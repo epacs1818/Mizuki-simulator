@@ -1,4 +1,4 @@
-from core import Ability, Hit, Combo
+from core import Ability, Hit, Combo, ActionCategory
 
 aether_n1 = Ability("N1", hits=[Hit("N1_Hit", 0.000)])
 aether_n1ca = Ability("Charged Attack", hits=[Hit("N1", 0.000), Hit("C1_Hit", 0.510), Hit("C2_Hit", 0.720)])
