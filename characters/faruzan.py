@@ -1,4 +1,4 @@
-from core import Ability, Hit, Combo
+from core import Ability, Hit, Combo, ActionCategory
 
 # --- Faruzan ---
 faruzan_burst = Ability(
