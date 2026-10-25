@@ -43,8 +43,13 @@ aether_burst = Ability(
     ]
 )
 
-aether_en1 = Combo("AetherEN1", "Aether", swap_out_time=4.0)
-aether_en1.add_ability(0.000, aether_skill)
+aether_ecq = Combo("AetherECQ", "Aether", swap_out_time=3.631)
+aether_ecq.add_ability(0.601, aether_skill)
+aether_ecq.add_ability(1.2, aether_n1ca)
+aether_ecq.add_ability(3.061, aether_burst)
+
+aether_en1 = Combo("AetherEN1", "Aether", swap_out_time=1.23)
+aether_en1.add_ability(0.601, aether_skill)
 aether_en1.add_ability(1.2, aether_n1)
 
 aether_cq = Combo("AetherCQ", "Aether", swap_out_time=2.941)
@@ -84,9 +89,9 @@ odette_recast = Ability(
     cooldown=0.0,
     hits=[
         Hit("Skill_Recast1", 0.000, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, attack_type=AttackType.SKILL),
-        Hit("Skill_Recast2", 0.180, element="Cryo", category=ActionCategory.STANDARD_DMG, attack_type=AttackType.SKILL),
-        Hit("Skill_Recast3", 0.300, element="Cryo", category=ActionCategory.STANDARD_DMG, attack_type=AttackType.SKILL),
-        Hit("Skill_Stellar", 0.871, element="Cryo", category=ActionCategory.STELLAR_DMG),
+        Hit("Skill_Recast2", 0.180, element="Cryo",                     category=ActionCategory.STANDARD_DMG, attack_type=AttackType.SKILL),
+        Hit("Skill_Recast3", 0.300, element="Cryo",                     category=ActionCategory.STANDARD_DMG, attack_type=AttackType.SKILL),
+        Hit("Skill_Stellar", 0.871, element="Cryo",                     category=ActionCategory.STELLAR_DMG),
     ]
 )
 odette_ee = Combo("OdetteEE", "Odette", swap_out_time=2.371)
