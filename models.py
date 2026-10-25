@@ -13,14 +13,22 @@ class ActionCategory(Enum):
     STELLAR_DMG = "Stellar DMG"
     STELLAR_REACTION = "Stellar Reaction"
 
+class AttackType(Enum):
+    NORMAL = "Normal Attack"
+    CHARGED = "Charged Attack"
+    PLUNGING = "Plunging Attack"
+    SKILL = "Elemental Skill"
+    BURST = "Elemental Burst"
+
 
 @dataclass
 class Hit:
     name: str
     relative_delay: float
-    elemental_app: Optional[str] = None  # e.g., "1U"
-    element: Optional[str] = None        # "Cryo", "Anemo", etc.
+    element: str                          # Now mandatory (e.g., "Cryo", "Anemo", "Physical")
+    elemental_app: Optional[str] = None   # e.g., "1U"
     category: ActionCategory = ActionCategory.STANDARD_DMG
+    attack_type: Optional[AttackType] = None  # Optional tag for effect checks
 
 
 @dataclass
