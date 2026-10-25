@@ -1,9 +1,9 @@
-﻿from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from models import ActionCategory, Combo
 from aura import CryoAuraTracker
 from mechanics import StellarVortex
-from combos import faruzan_collapse_hit
+from combos import faruzan_collapse_hit, mizuki_nuke_hit, mizuki_c1_mini_nuke_hit, stellar_swirl_hit
 
 
 # ==========================================
@@ -81,7 +81,10 @@ class RotationTimeline:
                     "element": hit.element,
                     "event_type": "HIT",
                     "hit_name": hit.name,
-                    "ability_name": call.ability.name
+                    "ability_name": call.ability.name,
+                    "stat_ref": hit.stat_ref,
+                    "multiplier": hit.multiplier,
+                    "attack_type": hit.attack_type
                 })
 
         self.global_events.sort(key=lambda x: x["global_time"])
@@ -126,6 +129,8 @@ class RotationTimeline:
         )
 
         # Mizuki State Trackers
+        mizuki_data = self.party.get("Mizuki", {})
+        mizuki_c1_unlocked = mizuki_data.get("constellation", 0) >= 1
         mizuki_dreamdrifter_active = False
         mizuki_nuke_armed = False
         mizuki_nuke_armed_time: float = -1.0
@@ -199,7 +204,7 @@ class RotationTimeline:
                 if e_type == "HIT" and char == "Faruzan" and ability_name == "Elemental Burst" and hit_name == "Burst_Cast":
                     faruzan_buff_expiration = t + 22.0
                     faruzan_debuff_expiration = t + 22.0
-                    collapse_time = t + 0.720
+                    collapse_time = t + faruzan_collapse_hit.relative_delay
                     faruzan_collapse_cd_expires = collapse_time + 3.0
 
                     self.global_events.insert(i + 1, {
@@ -207,11 +212,14 @@ class RotationTimeline:
                         "character": "Faruzan",
                         "action": "Pressurized Collapse",
                         "category": faruzan_collapse_hit.category,
-                        "elem_app": faruzan_collapse_hit.elemental_app,
+                        "elem_app": faruzan_collapse_hit.elemental_app if faruzan_collapse_hit.elemental_app else "-",
                         "element": faruzan_collapse_hit.element,
                         "event_type": "HIT",
                         "hit_name": "Pressurized_Collapse",
-                        "ability_name": "Pressurized Collapse"
+                        "ability_name": "Pressurized Collapse",
+                        "stat_ref": faruzan_collapse_hit.stat_ref,
+                        "multiplier": faruzan_collapse_hit.multiplier,
+                        "attack_type": faruzan_collapse_hit.attack_type
                     })
 
                 if e_type == "HIT" and hit_name == "Pressurized_Collapse":
@@ -220,18 +228,21 @@ class RotationTimeline:
                 faruzan_buff_active = (faruzan_buff_expiration is not None) and (t <= faruzan_buff_expiration)
                 if faruzan_buff_active and e_type == "HIT" and hit_name != "Pressurized_Collapse":
                     if t >= faruzan_collapse_cd_expires:
-                        collapse_time = t + 0.720
+                        collapse_time = t + faruzan_collapse_hit.relative_delay
                         faruzan_collapse_cd_expires = collapse_time + 3.0
                         self.global_events.insert(i + 1, {
                             "global_time": collapse_time,
                             "character": "Faruzan",
                             "action": "Pressurized Collapse",
                             "category": faruzan_collapse_hit.category,
-                            "elem_app": faruzan_collapse_hit.elemental_app,
+                            "elem_app": faruzan_collapse_hit.elemental_app if faruzan_collapse_hit.elemental_app else "-",
                             "element": faruzan_collapse_hit.element,
                             "event_type": "HIT",
                             "hit_name": "Pressurized_Collapse",
-                            "ability_name": "Pressurized Collapse"
+                            "ability_name": "Pressurized Collapse",
+                            "stat_ref": faruzan_collapse_hit.stat_ref,
+                            "multiplier": faruzan_collapse_hit.multiplier,
+                            "attack_type": faruzan_collapse_hit.attack_type
                         })
 
                 faruzan_debuff_active = (faruzan_debuff_expiration is not None) and (t <= faruzan_debuff_expiration)
@@ -257,17 +268,71 @@ class RotationTimeline:
                 if is_stellar_swirl and instructor_holder and char == instructor_holder:
                     instructor_expiration_time = t + 12.0
 
-                # Stellar Vortex mechanic
+                # Stellar Vortex & Stellar Swirl mechanics
                 if is_stellar_swirl and swirl_meta:
+                    c1_debuff_active = mizuki_c1_unlocked and (t <= mizuki_c1_debuff_expiration)
+                    if c1_debuff_active:
+                        mizuki_c1_debuff_expiration = -1.0
+
+                    swirl_hit_event = {
+                        "global_time": t,
+                        "active_character": active_character,
+                        "character": char,
+                        "action": stellar_swirl_hit.name,
+                        "category": stellar_swirl_hit.category,
+                        "elem_app": stellar_swirl_hit.elemental_app if stellar_swirl_hit.elemental_app else "-",
+                        "element": stellar_swirl_hit.element,
+                        "event_type": "HIT",
+                        "hit_name": "Stellar_Swirl_Hit",
+                        "ability_name": "Stellar Swirl",
+                        "stat_ref": stellar_swirl_hit.stat_ref,
+                        "multiplier": stellar_swirl_hit.multiplier,
+                        "attack_type": stellar_swirl_hit.attack_type,
+                        "reaction": "Stellar Swirl",
+                        "swirl_metadata": swirl_meta,
+                        "c1_empowered": c1_debuff_active,
+                        "fanz_buff_state": event.get("fanz_buff_state", "OFF"),
+                        "fanz_debuff_state": event.get("fanz_debuff_state", "OFF"),
+                        "aether_c2_state": event.get("aether_c2_state", "OFF"),
+                        "marvelous_stacks": event.get("marvelous_stacks", 0),
+                        "hotf_state": event.get("hotf_state", "OFF"),
+                        "dreamdrifter_state": event.get("dreamdrifter_state", "OFF")
+                    }
+                    self.global_events.insert(i + 1, swirl_hit_event)
+
+                    if c1_debuff_active:
+                        mini_nuke_event = {
+                            "global_time": t + mizuki_c1_mini_nuke_hit.relative_delay,
+                            "active_character": active_character,
+                            "character": "Mizuki",
+                            "action": mizuki_c1_mini_nuke_hit.name,
+                            "category": mizuki_c1_mini_nuke_hit.category,
+                            "elem_app": mizuki_c1_mini_nuke_hit.elemental_app if mizuki_c1_mini_nuke_hit.elemental_app else "-",
+                            "element": mizuki_c1_mini_nuke_hit.element,
+                            "event_type": "HIT",
+                            "hit_name": "C1_Mini_Nuke",
+                            "ability_name": "Mizuki C1",
+                            "stat_ref": mizuki_c1_mini_nuke_hit.stat_ref,
+                            "multiplier": mizuki_c1_mini_nuke_hit.multiplier,
+                            "attack_type": mizuki_c1_mini_nuke_hit.attack_type,
+                            "reaction": "-",
+                            "fanz_buff_state": event.get("fanz_buff_state", "OFF"),
+                            "fanz_debuff_state": event.get("fanz_debuff_state", "OFF"),
+                            "aether_c2_state": event.get("aether_c2_state", "OFF"),
+                            "marvelous_stacks": event.get("marvelous_stacks", 0),
+                            "hotf_state": event.get("hotf_state", "OFF"),
+                            "dreamdrifter_state": event.get("dreamdrifter_state", "OFF")
+                        }
+                        self.global_events.insert(i + 2, mini_nuke_event)
+
                     if active_vortex is None or not active_vortex.is_active:
                         active_vortex = StellarVortex(swirl_meta, t)
                         reaction = "SSW (Vortex Spawn)"
                     else:
                         exploded, reaction = active_vortex.inherit_swirl(swirl_meta)
                         if exploded:
-                            c1_debuff_active = (mizuki_c1_debuff_expiration is not None) and (t <= mizuki_c1_debuff_expiration)
                             explosion_event = {
-                                "global_time": t + 0.1,
+                                "global_time": t,
                                 "active_character": active_character,
                                 "character": active_vortex.last_trigger,
                                 "action": f"Vortex Explosion (Lv{active_vortex.level} Early)",
@@ -293,7 +358,7 @@ class RotationTimeline:
                                 "dreamdrifter_state": event.get("dreamdrifter_state", "OFF")
                             }
                             insertion_offset = 3 if c1_debuff_active else 2
-                            self.global_events.insert(i + 2, explosion_event)
+                            self.global_events.insert(i + insertion_offset, explosion_event)
                             active_vortex = None
 
             # 5. Mizuki Nuke Preparation Check
@@ -396,18 +461,21 @@ class RotationTimeline:
                         event["nuke_fired"] = True
                         mizuki_nuke_armed = False
 
-                        nuke_hit_time = t + 0.5
+                        nuke_hit_time = t + mizuki_nuke_hit.relative_delay
                         self.global_events.insert(i + 1, {
                             "global_time": nuke_hit_time,
                             "active_character": active_character,
                             "character": "Mizuki",
-                            "action": "Mizuki Nuke Hit",
-                            "category": ActionCategory.STELLAR_DMG,
-                            "elem_app": "-",
-                            "element": "Anemo",
+                            "action": mizuki_nuke_hit.name,
+                            "category": mizuki_nuke_hit.category,
+                            "elem_app": mizuki_nuke_hit.elemental_app if mizuki_nuke_hit.elemental_app else "-",
+                            "element": mizuki_nuke_hit.element,
                             "event_type": "HIT",
-                            "hit_name": "Nuke_Hit",
+                            "hit_name": mizuki_nuke_hit.name,
                             "ability_name": "Mizuki Nuke",
+                            "stat_ref": mizuki_nuke_hit.stat_ref,
+                            "multiplier": mizuki_nuke_hit.multiplier,
+                            "attack_type": mizuki_nuke_hit.attack_type,
                             "reaction": "-",
                             "fanz_buff_state": event.get("fanz_buff_state", "OFF"),
                             "fanz_debuff_state": event.get("fanz_debuff_state", "OFF"),

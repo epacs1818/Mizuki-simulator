@@ -20,6 +20,11 @@ class AttackType(Enum):
     SKILL = "Elemental Skill"
     BURST = "Elemental Burst"
 
+class StatRef(Enum):
+    ATK = "ATK"
+    HP = "HP"
+    DEF = "DEF"
+    EM = "EM"
 
 @dataclass
 class Hit:
@@ -28,6 +33,8 @@ class Hit:
     element: str                          # Now mandatory (e.g., "Cryo", "Anemo", "Physical")
     elemental_app: Optional[str] = None   # e.g., "1U"
     category: ActionCategory = ActionCategory.STANDARD_DMG
+    stat_ref: StatRef = StatRef.ATK
+    multiplier: float = 0.0
     attack_type: Optional[AttackType] = None  # Optional tag for effect checks
 
 
