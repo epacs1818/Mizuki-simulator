@@ -261,7 +261,7 @@ class RotationTimeline:
                 if is_stellar_swirl and swirl_meta:
                     if active_vortex is None or not active_vortex.is_active:
                         active_vortex = StellarVortex(swirl_meta, t)
-                        reaction = "Stellar Swirl (New Vortex)"
+                        reaction = "SSW (Vortex Spawn)"
                     else:
                         exploded, reaction = active_vortex.inherit_swirl(swirl_meta)
                         if exploded:
