@@ -12,7 +12,7 @@ CHARACTER_BASE_STATS = {
         "em": 115.2,
         "crit_rate": 0.05,    # Base 5%
         "crit_dmg": 0.50,     # Base 50%
-        "er": 1.0             # Base 100% (or 0.24 if using ER ascension stat, etc.)
+        "er": 1.0,             # Base 100% (or 0.24 if using ER ascension stat, etc.)
         "Bonus Damage": 0.0
     },
     "Odette": {
@@ -28,7 +28,7 @@ CHARACTER_BASE_STATS = {
         "em": 0.0,
         "crit_rate": 0.05,
         "crit_dmg": 0.884,
-        "er": 1.0
+        "er": 1.0,
         "Bonus Damage": 0.0
     },
     "Aether": {
@@ -44,7 +44,7 @@ CHARACTER_BASE_STATS = {
         "em": 0.0,
         "crit_rate": 0.05,
         "crit_dmg": 0.50,
-        "er": 1.0
+        "er": 1.0,
         "Bonus Damage": 0.0
     },
     "Faruzan": {
@@ -60,7 +60,7 @@ CHARACTER_BASE_STATS = {
         "em": 115.2,
         "crit_rate": 0.05,    # Base 5%
         "crit_dmg": 0.50,     # Base 50%
-        "er": 1.0             # Base 100% (or 0.24 if using ER ascension stat, etc.)
+        "er": 1.0,            # Base 100% (or 0.24 if using ER ascension stat, etc.)
         "Bonus Damage": 0.0
     },
     "Sucrose": {
@@ -76,11 +76,11 @@ CHARACTER_BASE_STATS = {
         "em": 115.2,
         "crit_rate": 0.05,    # Base 5%
         "crit_dmg": 0.50,     # Base 50%
-        "er": 1.0             # Base 100% (or 0.24 if using ER ascension stat, etc.)
+        "er": 1.0,            # Base 100% (or 0.24 if using ER ascension stat, etc.)
         "Bonus Damage": 0.24
     },
     "Diona": {
-        "base_hp": 9,569.93,      # Example Level 90 base value
+        "base_hp": 9569.93,      # Example Level 90 base value
         "base_atk": 212.40,      # Example Level 90 base value
         "base_def": 600.62,      # Example Level 90 base value
         "atk_percent": 0.0,   # Usually 0 unless specified
@@ -92,7 +92,7 @@ CHARACTER_BASE_STATS = {
         "em": 115.2,
         "crit_rate": 0.05,    # Base 5%
         "crit_dmg": 0.50,     # Base 50%
-        "er": 1.0             # Base 100% (or 0.24 if using ER ascension stat, etc.)
+        "er": 1.0,            # Base 100% (or 0.24 if using ER ascension stat, etc.)
         "Bonus Damage": 0.24
     },
     # Add other characters here...

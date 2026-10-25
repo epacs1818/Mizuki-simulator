@@ -1,4 +1,6 @@
-﻿from timeline import RotationTimeline
+﻿import contextlib
+from pathlib import Path
+from timeline import RotationTimeline
 from combos import (
     aether_en1,
     aether_cq,
@@ -30,4 +32,9 @@ if __name__ == "__main__":
     current_time = timeline.add_combo(aether_cq,                swap_in_time=current_time)
     current_time = timeline.add_combo(mizuki_burstless_pull_out, swap_in_time=current_time)
 
-    timeline.display()
+    # Print to console and save to file
+    output_path = Path(__file__).parent / "output.txt"
+    with open(output_path, "w", encoding="utf-8") as f:
+        with contextlib.redirect_stdout(f):
+            timeline.display()
+    print(f"\n[Saved output table to {output_path.name}]")
