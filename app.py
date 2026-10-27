@@ -1,4 +1,5 @@
 import streamlit as st
+from stats_calc import build_initial_stats, compute_card_stats
 
 # Set page layout to wide
 st.set_page_config(page_title="Genshin Rotation Simulator", layout="wide")
@@ -208,58 +209,65 @@ def parse_val(val_str):
 if st.button("Confirm", type="primary"):
     my_party = {}
     
-    for slot, data in team_data.items():
+    st.header("Character Card Comparison (Off-Field Stats)")
+    card_cols = st.columns(4)
+    
+    for idx, (slot, data) in enumerate(team_data.items()):
         char_name = data["character"]
         if char_name == "Select Character":
             continue
             
         const_val = int(data["constellation"].replace("C", "")) if data["constellation"] else 0
-        artifacts = data.get("artifacts", {})
-        pieces = artifacts.get("Pieces", {})
+        weapon = data["weapon"]
+        artifact_set = data.get("artifacts", {}).get("Set", "None")
+        pieces = data.get("artifacts", {}).get("Pieces", {})
         
         main_stats_total = {}
         subs_total = {}
-        character_pieces_data = {}
         
-        # Process each artifact piece
+        # Parse main stats and substats totals (as before)...
         for piece_name, piece_info in pieces.items():
-            p_key = piece_name.lower()
             main_stat = piece_info.get("main_stat", "")
             substats = piece_info.get("substats", [])
             
-            # Store individual piece main stat
-            character_pieces_data[f"{p_key}_main"] = {main_stat: STANDARD_MAIN_STATS.get(main_stat.lower(), 0)}
-            
-            # Aggregate Main Stats using standard values
             if main_stat:
                 stat_key = main_stat.lower().replace(" ", "_")
-                stat_value = STANDARD_MAIN_STATS.get(stat_key, 0)
-                main_stats_total[stat_key] = main_stats_total.get(stat_key, 0.0) + stat_value
+                main_stats_total[stat_key] = main_stats_total.get(stat_key, 0.0) + STANDARD_MAIN_STATS.get(stat_key, 0.0)
             
-            # Process Substats for this piece
-            for idx, sub in enumerate(substats, start=1):
+            for sub in substats:
                 sub_type = sub.get("stat")
-                sub_val_raw = sub.get("value")
-                numeric_val = parse_val(sub_val_raw)
-                
-                # Store individual substat
-                character_pieces_data[f"{p_key}_sub{idx}"] = {sub_type: sub_val_raw}
-                
-                # Aggregate Substats Total
+                numeric_val = parse_val(sub.get("value"))
                 if sub_type and sub_type != "None":
                     sub_key = sub_type.lower().replace(" ", "_")
                     subs_total[sub_key] = subs_total.get(sub_key, 0.0) + numeric_val
 
-        # Compile everything into the final character profile matching your requested structure
+        # 1. Build the backend initial_stats dictionary (uncalculated pools)
+        initial_stats = build_initial_stats(char_name, weapon, main_stats_total, subs_total)
+        
+        # 2. Derive the user-facing card display stats from initial_stats
+        card_stats = compute_card_stats(initial_stats)
+
+        # Store in party profile structure
         my_party[char_name] = {
             "constellation": const_val,
-            "weapon": data["weapon"],
-            "artifact_set": artifacts.get("Set", "None"),
-            "pieces_breakdown": character_pieces_data,
-            f"{char_name.lower()}_mainstats_total": main_stats_total,
-            f"{char_name.lower()}_subs_total": subs_total
+            "weapon": weapon,
+            "artifact_set": artifact_set,
+            "initial_stats": initial_stats,  # Kept ready for the rotation/buff engine
+            "card_stats": card_stats         # Used for UI comparison
         }
-        
-    st.header("📊 Party Dictionary Output with Stats")
-    st.write("Here is the structured dictionary representation of your party, main stats, and subtotal calculations:")
+
+        # Render the Character Card UI
+        with card_cols[idx]:
+            with st.container(border=True):
+                st.subheader(f"{char_name} ({data['constellation']})")
+                st.caption(f"**Level:** 90")
+                st.caption(f"**Weapon:** {weapon} (Lv 90)")
+                st.caption(f"**Artifacts:** {artifact_set}")
+                st.markdown("---")
+                
+                for stat_name, stat_val in card_stats.items():
+                    st.text(f"{stat_name:<13}: {stat_val}")
+
+    st.markdown("---")
+    st.subheader("Party Dictionary Output (Backend Ready)")
     st.code(f"my_party = {my_party}", language="python")
