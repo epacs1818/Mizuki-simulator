@@ -3,7 +3,16 @@ from typing import Dict, List, Optional, Tuple
 from models import ActionCategory, Combo
 from aura import CryoAuraTracker
 from mechanics import StellarVortex
-from combos import faruzan_collapse_hit, mizuki_nuke_hit, mizuki_c1_mini_nuke_hit, stellar_swirl_hit
+from combos import (
+    faruzan_collapse_hit,
+    mizuki_nuke_hit,
+    mizuki_c1_mini_nuke_hit,
+    stellar_swirl_hit,
+    configure_combo_talents,
+    get_ability_motion_value,
+)
+from damage_calc import calculate_damage, DEFAULT_ENEMY_STATS
+from stats_calc import build_initial_stats, apply_permanent_buffs, build_snapshot_stats, compute_final_stats
 
 
 # ==========================================
@@ -11,9 +20,10 @@ from combos import faruzan_collapse_hit, mizuki_nuke_hit, mizuki_c1_mini_nuke_hi
 # ==========================================
 
 class RotationTimeline:
-    def __init__(self, party: Optional[Dict[str, dict]] = None):
+    def __init__(self, party: Optional[Dict[str, dict]] = None, enemy_stats: Optional[Dict[str, float]] = None):
         self.global_events = []
         self.last_used_timestamps: Dict[Tuple[str, str], float] = {}
+        self.enemy_stats = enemy_stats if enemy_stats is not None else DEFAULT_ENEMY_STATS.copy()
 
         # Normalize party structure: ensure every entry has dict metadata
         self.party: Dict[str, dict] = {}
@@ -24,10 +34,39 @@ class RotationTimeline:
                 else:
                     self.party[char] = data
 
+        self._prepare_character_stats()
+
+        # If Faruzan has custom talents, update faruzan_collapse_hit
+        far_talents = self.party.get("Faruzan", {}).get("talents")
+        if far_talents:
+            levels = [int(p.strip()) for p in far_talents.split("/")] if isinstance(far_talents, str) else list(far_talents)
+            if len(levels) >= 2 and faruzan_collapse_hit.scaling_key:
+                char_k, cat_k, sub_k = faruzan_collapse_hit.scaling_key
+                faruzan_collapse_hit.motion_value = get_ability_motion_value(char_k, cat_k, sub_k, levels[1])
+
+    def _prepare_character_stats(self):
+        self.char_initial_stats_map = {}
+        for char_name, data in self.party.items():
+            weapon = data.get("weapon")
+            artifact = data.get("artifact")
+            main_stats = data.get("main_stats_total", {})
+            subs = data.get("subs_total", {})
+            init_s = build_initial_stats(char_name, weapon, artifact, main_stats, subs)
+            init_s = apply_permanent_buffs(init_s, char_name)
+            self.char_initial_stats_map[char_name] = init_s
+
     def add_combo(self, combo: Combo, swap_in_time: float) -> float:
         if combo.character not in self.party:
             # Auto-register missing characters with default settings
             self.party[combo.character] = {"constellation": 0, "weapon": None, "artifact": None}
+            self._prepare_character_stats()
+
+        # Apply talent levels from party configuration if specified
+        char_data = self.party.get(combo.character, {})
+        talents = char_data.get("talents")
+        if talents:
+            combo = configure_combo_talents(combo, talents)
+
         self.global_events.append({
             "global_time": swap_in_time,
             "character": combo.character,
@@ -490,6 +529,71 @@ class RotationTimeline:
 
             i += 1
 
+        self._calculate_all_hits_damage()
+
+    def _calculate_all_hits_damage(self):
+        for event in self.global_events:
+            if event.get("event_type") == "HIT":
+                char = event.get("character")
+                active_char = event.get("active_character", "None")
+                char_data = self.party.get(char, {})
+                char_refinement = char_data.get("refinement", 1)
+                char_level = char_data.get("level", 90)
+
+                init_stats = self.char_initial_stats_map.get(char)
+                if init_stats is None:
+                    init_stats = build_initial_stats(char, None, None, {}, {})
+                    init_stats = apply_permanent_buffs(init_stats, char)
+                    self.char_initial_stats_map[char] = init_stats
+
+                snapshot = build_snapshot_stats(
+                    initial_stats=init_stats,
+                    event_flags=event,
+                    party=self.party,
+                    refinement=char_refinement,
+                    char_name=char,
+                    active_character=active_char,
+                    char_initial_stats_map=self.char_initial_stats_map,
+                )
+                final_stats = compute_final_stats(snapshot)
+
+                # Prepare party_stats_dict for reaction contributors
+                party_stats_dict = {}
+                for p_name, p_d in self.party.items():
+                    p_init = self.char_initial_stats_map.get(p_name, {})
+                    party_stats_dict[p_name] = {
+                        "level": p_d.get("level", 90),
+                        "CR": p_init.get("crit_rate", 0.05),
+                        "CD": p_init.get("crit_dmg", 0.50),
+                        "crit_rate": p_init.get("crit_rate", 0.05),
+                        "crit_dmg": p_init.get("crit_dmg", 0.50),
+                    }
+                    if event.get("cryo_resonance_state") == "ON":
+                        party_stats_dict[p_name]["CR"] += 0.15
+                        party_stats_dict[p_name]["crit_rate"] += 0.15
+
+                if char in party_stats_dict:
+                    party_stats_dict[char]["CR"] = final_stats.get("CR", party_stats_dict[char]["CR"])
+                    party_stats_dict[char]["CD"] = final_stats.get("CD", party_stats_dict[char]["CD"])
+
+                dmg = calculate_damage(
+                    hit=event,
+                    final_stats=final_stats,
+                    enemy_stats=self.enemy_stats,
+                    char_level=char_level,
+                    party_dict=party_stats_dict,
+                )
+
+                event["non_crit"] = dmg.get("non_crit", 0.0)
+                event["crit_damage"] = dmg.get("crit_damage", 0.0)
+                event["average_damage"] = dmg.get("average_damage", 0.0)
+                event["effective_average_damage"] = dmg.get("effective_average_damage", 0.0)
+            else:
+                event["non_crit"] = None
+                event["crit_damage"] = None
+                event["average_damage"] = None
+                event["effective_average_damage"] = None
+
     def display(self):
         self.evaluate_timeline()
 
@@ -502,56 +606,83 @@ class RotationTimeline:
         has_dream = any(ev.get("dreamdrifter_state") == "ON" for ev in self.global_events)
         has_cryo_resonance = any(ev.get("cryo_resonance_state") == "ON" for ev in self.global_events)
 
-        # Build dynamic header components
-        headers = ["Time (s)", "Active", "Owner", "Action", "Aura (Cryo)", "Reaction"]
-        if has_fanz:
-            headers.extend(["FanzBuff", "FanzDebuff"])
-        if has_c2:
-            headers.append("AetherC2")
-        headers.append("Marvelous")
-        if has_hotf:
-            headers.append("HotF")
-        if has_dream:
-            headers.append("Dream")
-        if has_vv:
-            headers.append("VV")
-        if has_instructor:
-            headers.append("Instructor")
-        if has_cryo_resonance:
-            headers.append("CryoResonance")
+        # 1. Main category columns
+        main_headers = ["Time (s)", "Active", "Owner", "Action", "Aura (Cryo)", "Reaction"]
+        main_widths = [10, 8, 8, 36, 11, 24]
 
-        # Format widths
-        col_widths = [10, 8, 8, 36, 11, 24]
-        if has_fanz:
-            col_widths.extend([9, 12])
-        if has_c2:
-            col_widths.append(9)
-        col_widths.append(10)  # Marvelous
-        if has_hotf:
-            col_widths.append(5)
-        if has_dream:
-            col_widths.append(7)
-        if has_vv:
-            col_widths.append(5)
-        if has_instructor:
-            col_widths.append(10)
-        if has_cryo_resonance:
-            col_widths.append(12)
+        # 2. Damage calcs category columns
+        dmg_headers = ["non_crit", "crit_damage", "average_damage", "effective_average_damage"]
+        dmg_widths = [12, 13, 16, 26]
 
-        # Print Header
-        header_str = " | ".join(f"{h:<{w}}" for h, w in zip(headers, col_widths))
+        # 3. Buffs category columns
+        buff_headers = []
+        buff_widths = []
+        if has_fanz:
+            buff_headers.extend(["FanzBuff", "FanzDebuff"])
+            buff_widths.extend([9, 12])
+        if has_c2:
+            buff_headers.append("AetherC2")
+            buff_widths.append(9)
+        buff_headers.append("Marvelous")
+        buff_widths.append(10)
+        if has_hotf:
+            buff_headers.append("HotF")
+            buff_widths.append(5)
+        if has_dream:
+            buff_headers.append("Dream")
+            buff_widths.append(7)
+        if has_vv:
+            buff_headers.append("VV")
+            buff_widths.append(5)
+        if has_instructor:
+            buff_headers.append("Instructor")
+            buff_widths.append(10)
+        if has_cryo_resonance:
+            buff_headers.append("CryoResonance")
+            buff_widths.append(13)
+
+        # Spans for the 2-tier Category Header
+        main_span = sum(main_widths) + 3 * (len(main_widths) - 1)
+        dmg_span = sum(dmg_widths) + 3 * (len(dmg_widths) - 1)
+        buff_span = sum(buff_widths) + 3 * (len(buff_widths) - 1) if buff_widths else 0
+
+        # Construct Category Row
+        categories = [
+            f"{'Main':^{main_span}}",
+            f"{'Damage calcs':^{dmg_span}}"
+        ]
+        if buff_widths:
+            categories.append(f"{'Buffs':^{buff_span}}")
+        category_str = " | ".join(categories)
+
+        # Construct Column Header Row
+        all_headers = main_headers + dmg_headers + buff_headers
+        all_widths = main_widths + dmg_widths + buff_widths
+        header_str = " | ".join(f"{h:<{w}}" for h, w in zip(all_headers, all_widths))
+
+        # Print Headers and Separator
+        print(category_str)
         print(header_str)
         print("-" * len(header_str))
 
         # Print Rows
         for event in self.global_events:
+            nc_str = f"{event['non_crit']:.1f}" if event.get("non_crit") is not None else "-"
+            cd_str = f"{event['crit_damage']:.1f}" if event.get("crit_damage") is not None else "-"
+            avg_str = f"{event['average_damage']:.1f}" if event.get("average_damage") is not None else "-"
+            eff_str = f"{event['effective_average_damage']:.1f}" if event.get("effective_average_damage") is not None else "-"
+
             row_data = [
                 f"{event['global_time']:.3f}",
-                event["active_character"],
-                event["character"],
-                event["action"],
-                event["cryo_aura"],
-                event["reaction"]
+                str(event.get("active_character", "None")),
+                str(event.get("character", "")),
+                str(event.get("action", "")),
+                str(event.get("cryo_aura", "-")),
+                str(event.get("reaction", "-")),
+                nc_str,
+                cd_str,
+                avg_str,
+                eff_str,
             ]
             if has_fanz:
                 row_data.extend([event.get("faruzan_buff_state", "OFF"), event.get("faruzan_debuff_state", "OFF")])
@@ -569,6 +700,6 @@ class RotationTimeline:
             if has_cryo_resonance:
                 row_data.append(event.get("cryo_resonance_state", "OFF"))
 
-            row_str = " | ".join(f"{val:<{w}}" for val, w in zip(row_data, col_widths))
+            row_str = " | ".join(f"{val:<{w}}" for val, w in zip(row_data, all_widths))
             print(row_str)
 

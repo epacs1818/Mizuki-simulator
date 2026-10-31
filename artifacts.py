@@ -27,3 +27,12 @@ ARTIFACTS_BONUSES = {
         "atk_percent": 0.180
     }
 }
+
+# Artifact aliases and safe defaults to prevent KeyError
+ARTIFACTS_BONUSES.setdefault("Noblesse", ARTIFACTS_BONUSES.get("Noblesse Oblige", {"burst_bonus": 0.200}))
+ARTIFACTS_BONUSES.setdefault("Tenacity", ARTIFACTS_BONUSES.get("Tenacity Of The Millelith", {"hp_percent": 0.200}))
+ARTIFACTS_BONUSES.setdefault("Viridescent", ARTIFACTS_BONUSES.get("Viridescent Venerer", {}))
+ARTIFACTS_BONUSES.setdefault("Viridescent Venerer", {})
+ARTIFACTS_BONUSES.setdefault("Blizzard Strayer", {"cryo_bonus": 0.15})
+ARTIFACTS_BONUSES.setdefault("Select Set", {})
+ARTIFACTS_BONUSES.setdefault("None", {})

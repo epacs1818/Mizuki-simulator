@@ -1,4 +1,4 @@
-﻿import contextlib
+import contextlib
 from pathlib import Path
 from timeline import RotationTimeline
 from combos import (
@@ -16,10 +16,10 @@ from combos import (
 
 if __name__ == "__main__":
     my_party = {
-        "Aether":  {"constellation": 4, "weapon": "Favonius Sword",        "artifact": "Noblesse"},
-        "Odette":  {"constellation": 0, "weapon": "Heart of the Furnace",   "artifact": "Blizzard Strayer"},
-        "Faruzan": {"constellation": 6, "weapon": "Elegy",                  "artifact": "Tenacity"},
-        "Mizuki":  {"constellation": 2, "weapon": "Sacrificial Fragments",  "artifact": "Viridescent"},
+        "Aether":  {"constellation": 4, "weapon": "Favonius Sword",        "artifact": "Noblesse",         "talents": "1/13/13"},
+        "Odette":  {"constellation": 0, "weapon": "Heart of the Furnace",   "artifact": "Blizzard Strayer", "talents": "1/13/13"},
+        "Faruzan": {"constellation": 6, "weapon": "Elegy",                  "artifact": "Tenacity",         "talents": "1/13/13"},
+        "Mizuki":  {"constellation": 2, "weapon": "Sacrificial Fragments",  "artifact": "Viridescent",      "talents": "1/13/13"},
     }
 
     timeline = RotationTimeline(party=my_party)

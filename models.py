@@ -1,4 +1,4 @@
-﻿from dataclasses import dataclass, field
+from dataclasses import dataclass, field
 from typing import List, Optional
 from enum import Enum
 
@@ -34,8 +34,19 @@ class Hit:
     elemental_app: Optional[str] = None   # e.g., "1U"
     category: ActionCategory = ActionCategory.STANDARD_DMG
     stat_ref: StatRef = StatRef.ATK
-    multiplier: float = 0.0
+    motion_value: float = 0.0
     attack_type: Optional[AttackType] = None  # Optional tag for effect checks
+    # Optional scaling coordinates in CHARACTER_SKILLS: (character, category, sub_ability)
+    scaling_key: Optional[tuple] = None
+
+    @property
+    def multiplier(self) -> float:
+        """Alias for motion_value to preserve backward compatibility."""
+        return self.motion_value
+
+    @multiplier.setter
+    def multiplier(self, value: float):
+        self.motion_value = value
 
 
 @dataclass
@@ -43,6 +54,7 @@ class Ability:
     name: str
     hits: List[Hit]
     cooldown: float = 0.0
+    talent_level: int = 10  # Track skill level of the attack (1-13)
 
 
 @dataclass
