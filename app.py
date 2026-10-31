@@ -22,10 +22,10 @@ from stats_calc import build_initial_stats, compute_card_stats
 
 # Callback functions for seamless programmatic tab switching
 def go_to_enemy_tab():
-    st.session_state["main_tabs"] = "🛡️ Enemy Configuration"
+    st.session_state["main_tabs"] = "Enemy Configuration"
 
 def go_to_rotation_tab():
-    st.session_state["main_tabs"] = "⚔️ Rotation Setup"
+    st.session_state["main_tabs"] = "Rotation Setup"
 
 # Safe aliases for weapons and artifact sets to prevent KeyError
 WEAPON_STATS.setdefault("Fav Bow", WEAPON_STATS.get("Favonius Warbow", {"base_atk": 454.0, "er": 0.613}))
@@ -290,10 +290,10 @@ team_data = {}
 # TAB NAVIGATION STRUCTURE
 # ---------------------------------------------------------
 tab1, tab2, tab3, tab4 = st.tabs([
-    "👥 Team & Gear Setup", 
-    "🛡️ Enemy Configuration", 
-    "⚔️ Rotation Setup", 
-    "📜 History & Simulation Results"
+    "Team & Gear Setup", 
+    "Enemy Configuration", 
+    "Rotation Setup", 
+    "History & Simulation Results"
 ], key="main_tabs", on_change="rerun")
 
 # =========================================================
@@ -398,7 +398,7 @@ with tab1:
         char_name = team_data[f"Slot {slot_num}"]["character"]
         label_name = char_name if char_name != "Select Character" else f"Character {slot_num}"
         
-        with st.expander(f"📦 Artifacts for {label_name} (Slot {slot_num})", expanded=False):
+        with st.expander(f"Artifacts for {label_name} (Slot {slot_num})", expanded=False):
             if char_name in CHARACTER_ARTIFACT_SETS:
                 set_options = CHARACTER_ARTIFACT_SETS[char_name]
             else:
@@ -748,7 +748,7 @@ with tab3:
     elif not st.session_state.get("enemy_confirmed"):
         st.warning("⚠️ Please confirm your enemy configuration first in the **Enemy Configuration** tab.")
     else:
-        st.header("🥊 Combo Sequence Setup")
+        st.header("Combo Sequence Setup")
         st.write("Add combos in order to define your rotation timeline.")
 
         COMBO_CHAR_MAP = {
@@ -798,7 +798,7 @@ with tab3:
                     st.session_state["combo_sequence"] = []
                     st.rerun()
             with action_col2:
-                if st.button("💾 Run Simulation & Save", type="primary", key="save_config_btn", use_container_width=True):
+                if st.button("Run Simulation & Save", type="primary", key="save_config_btn", use_container_width=True):
                     party = st.session_state.get("my_party", {})
                     enemy = st.session_state.get("enemy_stats", {"enemy_lv": 100, "cryo_res": 0.1, "anemo_res": 0.1})
                     combo_seq = st.session_state.get("combo_sequence", [])
@@ -839,7 +839,7 @@ with tab3:
 # TAB 4: HISTORY & SIMULATION RESULTS
 # =========================================================
 with tab4:
-    st.header("📜 Configuration History & Timeline Simulation")
+    st.header("Configuration History & Timeline Simulation")
     
     if not st.session_state.get("history"):
         st.info("No saved configurations yet. Set up your party, enemy, and combo rotation in the previous tabs and click **Run Simulation & Save**.")
@@ -855,10 +855,10 @@ with tab4:
                 st.markdown(f"**Enemy:** {entry['enemy']}")
                 
                 if "timeline_events" in entry and entry["timeline_events"]:
-                    st.markdown("##### ⏱️ Rotation Timeline Table")
+                    st.markdown("##### ⏱Rotation Timeline Table")
                     df_timeline = build_timeline_dataframe(entry["timeline_events"])
                     st.dataframe(df_timeline, use_container_width=True)
 
-                if st.button("🗑️ Delete entry", key=f"del_hist_{real_idx}"):
+                if st.button("Delete entry", key=f"del_hist_{real_idx}"):
                     st.session_state["history"].pop(real_idx)
                     st.rerun()
