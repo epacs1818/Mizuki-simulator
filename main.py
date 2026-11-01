@@ -1,7 +1,7 @@
 import contextlib
 from pathlib import Path
 from timeline import RotationTimeline
-from combos import (
+from abilities import (
     aether_en1,
     aether_cq,
     faruzan_q,
@@ -25,12 +25,12 @@ if __name__ == "__main__":
     timeline = RotationTimeline(party=my_party)
     current_time = 0.0
 
-    current_time = timeline.add_combo(aether_en1,               swap_in_time=current_time)
-    current_time = timeline.add_combo(faruzan_q,                swap_in_time=current_time)
-    current_time = timeline.add_combo(odette_ee,                swap_in_time=current_time)
-    current_time = timeline.add_combo(mizuki_sacfrag_fill,      swap_in_time=current_time)
-    current_time = timeline.add_combo(aether_cq,                swap_in_time=current_time)
-    current_time = timeline.add_combo(mizuki_burstless_pull_out, swap_in_time=current_time)
+    current_time = timeline.add_field_sequence(aether_en1,               swap_in_time=current_time)
+    current_time = timeline.add_field_sequence(faruzan_q,                swap_in_time=current_time)
+    current_time = timeline.add_field_sequence(odette_ee,                swap_in_time=current_time)
+    current_time = timeline.add_field_sequence(mizuki_sacfrag_fill,      swap_in_time=current_time)
+    current_time = timeline.add_field_sequence(aether_cq,                swap_in_time=current_time)
+    current_time = timeline.add_field_sequence(mizuki_burstless_pull_out, swap_in_time=current_time)
 
     # Print to console and save to file
     output_path = Path(__file__).parent / "output.txt"

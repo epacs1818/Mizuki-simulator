@@ -55,6 +55,7 @@ class Ability:
     hits: List[Hit]
     cooldown: float = 0.0
     talent_level: int = 10  # Track skill level of the attack (1-13)
+    talent_type: str = "skill_talent"
 
 
 @dataclass
@@ -63,7 +64,7 @@ class TimedAbilityCall:
     start_time: float
 
 
-class Combo:
+class FieldSequence:
     def __init__(self, name: str, character: str, swap_out_time: float):
         self.name = name
         self.character = character

@@ -3,7 +3,7 @@ import pandas as pd
 import buffs
 import datetime
 from timeline import RotationTimeline
-from combos import (
+from abilities import (
     aether_en1,
     aether_cq,
     faruzan_q,
@@ -299,7 +299,7 @@ STAT_KEY_MAP = {
     "Cryo Bonus%": "cryo_bonus",
 }
 
-AVAILABLE_COMBOS = {
+AVAILABLE_FIELD_SEQUENCES = {
     "AetherEN1   (Aether – Skill N1)":           "aether_en1",
     "AetherCQ    (Aether – Charged + Burst)":    "aether_cq",
     "FaruzanQ    (Faruzan – Burst Swap)":        "faruzan_q",
@@ -308,7 +308,7 @@ AVAILABLE_COMBOS = {
     "BurstlessPO (Mizuki – Burstless Pull-Out)": "mizuki_burstless_pull_out",
 }
 
-COMBO_OBJ_MAP = {
+FIELD_SEQUENCE_OBJ_MAP = {
     "aether_en1": aether_en1,
     "aether_cq": aether_cq,
     "faruzan_q": faruzan_q,
@@ -506,6 +506,13 @@ with tab1:
                     main_stat = "Flat ATK"
                 else:
                     main_stat = st.selectbox("Main Stat", main_stat_widget, key=f"main_{piece_name}_{slot_num}")
+
+                rarity = st.radio(
+                    "Artifact Rarity",
+                    options=["5★", "4★"],
+                    horizontal=True,
+                    key=f"rarity_{piece_name}_{slot_num}"
+                )
                     
                 st.markdown("---")
                 st.caption("Substats")
@@ -537,6 +544,7 @@ with tab1:
                         
                 return {
                     "main_stat": main_stat,
+                    "rarity": rarity,
                     "substats": substats_list
                 }
 
@@ -559,10 +567,18 @@ with tab1:
     
     STANDARD_MAIN_STATS = {
         "hp_flat": 4780, "atk_flat": 311, "hp_percent": 0.466, "atk_percent": 0.466,
-        "def_percent": 0.583, "em": 187.5, "er": 0.518, "crit_rate": 0.311,
-        "crit_dmg": 0.622, "healing_bonus": 0.359, "physical_bonus": 0.466,
+        "def_percent": 0.583, "em": 186.5, "er": 0.518, "crit_rate": 0.311,
+        "crit_dmg": 0.622, "healing_bonus": 0.359, "physical_bonus": 0.583,
         "pyro_bonus": 0.466, "hydro_bonus": 0.466, "geo_bonus": 0.466,
         "anemo_bonus": 0.466, "electro_bonus": 0.466, "dendro_bonus": 0.466, "cryo_bonus": 0.466
+    }
+
+    STANDARD_4STAR_MAIN_STATS = {
+        "hp_flat": 3571, "atk_flat": 232, "hp_percent": 0.348, "atk_percent": 0.348,
+        "def_percent": 0.435, "em": 139.3, "er": 0.387, "crit_rate": 0.232,
+        "crit_dmg": 0.464, "healing_bonus": 0.268, "physical_bonus": 0.435,
+        "pyro_bonus": 0.348, "hydro_bonus": 0.348, "geo_bonus": 0.348,
+        "anemo_bonus": 0.348, "electro_bonus": 0.348, "dendro_bonus": 0.348, "cryo_bonus": 0.348
     }
 
     def parse_val(val_str):
@@ -650,11 +666,14 @@ with tab1:
                     for piece_name, piece_info in pieces.items():
                         main_stat = piece_info.get("main_stat", "")
                         substats = piece_info.get("substats", [])
+                        piece_rarity = piece_info.get("rarity", "5★")
+
+                        active_stats_dict = STANDARD_4STAR_MAIN_STATS if piece_rarity == "4★" else STANDARD_MAIN_STATS
                         
                         if main_stat:
                             stat_key = STAT_KEY_MAP.get(main_stat)
-                            if stat_key and stat_key in STANDARD_MAIN_STATS:
-                                main_stats_total[stat_key] = main_stats_total.get(stat_key, 0.0) + STANDARD_MAIN_STATS[stat_key]
+                            if stat_key and stat_key in active_stats_dict:
+                                main_stats_total[stat_key] = main_stats_total.get(stat_key, 0.0) + active_stats_dict[stat_key]
                         
                         for sub in substats:
                             sub_type = sub.get("stat")
@@ -830,10 +849,10 @@ with tab3:
     elif not st.session_state.get("enemy_confirmed"):
         st.warning("⚠️ Please confirm your enemy configuration first in the **Enemy Configuration** tab.")
     else:
-        st.header("Combo Sequence Setup")
-        st.write("Add combos in order to define your rotation timeline.")
+        st.header("Field Sequence Setup")
+        st.write("Add field sequences in order to define your rotation timeline.")
 
-        COMBO_CHAR_MAP = {
+        FIELD_SEQUENCE_CHAR_MAP = {
             "aether_en1":               "Aether",
             "aether_cq":                "Aether",
             "faruzan_q":                "Faruzan",
@@ -842,69 +861,69 @@ with tab3:
             "mizuki_burstless_pull_out":"Mizuki",
         }
 
-        if "combo_sequence" not in st.session_state:
-            st.session_state["combo_sequence"] = []
+        if "field_sequence" not in st.session_state:
+            st.session_state["field_sequence"] = []
 
         add_col, btn_col = st.columns([3, 1])
         with add_col:
             selected_label = st.selectbox(
-                "Pick a combo to add",
-                list(AVAILABLE_COMBOS.keys()),
-                key="combo_picker"
+                "Pick a field sequence to add",
+                list(AVAILABLE_FIELD_SEQUENCES.keys()),
+                key="field_sequence_picker"
             )
         with btn_col:
             st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("➕ Add Combo", key="add_combo_btn", use_container_width=True):
-                st.session_state["combo_sequence"].append(AVAILABLE_COMBOS[selected_label])
+            if st.button("➕ Add Field Sequence", key="add_field_sequence_btn", use_container_width=True):
+                st.session_state["field_sequence"].append(AVAILABLE_FIELD_SEQUENCES[selected_label])
                 st.rerun()
 
-        if st.session_state["combo_sequence"]:
+        if st.session_state["field_sequence"]:
             st.markdown("##### Current Rotation Sequence")
-            for idx, combo_key in enumerate(st.session_state["combo_sequence"]):
+            for idx, field_sequence_key in enumerate(st.session_state["field_sequence"]):
                 row_c1, row_c2, row_c3 = st.columns([0.5, 3, 1])
                 with row_c1:
                     st.markdown(f"**{idx + 1}.**")
                 with row_c2:
-                    label = next((lbl for lbl, k in AVAILABLE_COMBOS.items() if k == combo_key), combo_key)
-                    owner = COMBO_CHAR_MAP.get(combo_key, "?")
+                    label = next((lbl for lbl, k in AVAILABLE_FIELD_SEQUENCES.items() if k == field_sequence_key), field_sequence_key)
+                    owner = FIELD_SEQUENCE_CHAR_MAP.get(field_sequence_key, "?")
                     st.markdown(f"`{label}` — *{owner}*")
                 with row_c3:
-                    if st.button("🗑️ Remove", key=f"rm_combo_{idx}"):
-                        st.session_state["combo_sequence"].pop(idx)
+                    if st.button("🗑️ Remove", key=f"rm_field_sequence_{idx}"):
+                        st.session_state["field_sequence"].pop(idx)
                         st.rerun()
 
             st.markdown("<br>", unsafe_allow_html=True)
             action_col1, action_col2 = st.columns([1, 3])
             with action_col1:
-                if st.button("🧹 Clear All Combos", key="clear_combos_btn", use_container_width=True):
-                    st.session_state["combo_sequence"] = []
+                if st.button("🧹 Clear All Field Sequences", key="clear_field_sequences_btn", use_container_width=True):
+                    st.session_state["field_sequence"] = []
                     st.rerun()
             with action_col2:
                 if st.button("Run Simulation & Save", type="primary", key="save_config_btn", use_container_width=True):
                     party = st.session_state.get("my_party", {})
                     enemy = st.session_state.get("enemy_stats", {"enemy_lv": 100, "cryo_res": 0.1, "anemo_res": 0.1})
-                    combo_seq = st.session_state.get("combo_sequence", [])
+                    field_sequence_seq = st.session_state.get("field_sequence", [])
 
                     timeline = RotationTimeline(party=party, enemy_stats=enemy)
                     current_time = 0.0
-                    for combo_key in combo_seq:
-                        combo_obj = COMBO_OBJ_MAP.get(combo_key)
-                        if combo_obj:
-                            current_time = timeline.add_combo(combo_obj, swap_in_time=current_time)
+                    for field_sequence_key in field_sequence_seq:
+                        field_sequence_obj = FIELD_SEQUENCE_OBJ_MAP.get(field_sequence_key)
+                        if field_sequence_obj:
+                            current_time = timeline.add_field_sequence(field_sequence_obj, swap_in_time=current_time)
                     timeline.evaluate_timeline()
 
                     char_summary = ", ".join(
                         f"{name} Lv{data.get('level',90)} C{data['constellation']} {data['weapon']} T{data['talents']}"
                         for name, data in party.items()
                     )
-                    combo_summary = " → ".join(combo_seq) if combo_seq else "no combos"
+                    field_sequence_summary = " → ".join(field_sequence_seq) if field_sequence_seq else "no field sequences"
                     enemy_summary = f"Lv{enemy.get('enemy_lv','?')} | Cryo {int(enemy.get('cryo_res',0.1)*100)}% | Anemo {int(enemy.get('anemo_res',0.1)*100)}%"
                     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
 
                     entry = {
                         "timestamp": timestamp,
                         "chars": char_summary,
-                        "combos": combo_summary,
+                        "field_sequences": field_sequence_summary,
                         "enemy": enemy_summary,
                         "timeline_events": timeline.global_events,
                     }
@@ -914,7 +933,7 @@ with tab3:
                     st.session_state["history"].append(entry)
                     st.success("Simulation complete! Check the **History & Simulation Results** tab.")
         else:
-            st.info("No combos added yet. Pick a combo above and click ➕ Add Combo.")
+            st.info("No field sequences added yet. Pick a field sequence above and click ➕ Add Field Sequence.")
 
 
 # =========================================================
@@ -924,7 +943,7 @@ with tab4:
     st.header("Configuration History & Timeline Simulation")
     
     if not st.session_state.get("history"):
-        st.info("No saved configurations yet. Set up your party, enemy, and combo rotation in the previous tabs and click **Run Simulation & Save**.")
+        st.info("No saved configurations yet. Set up your party, enemy, and field_sequence rotation in the previous tabs and click **Run Simulation & Save**.")
     else:
         st.write("Each entry below reflects a saved configuration complete with its detailed Streamlit rotation timeline table.")
 
@@ -933,7 +952,7 @@ with tab4:
             real_idx = len(history) - 1 - i
             with st.expander(f"[{entry['timestamp']}] Entry #{real_idx + 1}", expanded=(i == 0)):
                 st.markdown(f"**Characters:** {entry['chars']}")
-                st.markdown(f"**Combos:** `{entry['combos']}`")
+                st.markdown(f"**Field Sequences:** `{entry['field_sequences']}`")
                 st.markdown(f"**Enemy:** {entry['enemy']}")
                 
                 if "timeline_events" in entry and entry["timeline_events"]:

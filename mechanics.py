@@ -1,4 +1,6 @@
 ﻿from typing import Set, Tuple
+from models import Hit, ActionCategory, StatRef
+
 
 
 # ==========================================
@@ -38,3 +40,7 @@ class StellarVortex:
             return True, "SSW (Vortex Early Detonation)"
 
         return False, "Stellar Swirl"
+
+
+stellar_swirl_hit = Hit("Stellar Swirl DMG", 0.0, element="Anemo", category=ActionCategory.STELLAR_REACTION, stat_ref=StatRef.EM, motion_value=0.0)
+

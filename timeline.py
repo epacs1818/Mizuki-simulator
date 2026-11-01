@@ -1,14 +1,12 @@
 from typing import Dict, List, Optional, Tuple
 
-from models import ActionCategory, Combo
+from models import ActionCategory, FieldSequence, AttackType, StatRef
 from aura import CryoAuraTracker
-from mechanics import StellarVortex
-from combos import (
-    faruzan_collapse_hit,
+from mechanics import StellarVortex, stellar_swirl_hit
+from abilities import (
     mizuki_nuke_hit,
     mizuki_c1_mini_nuke_hit,
-    stellar_swirl_hit,
-    configure_combo_talents,
+    configure_field_sequence_talents,
     get_ability_motion_value,
 )
 from damage_calc import calculate_damage, DEFAULT_ENEMY_STATS
@@ -36,14 +34,6 @@ class RotationTimeline:
 
         self._prepare_character_stats()
 
-        # If Faruzan has custom talents, update faruzan_collapse_hit
-        far_talents = self.party.get("Faruzan", {}).get("talents")
-        if far_talents:
-            levels = [int(p.strip()) for p in far_talents.split("/")] if isinstance(far_talents, str) else list(far_talents)
-            if len(levels) >= 2 and faruzan_collapse_hit.scaling_key:
-                char_k, cat_k, sub_k = faruzan_collapse_hit.scaling_key
-                faruzan_collapse_hit.motion_value = get_ability_motion_value(char_k, cat_k, sub_k, levels[1])
-
     def _prepare_character_stats(self):
         self.char_initial_stats_map = {}
         for char_name, data in self.party.items():
@@ -55,21 +45,21 @@ class RotationTimeline:
             init_s = apply_permanent_buffs(init_s, char_name)
             self.char_initial_stats_map[char_name] = init_s
 
-    def add_combo(self, combo: Combo, swap_in_time: float) -> float:
-        if combo.character not in self.party:
+    def add_field_sequence(self, field_sequence: FieldSequence, swap_in_time: float) -> float:
+        if field_sequence.character not in self.party:
             # Auto-register missing characters with default settings
-            self.party[combo.character] = {"constellation": 0, "weapon": None, "artifact": None}
+            self.party[field_sequence.character] = {"constellation": 0, "weapon": None, "artifact": None}
             self._prepare_character_stats()
 
         # Apply talent levels from party configuration if specified
-        char_data = self.party.get(combo.character, {})
+        char_data = self.party.get(field_sequence.character, {})
         talents = char_data.get("talents")
         if talents:
-            combo = configure_combo_talents(combo, talents)
+            field_sequence = configure_field_sequence_talents(field_sequence, talents)
 
         self.global_events.append({
             "global_time": swap_in_time,
-            "character": combo.character,
+            "character": field_sequence.character,
             "action": "Swap In",
             "category": ActionCategory.SWAP,
             "elem_app": "-",
@@ -77,10 +67,10 @@ class RotationTimeline:
             "event_type": "SWAP_IN"
         })
 
-        swap_out_global = swap_in_time + combo.swap_out_time
+        swap_out_global = swap_in_time + field_sequence.swap_out_time
         self.global_events.append({
             "global_time": swap_out_global,
-            "character": combo.character,
+            "character": field_sequence.character,
             "action": "Swap Out",
             "category": ActionCategory.SWAP,
             "elem_app": "-",
@@ -88,15 +78,15 @@ class RotationTimeline:
             "event_type": "SWAP_OUT"
         })
 
-        for call in combo.calls:
+        for call in field_sequence.calls:
             ability_start_global = swap_in_time + call.start_time
-            ability_key = (combo.character, call.ability.name)
+            ability_key = (field_sequence.character, call.ability.name)
 
             if call.ability.cooldown > 0 and ability_key in self.last_used_timestamps:
                 last_time = self.last_used_timestamps[ability_key]
                 cd_expires_at = last_time + call.ability.cooldown
                 if ability_start_global < cd_expires_at:
-                    raise ValueError(f"[COOLDOWN ERROR] {combo.character}'\''s {call.ability.name} on CD until {cd_expires_at:.3f}s")
+                    raise ValueError(f"[COOLDOWN ERROR] {field_sequence.character}'\''s {call.ability.name} on CD until {cd_expires_at:.3f}s")
 
             if call.ability.cooldown > 0:
                 self.last_used_timestamps[ability_key] = ability_start_global
@@ -104,7 +94,7 @@ class RotationTimeline:
             self.global_events = [
                 ev for ev in self.global_events
                 if not (ev.get("event_type") == "HIT" and
-                        ev.get("character") == combo.character and
+                        ev.get("character") == field_sequence.character and
                         ev.get("ability_name") == call.ability.name and
                         ev["global_time"] >= ability_start_global)
             ]
@@ -113,7 +103,7 @@ class RotationTimeline:
                 hit_global_time = ability_start_global + hit.relative_delay
                 self.global_events.append({
                     "global_time": hit_global_time,
-                    "character": combo.character,
+                    "character": field_sequence.character,
                     "action": f"{call.ability.name} ({hit.name})",
                     "category": hit.category,
                     "elem_app": hit.elemental_app if hit.elemental_app else "-",
@@ -233,56 +223,60 @@ class RotationTimeline:
             # 2. Active Character Tracking
             if e_type == "SWAP_IN":
                 active_character = char
-            elif e_type == "SWAP_OUT" and active_character == char:
+                event["active_character"] = active_character
+            elif e_type == "SWAP_OUT":
+                event["active_character"] = char
                 active_character = "None"
-
-            event["active_character"] = active_character
+            else:
+                event["active_character"] = active_character
 
             # 3. Faruzan Buff & Debuff Logic
             if "Faruzan" in self.party:
-                if e_type == "HIT" and char == "Faruzan" and ability_name == "Elemental Burst" and hit_name == "Burst_Cast":
-                    faruzan_buff_expiration = t + 22.0
-                    faruzan_debuff_expiration = t + 22.0
-                    collapse_time = t + faruzan_collapse_hit.relative_delay
-                    faruzan_collapse_cd_expires = collapse_time + 3.0
+                # Helper to safely pull Faruzan's skill talent level (index 1 of int/int/int)
+                far_talents = self.party.get("Faruzan", {}).get("talents", "1/13/13")
+                if isinstance(far_talents, str):
+                    skill_lvl = int(far_talents.split("/")[1])
+                else:
+                    skill_lvl = far_talents[1]
 
-                    self.global_events.insert(i + 1, {
-                        "global_time": collapse_time,
+                # Helper function to build the dynamic collapse event dictionary
+                def create_collapse_event(c_time):
+                    collapse_mv = get_ability_motion_value("Faruzan", "Skill", "Pressurized Collapse Vortex DMG", skill_lvl)
+                    return {
+                        "global_time": c_time,
                         "character": "Faruzan",
                         "action": "Pressurized Collapse",
-                        "category": faruzan_collapse_hit.category,
-                        "elem_app": faruzan_collapse_hit.elemental_app if faruzan_collapse_hit.elemental_app else "-",
-                        "element": faruzan_collapse_hit.element,
+                        "category": ActionCategory.STANDARD_DMG,
+                        "elem_app": "1U",
+                        "element": "Anemo",
                         "event_type": "HIT",
                         "hit_name": "Pressurized_Collapse",
                         "ability_name": "Pressurized Collapse",
-                        "stat_ref": faruzan_collapse_hit.stat_ref,
-                        "multiplier": faruzan_collapse_hit.multiplier,
-                        "attack_type": faruzan_collapse_hit.attack_type
-                    })
+                        "stat_ref": StatRef.ATK,
+                        "multiplier": collapse_mv,
+                        "attack_type": AttackType.SKILL
+                    }
+
+                # 1. Insertion upon Burst Cast
+                if e_type == "HIT" and char == "Faruzan" and ability_name == "Elemental Burst" and hit_name == "Burst_Cast":
+                    faruzan_buff_expiration = t + 22.0
+                    faruzan_debuff_expiration = t + 22.0
+                    collapse_time = t + 0.720  # standard delay for pressurized collapse
+                    faruzan_collapse_cd_expires = collapse_time + 3.0
+
+                    self.global_events.insert(i + 1, create_collapse_event(collapse_time))
 
                 if e_type == "HIT" and hit_name == "Pressurized_Collapse":
                     faruzan_debuff_expiration = t + 4.0
 
                 faruzan_buff_active = (faruzan_buff_expiration is not None) and (t <= faruzan_buff_expiration)
+                
+                # 2. Insertion upon Passive Trigger during Buff Window
                 if faruzan_buff_active and e_type == "HIT" and hit_name != "Pressurized_Collapse":
                     if t >= faruzan_collapse_cd_expires:
-                        collapse_time = t + faruzan_collapse_hit.relative_delay
+                        collapse_time = t + 0.720
                         faruzan_collapse_cd_expires = collapse_time + 3.0
-                        self.global_events.insert(i + 1, {
-                            "global_time": collapse_time,
-                            "character": "Faruzan",
-                            "action": "Pressurized Collapse",
-                            "category": faruzan_collapse_hit.category,
-                            "elem_app": faruzan_collapse_hit.elemental_app if faruzan_collapse_hit.elemental_app else "-",
-                            "element": faruzan_collapse_hit.element,
-                            "event_type": "HIT",
-                            "hit_name": "Pressurized_Collapse",
-                            "ability_name": "Pressurized Collapse",
-                            "stat_ref": faruzan_collapse_hit.stat_ref,
-                            "multiplier": faruzan_collapse_hit.multiplier,
-                            "attack_type": faruzan_collapse_hit.attack_type
-                        })
+                        self.global_events.insert(i + 1, create_collapse_event(collapse_time))
 
                 faruzan_debuff_active = (faruzan_debuff_expiration is not None) and (t <= faruzan_debuff_expiration)
                 event["faruzan_buff_state"] = "ON" if faruzan_buff_active else "OFF"
