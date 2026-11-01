@@ -28,14 +28,7 @@ def go_to_rotation_tab():
     st.session_state["main_tabs"] = "Rotation Setup"
 
 # Safe aliases for weapons and artifact sets to prevent KeyError
-WEAPON_STATS.setdefault("Fav Bow", WEAPON_STATS.get("Favonius Warbow", {"base_atk": 454.0, "er": 0.613}))
-WEAPON_STATS.setdefault("Favonius Warbow", {"base_atk": 454.0, "er": 0.613})
-WEAPON_STATS.setdefault("Tttds", {"base_atk": 401.0, "hp_percent": 0.352})
 WEAPON_STATS.setdefault("Select Weapon", {"base_atk": 0.0})
-WEAPON_STATS.setdefault("Favonius Sword", {"base_atk": 454.0, "er": 0.613})
-WEAPON_STATS.setdefault("The Catch", {"base_atk": 510.0, "er": 0.459})
-WEAPON_STATS.setdefault("The Widsith", WEAPON_STATS.get("The Widsith (Average)", {"base_atk": 510.0, "crit_dmg": 0.551}))
-WEAPON_STATS.setdefault("Sacrificial Bow", {"base_atk": 565.0, "er": 0.306})
 
 # Set page layout to wide
 st.set_page_config(page_title="Yumemizuki Mizuki's Rotation Damage Calculator", layout="wide")
@@ -159,27 +152,124 @@ CHARACTERS = ["Select Character", "Mizuki", "Aether", "Odette", "Faruzan", "Sucr
 LEVEL_OPTIONS = [60, 70, 80, 90, 95, 100]
 
 CHARACTER_WEAPONS = {
-    "Faruzan": [("Favonius Warbow", [5])],  # R5 Locked
-    "Mizuki": [("The Widsith", [1, 2, 3, 4, 5]), ("Sacrificial Fragments", [5])],
-    "Sucrose": [("Tttds", [1, 2, 3, 4, 5]), ("Sacrificial Fragments", [5])],
-    "Odette": [("New Bough", [1, 2, 3, 4, 5]), ("Silver Light", [5])],
-    "Aether": [("Exaiphanes Blade", [1, 2, 3, 4, 5])],
-    "Diona": [("Favonius Warbow", [1, 2, 3, 4, 5]), ("Sacrificial Bow", [1, 2, 3, 4, 5])],
+    "Mizuki": [
+        ("The Widsith (Average)", [1, 2, 3, 4, 5]),
+        ("The Widsith (All EM)", [1, 2, 3, 4, 5]),
+        ("Sacrificial Fragments", [4, 5]),
+        ("Sacrificial Jade", [1, 2, 3, 4, 5]),
+        ("Sunny Morning Sleep-In", [1, 2, 3, 4, 5]),
+        ("Starcaller's Watch", [1, 2, 3, 4, 5]),
+        ("A Thousand Floating Dreams", [1, 2, 3, 4, 5]),
+        ("Wandering Evenstar", [1, 2, 3, 4, 5]),
+        ("Thrilling Tales of Dragon Slayers", [1, 2, 3, 4, 5]),
+        ("Starsealed Edict", [1, 2, 3, 4, 5]),
+    ],
+    "Aether": [
+        ("New Bough", [1, 2, 3, 4, 5]),
+        ("Silver Light", [1, 2, 3, 4, 5]),
+        ("Exaiphanes Blade", [1, 2, 3, 4, 5]),
+        ("Whitelake Frostfeather", [1, 2, 3, 4, 5]),
+        ("Finale Of The Deep", [1, 2, 3, 4, 5]),
+        ("Azurelight", [1, 2, 3, 4, 5]),
+        ("Aquila Favonia", [1, 2, 3, 4, 5]),
+    ],
+    "Odette": [
+        ("New Bough", [1, 2, 3, 4, 5]),
+        ("Silver Light", [1, 2, 3, 4, 5]),
+        ("Exaiphanes Blade", [1, 2, 3, 4, 5]),
+        ("Whitelake Frostfeather", [1, 2, 3, 4, 5]),
+        ("Finale Of The Deep", [1, 2, 3, 4, 5]),
+        ("Azurelight", [1, 2, 3, 4, 5]),
+        ("Aquila Favonia", [1, 2, 3, 4, 5]),
+    ],
+    "Faruzan": [
+        ("Favonius Warbow", [1, 2, 3, 4, 5]),
+        ("Sacrificial Bow", [1, 2, 3, 4, 5]),
+        ("Breezeborne Refrain", [1, 2, 3, 4, 5]),
+        ("Elegy for the End", [1, 2, 3, 4, 5]),
+    ],
+    "Sucrose": [
+        ("The Widsith (Average)", [1, 2, 3, 4, 5]),
+        ("The Widsith (All EM)", [1, 2, 3, 4, 5]),
+        ("Sacrificial Fragments", [1, 2, 3, 4, 5]),
+        ("Sacrificial Jade", [1, 2, 3, 4, 5]),
+        ("Sunny Morning Sleep-In", [1, 2, 3, 4, 5]),
+        ("Starcaller's Watch", [1, 2, 3, 4, 5]),
+        ("A Thousand Floating Dreams", [1, 2, 3, 4, 5]),
+        ("Wandering Evenstar", [1, 2, 3, 4, 5]),
+        ("Thrilling Tales of Dragon Slayers", [1, 2, 3, 4, 5]),
+        ("Starsealed Edict", [1, 2, 3, 4, 5]),
+    ],
+    "Diona": [
+        ("Favonius Warbow", [1, 2, 3, 4, 5]),
+        ("Sacrificial Bow", [1, 2, 3, 4, 5]),
+        ("Breezeborne Refrain", [1, 2, 3, 4, 5]),
+        ("Elegy for the End", [1, 2, 3, 4, 5]),
+    ],
+}
+
+CHARACTER_CONSTELLATIONS = {
+    "Select Character": ["C0"],
+    "Faruzan": ["C6"],  # Only C6 available
+    "Diona": ["C6"],    # Only C6 available
+    "Mizuki": [f"C{j}" for j in range(7)],
+    "Aether": [f"C{j}" for j in range(7)],
+    "Odette": [f"C{j}" for j in range(7)],
+    "Sucrose": [f"C{j}" for j in range(7)],
 }
 
 CHARACTER_ARTIFACT_SETS = {
-    "Mizuki": ["Select Set", "2p/2p EM", "Gilded Dreams", "Scarlet Proof"],
-    "Odette": ["Select Set", "Heart Of The Furnace", "2p/2p ATK"],
-    "Aether": ["Select Set", "2p/2p ATK", "Tenacity Of The Millelith", "A Day Carved From Rising Winds"],
+    "Select Character": ["Select Set"],
+    "Mizuki": [
+        "Select Set",
+        "2p/2p EM",
+        "Gilded Dreams",
+        "Heart Of The Furnace",
+        "Instructor",
+        "Scarlet Proof",
+        "Viridescent Venerer",
+    ],
+    "Odette": [
+        "Select Set",
+        "2p/2p ATK",
+        "A Day Carved From Rising Winds",
+        "Heart Of The Furnace",
+        "Tenacity Of The Millelith",
+    ],
+    "Aether": [
+        "Select Set",
+        "2p/2p ATK",
+        "A Day Carved From Rising Winds",
+        "Heart Of The Furnace",
+        "Tenacity Of The Millelith",
+    ],
+    "Faruzan": [
+        "Select Set",
+        "Instructor",
+        "Noblesse Oblige",
+        "Tenacity Of The Millelith",
+        "Viridescent Venerer",
+    ],
+    "Sucrose": [
+        "Select Set",
+        "2p/2p EM",
+        "Gilded Dreams",
+        "Instructor",
+        "Viridescent Venerer",
+    ],
+    "Diona": [
+        "Select Set",
+        "Noblesse Oblige",
+        "Tenacity Of The Millelith",
+    ],
 }
-DEFAULT_ARTIFACT_SETS = ["Select Set", "Emblem of Severed Fate", "Gladiator's Finale", "Noblesse Oblige", "Viridescent Venerer", "Deepwood Memories"]
 
-# Register all sets with fallbacks in ARTIFACTS_BONUSES so ARTIFACTS_BONUSES[set] never throws KeyError
-for set_key in list(DEFAULT_ARTIFACT_SETS) + ["Select Set", "None", "", "2p/2p Em", "Heart of the furnace", "2p/2p Atk"]:
-    ARTIFACTS_BONUSES.setdefault(set_key, ARTIFACTS_BONUSES.get(set_key.title(), {}))
+# Strict fallback for unselected placeholders (let actual missing keys crash)
+WEAPON_STATS.setdefault("Select Weapon", {"base_atk": 0.0})
+ARTIFACTS_BONUSES.setdefault("Select Set", {})
 
 # Main Stat Options per piece type
-SANDS_MAINS = ["ER%", "ATK%", "HP%", "DEF%", "EM"]
+SANDS_MAINS = ["ATK%", "HP%", "DEF%", "EM", "ER%"]
 GOBLET_MAINS = ["ATK%", "HP%", "DEF%", "EM", "Physical Bonus%", "Pyro Bonus%", "Hydro Bonus%", "Geo Bonus%", "Anemo Bonus%", "Electro Bonus%", "Dendro Bonus%", "Cryo Bonus%"]
 CIRCLET_MAINS = ["ATK%", "HP%", "DEF%", "EM", "Crit Rate%", "Crit Damage%", "Healing Bonus%"]
 
@@ -329,22 +419,18 @@ with tab1:
             char_idx = slot_char_options.index(curr_char)
             char = st.selectbox("Character", slot_char_options, index=char_idx, key=f"char_{slot_num}")
 
+            # Level defaults to 90
             curr_lv = st.session_state.get(f"level_{slot_num}", 90)
             lv_idx = LEVEL_OPTIONS.index(curr_lv) if curr_lv in LEVEL_OPTIONS else LEVEL_OPTIONS.index(90)
             char_level = st.selectbox("Level", LEVEL_OPTIONS, index=lv_idx, key=f"level_{slot_num}")
 
-            if char in ["Diona", "Faruzan"]:
-                st.info(f"🔒 {char} is locked to C6")
-                const = "C6"
-            elif char in ["Mizuki", "Aether", "Odette", "Sucrose"]:
-                const_options = [f"C{j}" for j in range(7)]
-                if f"const_{slot_num}" in st.session_state and st.session_state[f"const_{slot_num}"] not in const_options:
-                    st.session_state[f"const_{slot_num}"] = const_options[0]
-                const = st.selectbox("Constellation", const_options, key=f"const_{slot_num}")
-            else:
-                const = "C0"
-                st.selectbox("Constellation", ["C0"], key=f"const_dummy_{slot_num}", disabled=True)
+            # Constellations (driven by CHARACTER_CONSTELLATIONS dictionary)
+            const_options = CHARACTER_CONSTELLATIONS.get(char, ["C0"])
+            if f"const_{slot_num}" in st.session_state and st.session_state[f"const_{slot_num}"] not in const_options:
+                st.session_state[f"const_{slot_num}"] = const_options[0]
+            const = st.selectbox("Constellation", const_options, key=f"const_{slot_num}")
                 
+            # Weapon & Refinement
             if char in CHARACTER_WEAPONS:
                 available_weapons_list = CHARACTER_WEAPONS[char]
                 weapon_names = [w[0] for w in available_weapons_list]
@@ -355,26 +441,20 @@ with tab1:
                 chosen_weapon = st.selectbox("Weapon", weapon_names, key=f"weapon_{slot_num}")
                 valid_refines = [w[1] for w in available_weapons_list if w[0] == chosen_weapon][0]
                 
-                if len(valid_refines) == 1:
-                    st.caption(f"Refinement locked to R{valid_refines[0]}")
-                    refinement_val = valid_refines[0]
-                else:
-                    refine_options = [f"R{r}" for r in valid_refines]
-                    if f"ref_{slot_num}" in st.session_state and st.session_state[f"ref_{slot_num}"] not in refine_options:
-                        st.session_state[f"ref_{slot_num}"] = refine_options[0]
-                    refine_choice = st.selectbox("Refinement", refine_options, key=f"ref_{slot_num}")
-                    refinement_val = int(refine_choice.replace("R", ""))
-            else:
-                fallback_weapons = ["Select Weapon", "Favonius Sword", "The Catch"]
-                if f"weapon_fallback_{slot_num}" in st.session_state and st.session_state[f"weapon_fallback_{slot_num}"] not in fallback_weapons:
-                    st.session_state[f"weapon_fallback_{slot_num}"] = fallback_weapons[0]
-                chosen_weapon = st.selectbox("Weapon", fallback_weapons, key=f"weapon_fallback_{slot_num}")
-                refine_choice = st.selectbox("Refinement", ["R1", "R2", "R3", "R4", "R5"], key=f"ref_fallback_{slot_num}")
+                refine_options = [f"R{r}" for r in valid_refines]
+                if f"ref_{slot_num}" in st.session_state and st.session_state[f"ref_{slot_num}"] not in refine_options:
+                    st.session_state[f"ref_{slot_num}"] = refine_options[0]
+                refine_choice = st.selectbox("Refinement", refine_options, key=f"ref_{slot_num}")
                 refinement_val = int(refine_choice.replace("R", ""))
+            else:
+                chosen_weapon = "Select Weapon"
+                st.selectbox("Weapon", ["Select Weapon"], key=f"weapon_locked_{slot_num}", disabled=True)
+                refinement_val = 1
+                st.selectbox("Refinement", ["R1"], key=f"ref_locked_{slot_num}", disabled=True)
 
             talent_input = st.text_input(
                 "Talent Levels",
-                placeholder="1/13/13",
+                placeholder="10/13/13",
                 key=f"talents_{slot_num}"
             )
                 
@@ -399,10 +479,7 @@ with tab1:
         label_name = char_name if char_name != "Select Character" else f"Character {slot_num}"
         
         with st.expander(f"Artifacts for {label_name} (Slot {slot_num})", expanded=False):
-            if char_name in CHARACTER_ARTIFACT_SETS:
-                set_options = CHARACTER_ARTIFACT_SETS[char_name]
-            else:
-                set_options = DEFAULT_ARTIFACT_SETS
+            set_options = CHARACTER_ARTIFACT_SETS.get(char_name, ["Select Set"])
                 
             if f"art_set_{slot_num}" in st.session_state and st.session_state[f"art_set_{slot_num}"] not in set_options:
                 st.session_state[f"art_set_{slot_num}"] = set_options[0]
@@ -412,7 +489,8 @@ with tab1:
                 set_options,
                 key=f"art_set_{slot_num}"
             )
-            
+
+
             st.markdown("")
             pieces_data = {}
             f_col, fe_col, s_col, g_col, c_col = st.columns(5)
@@ -513,28 +591,25 @@ with tab1:
         st.session_state["party_created"] = False
 
 
-    if st.button("Create party", type="primary"):
-        has_empty_fields = False
+    # Button renamed and validation relaxed to ONLY require characters
+    if st.button("Confirm party configuration", type="primary"):
+        has_empty_characters = False
         for slot_num in range(1, 5):
             s_data = team_data[f"Slot {slot_num}"]
             c = s_data["character"]
-            w = s_data["weapon"]
-            t = s_data["talents"]
             
+            # Only check if character selection is empty / default
             if not c or c == "Select Character":
-                has_empty_fields = True
-                break
-            if not w or w == "Select Weapon":
-                has_empty_fields = True
-                break
-            if not t:
-                has_empty_fields = True
+                has_empty_characters = True
                 break
 
-        if has_empty_fields:
+        if has_empty_characters:
             st.session_state["party_created"] = False
-            st.error("Please enter all fields.")
+            st.error("Please select characters for all slots.")
         else:
+            # Talent validation still runs if talents are filled, 
+            # or you can allow empty talents if desired. 
+            # Keeping your existing talent validation structure:
             talent_errors = []
             parsed_talents = {}
             for slot_num in range(1, 5):
@@ -542,11 +617,15 @@ with tab1:
                 c = s_data["character"]
                 t = s_data["talents"]
                 
-                is_valid, err_msg, levels = validate_talents(t)
-                if not is_valid:
-                    talent_errors.append(f"Slot {slot_num} ({c}): {err_msg}")
+                # If talents are left empty, default them or validate
+                if not t:
+                    parsed_talents[slot_num] = [1, 1, 1] # Safe default if skipped
                 else:
-                    parsed_talents[slot_num] = levels
+                    is_valid, err_msg, levels = validate_talents(t)
+                    if not is_valid:
+                        talent_errors.append(f"Slot {slot_num} ({c}): {err_msg}")
+                    else:
+                        parsed_talents[slot_num] = levels
                     
             if talent_errors:
                 st.session_state["party_created"] = False
@@ -556,6 +635,9 @@ with tab1:
                 my_party = {}
                 for idx, (slot, data) in enumerate(team_data.items()):
                     char_name = data["character"]
+                    if char_name == "Select Character":
+                        continue # Skip empty slots if any slip through
+                        
                     slot_num = idx + 1
                     const_val = int(data["constellation"].replace("C", "")) if data["constellation"] else 0
                     weapon = data["weapon"]
@@ -591,7 +673,7 @@ with tab1:
                         "level": data.get("level", 90),
                         "weapon": weapon,
                         "refinement": data["refinement"],
-                        "talents": data["talents"],
+                        "talents": data["talents"] if data["talents"] else "10/13/13",
                         "talent_levels": parsed_talents[slot_num],
                         "artifact_set": artifact_set if artifact_set != "Select Set" else "None",
                         "initial_stats": initial_stats,  

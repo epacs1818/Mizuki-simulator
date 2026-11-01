@@ -94,13 +94,3 @@ WEAPON_STATS = {
     }     
 }
 
-# Weapon aliases and safe defaults to prevent KeyError
-WEAPON_STATS.setdefault("Favonius Sword", {"base_atk": 454.0, "er": 0.613})
-WEAPON_STATS.setdefault("Fav Bow", WEAPON_STATS.get("Favonius Warbow", {"base_atk": 454.0, "er": 0.613}))
-WEAPON_STATS.setdefault("Elegy", WEAPON_STATS.get("Elegy for the End", {"base_atk": 608.0, "er": 0.551}))
-WEAPON_STATS.setdefault("Heart of the Furnace", {"base_atk": 510.0, "atk_percent": 0.413})
-WEAPON_STATS.setdefault("The Catch", {"base_atk": 510.0, "er": 0.459})
-WEAPON_STATS.setdefault("Tttds", {"base_atk": 401.0, "hp_percent": 0.352})
-WEAPON_STATS.setdefault("The Widsith", WEAPON_STATS.get("The Widsith (Average)", {"base_atk": 510.0, "crit_dmg": 0.551}))
-WEAPON_STATS.setdefault("Sacrificial Bow", {"base_atk": 565.0, "er": 0.306})
-WEAPON_STATS.setdefault("Select Weapon", {"base_atk": 0.0})
