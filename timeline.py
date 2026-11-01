@@ -119,6 +119,26 @@ class RotationTimeline:
         self.global_events.sort(key=lambda x: x["global_time"])
         return swap_out_global
 
+    def add_rotation(self, rotation: Rotation, start_time: float = 0.0) -> float:
+        current_time = start_time
+        for _ in range(rotation.repetitions):
+            for field_sequence in rotation.sequences:
+                # Reuse your existing field sequence addition logic
+                current_time = self.add_field_sequence(field_sequence, swap_in_time=current_time)
+        return current_time
+
+    def _cancel_pending_ability_hits(self, character: str, ability_name: str, current_time: float):
+        """Internal helper method to scrub overlapping future hits."""
+        self.global_events = [
+            ev for ev in self.global_events
+            if not (
+                ev.get("event_type") == "HIT" and
+                ev.get("character") == character and
+                ev.get("ability_name") == ability_name and
+                ev["global_time"] >= current_time
+            )
+        ]
+
     def _parse_gauge(self, elem_app: str) -> float:
         if elem_app and elem_app != "-" and elem_app.endswith("U"):
             try:

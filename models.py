@@ -73,3 +73,10 @@ class FieldSequence:
 
     def add_ability(self, start_time: float, ability: Ability):
         self.calls.append(TimedAbilityCall(ability=ability, start_time=start_time))
+
+@dataclass
+class Rotation:
+    name: str
+    sequences: List[FieldSequence]
+    repetitions: int = 1
+    description: Optional[str] = ""
