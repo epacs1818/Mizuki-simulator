@@ -1,11 +1,11 @@
 CHARACTER_BASE_STATS = {
     "Mizuki": {
-        "base_hp": 12735.75,      # Example Level 90 base value
-        "base_atk": 215.26,      # Example Level 90 base value
-        "base_def": 757.03,      # Example Level 90 base value
-        "crit_rate": 0.05,    # Base 5%
-        "crit_dmg": 0.50,     # Base 50%
-        "er": 1.0,             # Base 100% (or 0.24 if using ER ascension stat, etc.)
+        "base_hp": 12735.75,
+        "base_atk": 215.26,
+        "base_def": 757.03,
+        "crit_rate": 0.05,
+        "crit_dmg": 0.50,
+        "er": 1.0,
         "em": 115.2
     },
     "Odette": {
@@ -26,31 +26,31 @@ CHARACTER_BASE_STATS = {
         "atk_percent": 0.24
     },
     "Faruzan": {
-        "base_hp": 9569.93,      # Example Level 90 base value
-        "base_atk": 196.47,      # Example Level 90 base value
-        "base_def": 627.92,      # Example Level 90 base value
-        "crit_rate": 0.05,    # Base 5%
-        "crit_dmg": 0.50,     # Base 50%
-        "er": 1.0,            # Base 100% (or 0.24 if using ER ascension stat, etc.)
-        "atk_percent": 0.24   # Usually 0 unless specified
+        "base_hp": 9569.93,
+        "base_atk": 196.47,
+        "base_def": 627.92,
+        "crit_rate": 0.05,
+        "crit_dmg": 0.50,
+        "er": 1.0,
+        "atk_percent": 0.24
     },
     "Sucrose": {
-        "base_hp": 9243.68,      # Example Level 90 base value
-        "base_atk": 169.92,      # Example Level 90 base value
-        "base_def": 703.00,      # Example Level 90 base value
-        "crit_rate": 0.05,    # Base 5%
-        "crit_dmg": 0.50,     # Base 50%
-        "er": 1.0,            # Base 100% (or 0.24 if using ER ascension stat, etc.)
+        "base_hp": 9243.68,
+        "base_atk": 169.92,
+        "base_def": 703.00,
+        "crit_rate": 0.05,
+        "crit_dmg": 0.50,
+        "er": 1.0,
         "anemo_bonus": 0.24
     },
     "Diona": {
-        "base_hp": 9569.93,      # Example Level 90 base value
-        "base_atk": 212.40,      # Example Level 90 base value
-        "base_def": 600.62,      # Example Level 90 base value
-        "crit_rate": 0.05,    # Base 5%
-        "crit_dmg": 0.50,     # Base 50%
-        "er": 1.0,            # Base 100% (or 0.24 if using ER ascension stat, etc.)
+        "base_hp": 9569.93,
+        "base_atk": 212.40,
+        "base_def": 600.62,
+        "crit_rate": 0.05,
+        "crit_dmg": 0.50,
+        "er": 1.0,
         "cryo_bonus": 0.24
     },
-    # Add other characters here...
+ 
 }

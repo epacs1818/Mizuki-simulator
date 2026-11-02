@@ -1226,162 +1226,162 @@ with tab4:
         st.markdown("<br>", unsafe_allow_html=True)
         
         history = st.session_state["history"]
-    for i, entry in enumerate(reversed(history)):
-        real_idx = len(history) - 1 - i
-        
-        # Ensure a default sim name exists
-        if "sim_name" not in entry:
-            entry["sim_name"] = f"Simulation #{real_idx + 1}"
-        
-        with st.expander(f"[{entry['timestamp']}] {entry['sim_name']}", expanded=(i == 0)):
+        for i, entry in enumerate(reversed(history)):
+            real_idx = len(history) - 1 - i
             
-            # 1. RENAME CONTROLS
-            col_name_input, col_info = st.columns([3, 1], vertical_alignment="bottom")
-            with col_name_input:
-                new_name = st.text_input(
-                    "Rename Simulation", 
-                    value=entry["sim_name"], 
-                    key=f"rename_sim_{real_idx}"
-                )
-                if new_name != entry["sim_name"]:
-                    entry["sim_name"] = new_name
-                    st.rerun()
-            with col_info:
-                st.markdown("<br>", unsafe_allow_html=True)
-                if st.button("Delete Entry", key=f"del_hist_{real_idx}", use_container_width=True):
-                    st.session_state["history"].pop(real_idx)
-                    st.rerun()
-
-            st.markdown(f"**Characters:** {entry['chars']}")
-            st.markdown(f"**Enemy Setup:** {entry['enemy']}")
-            st.markdown(f"**Trial Executed:** `{entry['field_sequences']}`")
+            # Ensure a default sim name exists
+            if "sim_name" not in entry:
+                entry["sim_name"] = f"Simulation #{real_idx + 1}"
             
-            st.markdown("---")
-            st.subheader("Performance Analytics & Visualizations")
-
-            # --- FALLBACK: Compute analytics on-the-fly for old history entries ---
-            analytics = entry.get("analytics", {})
-            if not analytics and "timeline_events" in entry and entry["timeline_events"]:
-                from timeline import RotationTimeline
-                temp_timeline = RotationTimeline(
-                    party=entry.get("snapshot_party", {}), 
-                    enemy_stats=entry.get("snapshot_enemy", {})
-                )
-                temp_timeline.global_events = entry["timeline_events"]
-                max_t = max((ev["global_time"] for ev in entry["timeline_events"]), default=30.0)
-                analytics = temp_timeline.get_analytics_summary(max_t)
-                entry["analytics"] = analytics # Cache it back into the entry
-
-            if analytics:
-                # 1. Key Metrics Summary Cards
-                m1, m2, m3 = st.columns(3)
-                with m1:
-                    st.metric("Total Damage", f"{analytics.get('total_damage', 0):,.1f}")
-                with m2:
-                    st.metric("Overall DPS", f"{analytics.get('overall_dps', 0):,.1f} DMG/s")
-                with m3:
-                    st.metric("Trial Duration", f"{analytics.get('trial_duration', 0):.1f}s")
+            with st.expander(f"[{entry['timestamp']}] {entry['sim_name']}", expanded=(i == 0)):
                 
-                st.markdown("---")
-                
-                # 2. Three Pie Charts (Element, Hit Type, Damage Owner)
-                chart_col1, chart_col2, chart_col3 = st.columns(3)
-                
-                with chart_col1:
-                    elem_data = analytics.get("element_breakdown", {})
-                    if elem_data:
-                        fig_elem = px.pie(
-                            names=list(elem_data.keys()), 
-                            values=list(elem_data.values()), 
-                            title="Damage by Element",
-                            hole=0.3
-                        )
-                        st.plotly_chart(fig_elem, use_container_width=True)
-                        
-                with chart_col2:
-                    hit_data = analytics.get("hit_type_breakdown", {})
-                    if hit_data:
-                        fig_hit = px.pie(
-                            names=list(hit_data.keys()), 
-                            values=list(hit_data.values()), 
-                            title="Damage by Hit Type",
-                            hole=0.3
-                        )
-                        st.plotly_chart(fig_hit, use_container_width=True)
-                        
-                with chart_col3:
-                    owner_data = analytics.get("owner_damage_share", {})
-                    if owner_data:
-                        fig_owner = px.pie(
-                            names=list(owner_data.keys()), 
-                            values=list(owner_data.values()), 
-                            title="Damage Share by Owner (Excl. Reactions)",
-                            hole=0.3
-                        )
-                        st.plotly_chart(fig_owner, use_container_width=True)
-
-                st.markdown("---")
-
-                # 3. Per-Second DPS Histogram / Timeline Bar Chart
-                dps_timeline_data = analytics.get("dps_timeline", [])
-                if dps_timeline_data:
-                    df_dps = pd.DataFrame(dps_timeline_data)
-                    fig_dps = px.bar(
-                        df_dps, 
-                        x="Second", 
-                        y="DPS", 
-                        title="DPS Track Throughout Timeline (Per-Second Breakdown)",
-                        labels={"Second": "Timeline Second (s)", "DPS": "Damage Per Second (DMG/s)"},
-                        color_discrete_sequence=["#3b82f6"]
+                # 1. RENAME CONTROLS
+                col_name_input, col_info = st.columns([3, 1], vertical_alignment="bottom")
+                with col_name_input:
+                    new_name = st.text_input(
+                        "Rename Simulation", 
+                        value=entry["sim_name"], 
+                        key=f"rename_sim_{real_idx}"
                     )
-                    st.plotly_chart(fig_dps, use_container_width=True)
+                    if new_name != entry["sim_name"]:
+                        entry["sim_name"] = new_name
+                        st.rerun()
+                with col_info:
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    if st.button("Delete Entry", key=f"del_hist_{real_idx}", use_container_width=True):
+                        st.session_state["history"].pop(real_idx)
+                        st.rerun()
 
-            st.markdown("<br>", unsafe_allow_html=True)
-
-            # Timeline Dataframe Table
-            if "timeline_events" in entry and entry["timeline_events"]:
-                st.markdown("##### Rotation Timeline Table")
-                df_timeline = build_timeline_dataframe(entry["timeline_events"])
-                st.dataframe(df_timeline, use_container_width=True)
-
-                st.markdown("<br><hr>", unsafe_allow_html=True)
-                                    
-                # 2. EXPORT CONFIGURATION FOR THIS SPECIFIC RUN
-                st.subheader("Export Run Configuration")
-                st.write("Export the exact build, enemy stats, and custom setups used for this specific simulation run.")
+                st.markdown(f"**Characters:** {entry['chars']}")
+                st.markdown(f"**Enemy Setup:** {entry['enemy']}")
+                st.markdown(f"**Trial Executed:** `{entry['field_sequences']}`")
                 
-                import json
-                export_payload = {
-                    "schema_version": "1.0",
-                    "simulation_name": entry["sim_name"],
-                    "party": entry.get("snapshot_party", {}),
-                    "enemy_stats": entry.get("snapshot_enemy", {}),
-                    "custom_field_sequences_raw": {
-                        name: {
-                            "name": fs.name,
-                            "character": fs.character,
-                            "swap_out_time": fs.swap_out_time,
-                            "calls": [{"start_time": call.start_time, "ability_name": call.ability.name} for call in fs.calls]
+                st.markdown("---")
+                st.subheader("Performance Analytics & Visualizations")
+
+                # --- FALLBACK: Compute analytics on-the-fly for old history entries ---
+                analytics = entry.get("analytics", {})
+                if not analytics and "timeline_events" in entry and entry["timeline_events"]:
+                    from timeline import RotationTimeline
+                    temp_timeline = RotationTimeline(
+                        party=entry.get("snapshot_party", {}), 
+                        enemy_stats=entry.get("snapshot_enemy", {})
+                    )
+                    temp_timeline.global_events = entry["timeline_events"]
+                    max_t = max((ev["global_time"] for ev in entry["timeline_events"]), default=30.0)
+                    analytics = temp_timeline.get_analytics_summary(max_t)
+                    entry["analytics"] = analytics # Cache it back into the entry
+
+                if analytics:
+                    # 1. Key Metrics Summary Cards
+                    m1, m2, m3 = st.columns(3)
+                    with m1:
+                        st.metric("Total Damage", f"{analytics.get('total_damage', 0):,.1f}")
+                    with m2:
+                        st.metric("Overall DPS", f"{analytics.get('overall_dps', 0):,.1f} DMG/s")
+                    with m3:
+                        st.metric("Trial Duration", f"{analytics.get('trial_duration', 0):.1f}s")
+                    
+                    st.markdown("---")
+                    
+                    # 2. Three Pie Charts (Element, Hit Type, Damage Owner)
+                    chart_col1, chart_col2, chart_col3 = st.columns(3)
+                    
+                    with chart_col1:
+                        elem_data = analytics.get("element_breakdown", {})
+                        if elem_data:
+                            fig_elem = px.pie(
+                                names=list(elem_data.keys()), 
+                                values=list(elem_data.values()), 
+                                title="Damage by Element",
+                                hole=0.3
+                            )
+                            st.plotly_chart(fig_elem, use_container_width=True)
+                            
+                    with chart_col2:
+                        hit_data = analytics.get("hit_type_breakdown", {})
+                        if hit_data:
+                            fig_hit = px.pie(
+                                names=list(hit_data.keys()), 
+                                values=list(hit_data.values()), 
+                                title="Damage by Hit Type",
+                                hole=0.3
+                            )
+                            st.plotly_chart(fig_hit, use_container_width=True)
+                            
+                    with chart_col3:
+                        owner_data = analytics.get("owner_damage_share", {})
+                        if owner_data:
+                            fig_owner = px.pie(
+                                names=list(owner_data.keys()), 
+                                values=list(owner_data.values()), 
+                                title="Damage Share by Owner (Excl. Reactions)",
+                                hole=0.3
+                            )
+                            st.plotly_chart(fig_owner, use_container_width=True)
+
+                    st.markdown("---")
+
+                    # 3. Per-Second DPS Histogram / Timeline Bar Chart
+                    dps_timeline_data = analytics.get("dps_timeline", [])
+                    if dps_timeline_data:
+                        df_dps = pd.DataFrame(dps_timeline_data)
+                        fig_dps = px.bar(
+                            df_dps, 
+                            x="Second", 
+                            y="DPS", 
+                            title="DPS Track Throughout Timeline (Per-Second Breakdown)",
+                            labels={"Second": "Timeline Second (s)", "DPS": "Damage Per Second (DMG/s)"},
+                            color_discrete_sequence=["#3b82f6"]
+                        )
+                        st.plotly_chart(fig_dps, use_container_width=True)
+
+                st.markdown("<br>", unsafe_allow_html=True)
+
+                # Timeline Dataframe Table
+                if "timeline_events" in entry and entry["timeline_events"]:
+                    st.markdown("##### Rotation Timeline Table")
+                    df_timeline = build_timeline_dataframe(entry["timeline_events"])
+                    st.dataframe(df_timeline, use_container_width=True)
+
+                    st.markdown("<br><hr>", unsafe_allow_html=True)
+                                        
+                    # 2. EXPORT CONFIGURATION FOR THIS SPECIFIC RUN
+                    st.subheader("Export Run Configuration")
+                    st.write("Export the exact build, enemy stats, and custom setups used for this specific simulation run.")
+                    
+                    import json
+                    export_payload = {
+                        "schema_version": "1.0",
+                        "simulation_name": entry["sim_name"],
+                        "party": entry.get("snapshot_party", {}),
+                        "enemy_stats": entry.get("snapshot_enemy", {}),
+                        "custom_field_sequences_raw": {
+                            name: {
+                                "name": fs.name,
+                                "character": fs.character,
+                                "swap_out_time": fs.swap_out_time,
+                                "calls": [{"start_time": call.start_time, "ability_name": call.ability.name} for call in fs.calls]
+                            }
+                            for name, fs in entry.get("snapshot_custom_fs", {}).items()
+                        },
+                        "custom_rotations_raw": {
+                            name: {
+                                "name": rot.name,
+                                "sequence_keys": [seq.name for seq in rot.sequences],
+                                "repetitions": rot.repetitions,
+                                "description": rot.description
+                            }
+                            for name, rot in entry.get("snapshot_custom_rots", {}).items()
                         }
-                        for name, fs in entry.get("snapshot_custom_fs", {}).items()
-                    },
-                    "custom_rotations_raw": {
-                        name: {
-                            "name": rot.name,
-                            "sequence_keys": [seq.name for seq in rot.sequences],
-                            "repetitions": rot.repetitions,
-                            "description": rot.description
-                        }
-                        for name, rot in entry.get("snapshot_custom_rots", {}).items()
                     }
-                }
-                
-                json_str = json.dumps(export_payload, indent=4)
-                st.download_button(
-                    label=f"Export JSON Config for '{entry['sim_name']}'",
-                    data=json_str,
-                    file_name=f"{entry['sim_name'].replace(' ', '_')}.json",
-                    mime="application/json",
-                    key=f"export_hist_{real_idx}",
-                    use_container_width=True
-                )
+                    
+                    json_str = json.dumps(export_payload, indent=4)
+                    st.download_button(
+                        label=f"Export JSON Config for '{entry['sim_name']}'",
+                        data=json_str,
+                        file_name=f"{entry['sim_name'].replace(' ', '_')}.json",
+                        mime="application/json",
+                        key=f"export_hist_{real_idx}",
+                        use_container_width=True
+                    )
