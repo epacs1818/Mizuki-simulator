@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import buffs
 import datetime
+import plotly.express as px
 from timeline import RotationTimeline
 from abilities import (
     aether_en1,
@@ -989,6 +990,9 @@ with tab3:
             timeline.add_trial(trial_obj)
             timeline.evaluate_timeline()
 
+            trial_duration = trial_obj.end_time
+            analytics = timeline.get_analytics_summary(trial_duration)
+
             char_summary = ", ".join(
                 f"{name} Lv{data.get('level',90)} C{data['constellation']} {data['weapon']} T{data['talents']}"
                 for name, data in party.items()
@@ -1222,48 +1226,126 @@ with tab4:
         st.markdown("<br>", unsafe_allow_html=True)
         
         history = st.session_state["history"]
-        for i, entry in enumerate(reversed(history)):
-            real_idx = len(history) - 1 - i
+    for i, entry in enumerate(reversed(history)):
+        real_idx = len(history) - 1 - i
+        
+        # Ensure a default sim name exists
+        if "sim_name" not in entry:
+            entry["sim_name"] = f"Simulation #{real_idx + 1}"
+        
+        with st.expander(f"[{entry['timestamp']}] {entry['sim_name']}", expanded=(i == 0)):
             
-            # Ensure a default sim name exists
-            if "sim_name" not in entry:
-                entry["sim_name"] = f"Simulation #{real_idx + 1}"
-            
-            # Expander title dynamically updates as you rename it
-            with st.expander(f"[{entry['timestamp']}] {entry['sim_name']}", expanded=(i == 0)):
-                
-                # 1. RENAME CONTROLS
-                col_name_input, col_info = st.columns([3, 1], vertical_alignment="bottom")
-                with col_name_input:
-                    new_name = st.text_input(
-                        "Rename Simulation", 
-                        value=entry["sim_name"], 
-                        key=f"rename_sim_{real_idx}"
-                    )
-                    if new_name != entry["sim_name"]:
-                        entry["sim_name"] = new_name
-                        st.rerun()
-                with col_info:
-                    st.markdown("<br>", unsafe_allow_html=True)
-                    if st.button("Delete Entry", key=f"del_hist_{real_idx}", use_container_width=True):
-                        st.session_state["history"].pop(real_idx)
-                        st.rerun()
+            # 1. RENAME CONTROLS
+            col_name_input, col_info = st.columns([3, 1], vertical_alignment="bottom")
+            with col_name_input:
+                new_name = st.text_input(
+                    "Rename Simulation", 
+                    value=entry["sim_name"], 
+                    key=f"rename_sim_{real_idx}"
+                )
+                if new_name != entry["sim_name"]:
+                    entry["sim_name"] = new_name
+                    st.rerun()
+            with col_info:
+                st.markdown("<br>", unsafe_allow_html=True)
+                if st.button("Delete Entry", key=f"del_hist_{real_idx}", use_container_width=True):
+                    st.session_state["history"].pop(real_idx)
+                    st.rerun()
 
-                st.markdown(f"**Characters:** {entry['chars']}")
-                st.markdown(f"**Enemy Setup:** {entry['enemy']}")
-                st.markdown(f"**Trial Executed:** `{entry['field_sequences']}`")
+            st.markdown(f"**Characters:** {entry['chars']}")
+            st.markdown(f"**Enemy Setup:** {entry['enemy']}")
+            st.markdown(f"**Trial Executed:** `{entry['field_sequences']}`")
+            
+            st.markdown("---")
+            st.subheader("Performance Analytics & Visualizations")
+
+            # --- FALLBACK: Compute analytics on-the-fly for old history entries ---
+            analytics = entry.get("analytics", {})
+            if not analytics and "timeline_events" in entry and entry["timeline_events"]:
+                from timeline import RotationTimeline
+                temp_timeline = RotationTimeline(
+                    party=entry.get("snapshot_party", {}), 
+                    enemy_stats=entry.get("snapshot_enemy", {})
+                )
+                temp_timeline.global_events = entry["timeline_events"]
+                max_t = max((ev["global_time"] for ev in entry["timeline_events"]), default=30.0)
+                analytics = temp_timeline.get_analytics_summary(max_t)
+                entry["analytics"] = analytics # Cache it back into the entry
+
+            if analytics:
+                # 1. Key Metrics Summary Cards
+                m1, m2, m3 = st.columns(3)
+                with m1:
+                    st.metric("Total Damage", f"{analytics.get('total_damage', 0):,.1f}")
+                with m2:
+                    st.metric("Overall DPS", f"{analytics.get('overall_dps', 0):,.1f} DMG/s")
+                with m3:
+                    st.metric("Trial Duration", f"{analytics.get('trial_duration', 0):.1f}s")
                 
                 st.markdown("---")
-                st.subheader("Performance & Timeline Breakdown")
+                
+                # 2. Three Pie Charts (Element, Hit Type, Damage Owner)
+                chart_col1, chart_col2, chart_col3 = st.columns(3)
+                
+                with chart_col1:
+                    elem_data = analytics.get("element_breakdown", {})
+                    if elem_data:
+                        fig_elem = px.pie(
+                            names=list(elem_data.keys()), 
+                            values=list(elem_data.values()), 
+                            title="Damage by Element",
+                            hole=0.3
+                        )
+                        st.plotly_chart(fig_elem, use_container_width=True)
+                        
+                with chart_col2:
+                    hit_data = analytics.get("hit_type_breakdown", {})
+                    if hit_data:
+                        fig_hit = px.pie(
+                            names=list(hit_data.keys()), 
+                            values=list(hit_data.values()), 
+                            title="Damage by Hit Type",
+                            hole=0.3
+                        )
+                        st.plotly_chart(fig_hit, use_container_width=True)
+                        
+                with chart_col3:
+                    owner_data = analytics.get("owner_damage_share", {})
+                    if owner_data:
+                        fig_owner = px.pie(
+                            names=list(owner_data.keys()), 
+                            values=list(owner_data.values()), 
+                            title="Damage Share by Owner (Excl. Reactions)",
+                            hole=0.3
+                        )
+                        st.plotly_chart(fig_owner, use_container_width=True)
 
-                # Timeline Dataframe Table
-                if "timeline_events" in entry and entry["timeline_events"]:
-                    st.markdown("##### Rotation Timeline Table")
-                    df_timeline = build_timeline_dataframe(entry["timeline_events"])
-                    st.dataframe(df_timeline, use_container_width=True)
+                st.markdown("---")
+
+                # 3. Per-Second DPS Histogram / Timeline Bar Chart
+                dps_timeline_data = analytics.get("dps_timeline", [])
+                if dps_timeline_data:
+                    df_dps = pd.DataFrame(dps_timeline_data)
+                    fig_dps = px.bar(
+                        df_dps, 
+                        x="Second", 
+                        y="DPS", 
+                        title="DPS Track Throughout Timeline (Per-Second Breakdown)",
+                        labels={"Second": "Timeline Second (s)", "DPS": "Damage Per Second (DMG/s)"},
+                        color_discrete_sequence=["#3b82f6"]
+                    )
+                    st.plotly_chart(fig_dps, use_container_width=True)
+
+            st.markdown("<br>", unsafe_allow_html=True)
+
+            # Timeline Dataframe Table
+            if "timeline_events" in entry and entry["timeline_events"]:
+                st.markdown("##### Rotation Timeline Table")
+                df_timeline = build_timeline_dataframe(entry["timeline_events"])
+                st.dataframe(df_timeline, use_container_width=True)
 
                 st.markdown("<br><hr>", unsafe_allow_html=True)
-                
+                                    
                 # 2. EXPORT CONFIGURATION FOR THIS SPECIFIC RUN
                 st.subheader("Export Run Configuration")
                 st.write("Export the exact build, enemy stats, and custom setups used for this specific simulation run.")

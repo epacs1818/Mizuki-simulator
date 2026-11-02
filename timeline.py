@@ -629,6 +629,76 @@ class RotationTimeline:
                 event["average_damage"] = None
                 event["effective_average_damage"] = None
 
+    def get_analytics_summary(self, trial_end_time: float) -> dict:
+        """
+        Aggregates simulation results into structured analytics for UI visualization:
+        - Total Damage & Overall DPS
+        - Damage breakdown by Element
+        - Damage breakdown by Hit Type / Category
+        - Damage share by Owner (excluding stellar reactions)
+        - Per-second DPS timeline breakdown
+        """
+        if not self.global_events or trial_end_time <= 0:
+            return {}
+
+        total_damage = 0.0
+        element_breakdown: Dict[str, float] = {}
+        hit_type_breakdown: Dict[str, float] = {}
+        owner_damage_share: Dict[str, float] = {}
+        
+        # Per-second binning
+        max_time = max((ev["global_time"] for ev in self.global_events), default=trial_end_time)
+        max_sec = int(max_time) + 1
+        second_damage = {s: 0.0 for s in range(max_sec + 1)}
+
+        for event in self.global_events:
+            if event.get("event_type") != "HIT":
+                continue
+            
+            dmg = event.get("average_damage", 0.0) or 0.0
+            if dmg <= 0:
+                continue
+
+            total_damage += dmg
+            
+            # 1. Element breakdown
+            elem = event.get("element") or "Physical"
+            element_breakdown[elem] = element_breakdown.get(elem, 0.0) + dmg
+
+            # 2. Hit type breakdown (category)
+            cat = event.get("category")
+            cat_str = cat.name if hasattr(cat, "name") else (cat.value if hasattr(cat, "value") else str(cat))
+            hit_type_breakdown[cat_str] = hit_type_breakdown.get(cat_str, 0.0) + dmg
+
+            # 3. Owner damage share (explicitly excluding stellar reactions)
+            char = event.get("character", "Unknown")
+            is_reaction = "REACTION" in cat_str.upper() or cat == ActionCategory.STELLAR_REACTION
+            if not is_reaction:
+                owner_damage_share[char] = owner_damage_share.get(char, 0.0) + dmg
+
+            # 4. Per-second binning
+            sec = int(event.get("global_time", 0.0))
+            second_damage[sec] = second_damage.get(sec, 0.0) + dmg
+
+        overall_dps = total_damage / trial_end_time if trial_end_time > 0 else 0.0
+
+        # Format per-second list for histogram/bar chart
+        dps_timeline = [
+            {"Second": s, "DPS": d} 
+            for s, d in sorted(second_damage.items()) 
+            if s <= int(trial_end_time) or d > 0
+        ]
+
+        return {
+            "total_damage": total_damage,
+            "overall_dps": overall_dps,
+            "element_breakdown": element_breakdown,
+            "hit_type_breakdown": hit_type_breakdown,
+            "owner_damage_share": owner_damage_share,
+            "dps_timeline": dps_timeline,
+            "trial_duration": trial_end_time
+        }
+
     def display(self):
         self.evaluate_timeline()
 
