@@ -86,5 +86,6 @@ class Rotation:
 class Trial:
     name: str
     rotations: List[Rotation]
+    end_mode: str = "time"
     end_time: float = 30.0
     description: Optional[str] = ""

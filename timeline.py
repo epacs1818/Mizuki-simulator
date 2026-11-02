@@ -132,7 +132,16 @@ class RotationTimeline:
         for rotation in trial.rotations:
             current_time = self.add_rotation(rotation, start_time=current_time)
         
-        # Enforce Trial End cutoff: remove any events past trial.end_time
+        # If set to last swap, calculate it and write it back to trial.end_time
+        if trial.end_mode == "last_swap":
+            swap_out_times = [
+                ev["global_time"] for ev in self.global_events
+                if ev.get("event_type") == "SWAP_OUT"
+            ]
+            if swap_out_times:
+                trial.end_time = max(swap_out_times)
+        
+        # Enforce cutoff using the finalized trial.end_time
         self.global_events = [
             ev for ev in self.global_events
             if ev["global_time"] <= trial.end_time

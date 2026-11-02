@@ -849,91 +849,181 @@ with tab3:
     elif not st.session_state.get("enemy_confirmed"):
         st.warning("⚠️ Please confirm your enemy configuration first in the **Enemy Configuration** tab.")
     else:
-        st.header("Field Sequence Setup")
-        st.write("Add field sequences in order to define your rotation timeline.")
+        st.header("Trial Simulation Setup")
+        
+        from presets import STANDARD_TRIALS, STANDARD_FIELD_SEQUENCES
+        from models import FieldSequence, TimedAbilityCall, Rotation, Trial
+        from abilities import aether_skill, aether_n1, aether_n1ca, aether_burst, odette_cast, odette_recast, faruzan_burst, mizuki_skill
 
-        FIELD_SEQUENCE_CHAR_MAP = {
-            "aether_en1":               "Aether",
-            "aether_cq":                "Aether",
-            "faruzan_q":                "Faruzan",
-            "odette_ee":                "Odette",
-            "mizuki_sacfrag_fill":      "Mizuki",
-            "mizuki_burstless_pull_out":"Mizuki",
-        }
+        # Initialize session state pools for custom advanced building if missing
+        if "custom_field_sequences" not in st.session_state:
+            st.session_state["custom_field_sequences"] = {}
+        if "custom_rotations" not in st.session_state:
+            st.session_state["custom_rotations"] = {}
+        if "active_trial_pool" not in st.session_state:
+            # Copy standard trials into session state so advanced trials can be safely appended
+            st.session_state["active_trial_pool"] = STANDARD_TRIALS.copy()
 
-        if "field_sequence" not in st.session_state:
-            st.session_state["field_sequence"] = []
+        # Combine standard and custom field sequences for reference
+        all_available_sequences = {**STANDARD_FIELD_SEQUENCES, **st.session_state["custom_field_sequences"]}
 
-        add_col, btn_col = st.columns([3, 1])
-        with add_col:
-            selected_label = st.selectbox(
-                "Pick a field sequence to add",
-                list(AVAILABLE_FIELD_SEQUENCES.keys()),
-                key="field_sequence_picker"
+        # --- SECTION A: PRESET TRIAL RUNNER ---
+        st.subheader("1. Select & Run Trial")
+        selected_trial_key = st.selectbox(
+            "Select Trial (Presets & Custom)",
+            list(st.session_state["active_trial_pool"].keys()),
+            key="trial_selector"
+        )
+        
+        trial_obj = st.session_state["active_trial_pool"][selected_trial_key]
+
+        with st.expander("🔍 Inspect Trial Breakdown", expanded=False):
+            st.write(f"**Description:** {trial_obj.description}")
+            st.write(f"**End Mode:** {trial_obj.end_mode.capitalize()} | **Duration:** {trial_obj.end_time}s")
+            
+            for r_idx, rotation in enumerate(trial_obj.rotations):
+                st.markdown(f"**Rotation #{r_idx + 1}: {rotation.name}** (Repeated {rotation.repetitions}x)")
+                for s_idx, seq in enumerate(rotation.sequences):
+                    st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;↳ Step {s_idx + 1}: `{seq.name}` (*{seq.character}* — {seq.swap_out_time}s field time)")
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("🚀 Run Trial Simulation & Save", type="primary", key="run_trial_btn", use_container_width=True):
+            party = st.session_state.get("my_party", {})
+            enemy = st.session_state.get("enemy_stats", {"enemy_lv": 100, "cryo_res": 0.1, "anemo_res": 0.1})
+
+            timeline = RotationTimeline(party=party, enemy_stats=enemy)
+            timeline.add_trial(trial_obj)
+            timeline.evaluate_timeline()
+
+            char_summary = ", ".join(
+                f"{name} Lv{data.get('level',90)} C{data['constellation']} {data['weapon']} T{data['talents']}"
+                for name, data in party.items()
             )
-        with btn_col:
-            st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("➕ Add Field Sequence", key="add_field_sequence_btn", use_container_width=True):
-                st.session_state["field_sequence"].append(AVAILABLE_FIELD_SEQUENCES[selected_label])
-                st.rerun()
+            enemy_summary = f"Lv{enemy.get('enemy_lv','?')} | Cryo {int(enemy.get('cryo_res',0.1)*100)}% | Anemo {int(enemy.get('anemo_res',0.1)*100)}%"
+            timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
 
-        if st.session_state["field_sequence"]:
-            st.markdown("##### Current Rotation Sequence")
-            for idx, field_sequence_key in enumerate(st.session_state["field_sequence"]):
-                row_c1, row_c2, row_c3 = st.columns([0.5, 3, 1])
-                with row_c1:
-                    st.markdown(f"**{idx + 1}.**")
-                with row_c2:
-                    label = next((lbl for lbl, k in AVAILABLE_FIELD_SEQUENCES.items() if k == field_sequence_key), field_sequence_key)
-                    owner = FIELD_SEQUENCE_CHAR_MAP.get(field_sequence_key, "?")
-                    st.markdown(f"`{label}` — *{owner}*")
-                with row_c3:
-                    if st.button("🗑️ Remove", key=f"rm_field_sequence_{idx}"):
-                        st.session_state["field_sequence"].pop(idx)
-                        st.rerun()
+            entry = {
+                "timestamp": timestamp,
+                "chars": char_summary,
+                "field_sequences": selected_trial_key,
+                "enemy": enemy_summary,
+                "timeline_events": timeline.global_events,
+            }
 
-            st.markdown("<br>", unsafe_allow_html=True)
-            action_col1, action_col2 = st.columns([1, 3])
-            with action_col1:
-                if st.button("🧹 Clear All Field Sequences", key="clear_field_sequences_btn", use_container_width=True):
-                    st.session_state["field_sequence"] = []
+            if "history" not in st.session_state:
+                st.session_state["history"] = []
+            st.session_state["history"].append(entry)
+            st.success("Trial simulation complete! Check the **History & Simulation Results** tab.")
+
+        st.markdown("<br><hr><br>", unsafe_allow_html=True)
+
+        # --- SECTION B: [ADVANCED] TRIAL EDITOR ---
+        with st.expander("🛠️ [Advanced] Trial Editor (Custom Builder)", expanded=False):
+            st.markdown("### Step 1: Create Custom Field Sequence")
+            seq_name = st.text_input("Field Sequence Name", placeholder="e.g., Custom Aether Burst", key="adv_seq_name")
+            seq_char = st.selectbox("Character Owner", ["Mizuki", "Aether", "Odette", "Faruzan", "Sucrose", "Diona"], key="adv_seq_char")
+            seq_swap_time = st.number_input("Field Time / Swap-Out Time (s)", min_value=0.1, value=3.0, step=0.1, key="adv_swap_time")
+
+            # Map characters to their available abilities from abilities module
+            char_ability_map = {
+                "Aether": {"N1": aether_n1, "Charged Attack": aether_n1ca, "Elemental Skill": aether_skill, "Elemental Burst": aether_burst},
+                "Odette": {"Skill Cast": odette_cast, "Skill Recast": odette_recast},
+                "Faruzan": {"Elemental Burst": faruzan_burst},
+                "Mizuki": {"Mizuki Skill": mizuki_skill}
+            }
+
+            if "temp_seq_calls" not in st.session_state:
+                st.session_state["temp_seq_calls"] = []
+
+            avail_abilities = char_ability_map.get(seq_char, {})
+            if avail_abilities:
+                chosen_abil_key = st.selectbox("Select Ability to Add", list(avail_abilities.keys()), key="adv_abil_picker")
+                abil_start_time = st.number_input("Ability Insertion Time (s relative to Swap In)", min_value=0.0, value=0.0, step=0.1, key="adv_abil_time")
+                
+                if st.button("➕ Add Ability to Sequence", key="adv_add_abil_btn"):
+                    st.session_state["temp_seq_calls"].append((abil_start_time, avail_abilities[chosen_abil_key]))
+                    st.success(f"Added {chosen_abil_key} at {abil_start_time}s")
+
+            if st.session_state["temp_seq_calls"]:
+                st.write("**Queued Ability Calls for this Sequence:**")
+                for c_idx, (st_time, ab_obj) in enumerate(st.session_state["temp_seq_calls"]):
+                    st.text(f"  - [{st_time}s] {ab_obj.name}")
+
+            if st.button("💾 Save Field Sequence", key="adv_save_seq_btn"):
+                if seq_name:
+                    new_fs = FieldSequence(name=seq_name, character=seq_char, swap_out_time=seq_swap_time)
+                    for st_time, ab_obj in st.session_state["temp_seq_calls"]:
+                        new_fs.add_ability(st_time, ab_obj)
+                    st.session_state["custom_field_sequences"][seq_name] = new_fs
+                    st.session_state["temp_seq_calls"] = []
+                    st.success(f"Field Sequence '{seq_name}' saved successfully!")
                     st.rerun()
-            with action_col2:
-                if st.button("Run Simulation & Save", type="primary", key="save_config_btn", use_container_width=True):
-                    party = st.session_state.get("my_party", {})
-                    enemy = st.session_state.get("enemy_stats", {"enemy_lv": 100, "cryo_res": 0.1, "anemo_res": 0.1})
-                    field_sequence_seq = st.session_state.get("field_sequence", [])
+                else:
+                    st.error("Please provide a name for the field sequence.")
 
-                    timeline = RotationTimeline(party=party, enemy_stats=enemy)
-                    current_time = 0.0
-                    for field_sequence_key in field_sequence_seq:
-                        field_sequence_obj = FIELD_SEQUENCE_OBJ_MAP.get(field_sequence_key)
-                        if field_sequence_obj:
-                            current_time = timeline.add_field_sequence(field_sequence_obj, swap_in_time=current_time)
-                    timeline.evaluate_timeline()
+            st.markdown("---")
+            st.markdown("### Step 2: Create Custom Rotation")
+            rot_name = st.text_input("Rotation Name", placeholder="e.g., Custom Main Loop", key="adv_rot_name")
+            
+            chosen_seq_keys = st.multiselect(
+                "Select Field Sequences in Order",
+                options=list(all_available_sequences.keys()),
+                key="adv_rot_seq_picker"
+            )
+            rot_reps = st.number_input("Repetitions", min_value=1, max_value=10, value=1, key="adv_rot_reps")
 
-                    char_summary = ", ".join(
-                        f"{name} Lv{data.get('level',90)} C{data['constellation']} {data['weapon']} T{data['talents']}"
-                        for name, data in party.items()
+            if st.button("💾 Save Rotation", key="adv_save_rot_btn"):
+                if rot_name and chosen_seq_keys:
+                    seq_list = [all_available_sequences[k] for k in chosen_seq_keys]
+                    new_rot = Rotation(name=rot_name, sequences=seq_list, repetitions=rot_reps)
+                    st.session_state["custom_rotations"][rot_name] = new_rot
+                    st.success(f"Rotation '{rot_name}' saved successfully!")
+                else:
+                    st.error("Please provide a rotation name and pick at least one field sequence.")
+
+            st.markdown("---")
+            st.markdown("### Step 3: Assemble & Save Trial")
+            trial_name = st.text_input("Trial Name", placeholder="e.g., My Custom 40s Trial", key="adv_trial_name")
+            trial_desc = st.text_input("Trial Description", placeholder="Custom user rotation test", key="adv_trial_desc")
+
+            # Checkbox for end mode
+            end_at_last_swap = st.checkbox("End at last rotation (auto-terminate at final swap out)", value=False, key="adv_end_swap_toggle")
+            
+            # Unfreeze / freeze float input based on checkbox
+            manual_end_time = st.number_input(
+                "Trial Duration Cap (seconds)", 
+                min_value=1.0, 
+                value=30.0, 
+                step=1.0, 
+                disabled=end_at_last_swap,
+                key="adv_trial_duration"
+            )
+
+            chosen_rot_keys = st.multiselect(
+                "Select Rotations for this Trial (in order)",
+                options=list(st.session_state["custom_rotations"].keys()),
+                key="adv_trial_rot_picker"
+            )
+
+            if st.button("✨ Create & Register Trial", type="primary", key="adv_create_trial_btn"):
+                if trial_name and chosen_rot_keys:
+                    rot_list = [st.session_state["custom_rotations"][k] for k in chosen_rot_keys]
+                    mode = "last_swap" if end_at_last_swap else "time"
+                    
+                    new_trial = Trial(
+                        name=trial_name,
+                        rotations=rot_list,
+                        end_mode=mode,
+                        end_time=manual_end_time,
+                        description=trial_desc
                     )
-                    field_sequence_summary = " → ".join(field_sequence_seq) if field_sequence_seq else "no field sequences"
-                    enemy_summary = f"Lv{enemy.get('enemy_lv','?')} | Cryo {int(enemy.get('cryo_res',0.1)*100)}% | Anemo {int(enemy.get('anemo_res',0.1)*100)}%"
-                    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
 
-                    entry = {
-                        "timestamp": timestamp,
-                        "chars": char_summary,
-                        "field_sequences": field_sequence_summary,
-                        "enemy": enemy_summary,
-                        "timeline_events": timeline.global_events,
-                    }
-
-                    if "history" not in st.session_state:
-                        st.session_state["history"] = []
-                    st.session_state["history"].append(entry)
-                    st.success("Simulation complete! Check the **History & Simulation Results** tab.")
-        else:
-            st.info("No field sequences added yet. Pick a field sequence above and click ➕ Add Field Sequence.")
+                    # Add to active trial pool session state
+                    st.session_state["active_trial_pool"][trial_name] = new_trial
+                    st.success(f"Trial '{trial_name}' successfully created and added to the trial selection dropdown above!")
+                    st.rerun()
+                else:
+                    st.error("Please enter a trial name and select at least one custom rotation.")
 
 
 # =========================================================
