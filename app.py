@@ -772,7 +772,7 @@ with tab1:
                                     numeric_val = numeric_val / 100.0
                                 subs_total[sub_key] = subs_total.get(sub_key, 0.0) + numeric_val
 
-                    initial_stats = build_initial_stats(char_name, weapon, artifact_set, main_stats_total, subs_total)
+                    initial_stats = build_initial_stats(char_name, data["level"], weapon, artifact_set, main_stats_total, subs_total)
                     card_stats = compute_card_stats(initial_stats)
 
                     my_party[char_name] = {

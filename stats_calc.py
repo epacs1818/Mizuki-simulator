@@ -1,5 +1,5 @@
 # stats_calc.py
-from characters import CHARACTER_BASE_STATS
+from characters import CHARACTER_BASE_STATS, get_level_stat
 from weapons import WEAPON_STATS
 from artifacts import ARTIFACTS_BONUSES
 from buffs import (
@@ -53,16 +53,19 @@ def _target_applies(target: str, char_name: str, active_character: str,
 # build_initial_stats
 # ---------------------------------------------------------------------------
 
-def build_initial_stats(char_name, weapon_full_name, artifact_set_name,
+def build_initial_stats(char_name, level, weapon_full_name, artifact_set_name,
                         main_stats_total, subs_total):
     """
     Combines Character Base + Weapon + Artifacts into a clean initial_stats
     dictionary separating base, percentages, and flats for future buff injection.
     """
-    char_base   = CHARACTER_BASE_STATS.get(char_name, {
+    raw_char_base = CHARACTER_BASE_STATS.get(char_name, {
         "base_hp": 10000.0, "base_atk": 250.0, "base_def": 700.0,
         "crit_rate": 0.05, "crit_dmg": 0.50, "er": 1.0
     })
+
+    # Resolve lists/scalars based on user-selected level
+    char_base = {k: get_level_stat(v, level) for k, v in raw_char_base.items()}
 
     weapon_key  = weapon_full_name.split(" (")[0] if weapon_full_name and " (" in weapon_full_name else (weapon_full_name or "Select Weapon")
     weapon_base = WEAPON_STATS.get(weapon_key, WEAPON_STATS.get("Select Weapon", {"base_atk": 510.0}))
