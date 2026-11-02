@@ -49,6 +49,7 @@ def update_ability_talent_level(ability: Ability, level: int):
 # --- Aether ---
 aether_n1 = Ability(
     "N1",
+    "Aether",
     talent_level=10,
     talent_type = "normal_talent",
     hits=[
@@ -64,6 +65,7 @@ aether_n1 = Ability(
 
 aether_n1ca = Ability(
     "Charged Attack",
+    "Aether",
     talent_level=10,
     talent_type="normal_talent",
     hits=[
@@ -93,6 +95,7 @@ aether_n1ca = Ability(
 
 aether_skill = Ability(
     name="Elemental Skill",
+    character="Aether",
     cooldown=15.0,
     talent_level=10,
     talent_type="skill_talent",
@@ -113,6 +116,7 @@ aether_skill = Ability(
 
 aether_burst = Ability(
     name="Elemental Burst",
+    character="Aether",
     cooldown=15.0,
     talent_level=13,
     talent_type="burst_talent",
@@ -141,6 +145,7 @@ aether_cq.add_ability(2.371, aether_burst)
 # --- Odette ---
 odette_cast = Ability(
     name="Skill Cast",
+    character="Odette",
     cooldown=15.0,
     talent_level=10,
     talent_type="skill_talent",
@@ -171,6 +176,7 @@ odette_cast = Ability(
 
 odette_recast = Ability(
     name="Skill Recast",
+    character="Odette",
     cooldown=0.0,
     talent_level=10,
     talent_type="skill_talent",
@@ -189,6 +195,7 @@ odette_ee.add_ability(1.170, odette_recast)
 # --- Faruzan ---
 faruzan_burst = Ability(
     name="Elemental Burst",
+    character="Faruzan",
     cooldown=19.0,
     talent_level=13,
     talent_type="burst_talent",
@@ -199,6 +206,7 @@ faruzan_burst = Ability(
 
 faruzan_collapse_ability = Ability(
     name="Pressurized Collapse",
+    character="Faruzan",
     talent_level=13,
     talent_type="skill_talent",
     hits=[
@@ -222,6 +230,7 @@ faruzan_q.add_ability(1.200, faruzan_burst)
 # --- Mizuki ---
 mizuki_skill = Ability(
     name="Mizuki Skill",
+    character="Mizuki",
     cooldown=15.0,
     talent_level=10,
     talent_type="skill_talent",
@@ -248,6 +257,7 @@ mizuki_burstless_pull_out.add_ability(0.000, mizuki_skill)
 
 mizuki_sacfrag_skill = Ability(
     name="Mizuki Skill (SacFrag)",
+    character="Mizuki",
     cooldown=0.0,
     talent_level=10,
     talent_type="skill_talent",

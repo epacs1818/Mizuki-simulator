@@ -52,6 +52,7 @@ class Hit:
 @dataclass
 class Ability:
     name: str
+    character: str
     hits: List[Hit]
     cooldown: float = 0.0
     talent_level: int = 10  # Track skill level of the attack (1-13)
@@ -79,4 +80,11 @@ class Rotation:
     name: str
     sequences: List[FieldSequence]
     repetitions: int = 1
+    description: Optional[str] = ""
+
+@dataclass
+class Trial:
+    name: str
+    rotations: List[Rotation]
+    end_time: float = 30.0
     description: Optional[str] = ""

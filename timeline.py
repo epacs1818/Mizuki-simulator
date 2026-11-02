@@ -1,6 +1,6 @@
 from typing import Dict, List, Optional, Tuple
 
-from models import ActionCategory, FieldSequence, AttackType, StatRef
+from models import ActionCategory, FieldSequence, AttackType, StatRef, Rotation, Trial
 from aura import CryoAuraTracker
 from mechanics import StellarVortex, stellar_swirl_hit
 from abilities import (
@@ -126,6 +126,18 @@ class RotationTimeline:
                 # Reuse your existing field sequence addition logic
                 current_time = self.add_field_sequence(field_sequence, swap_in_time=current_time)
         return current_time
+
+    def add_trial(self, trial: Trial) -> float:
+        current_time = 0.0
+        for rotation in trial.rotations:
+            current_time = self.add_rotation(rotation, start_time=current_time)
+        
+        # Enforce Trial End cutoff: remove any events past trial.end_time
+        self.global_events = [
+            ev for ev in self.global_events
+            if ev["global_time"] <= trial.end_time
+        ]
+        return trial.end_time
 
     def _cancel_pending_ability_hits(self, character: str, ability_name: str, current_time: float):
         """Internal helper method to scrub overlapping future hits."""
