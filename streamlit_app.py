@@ -213,10 +213,10 @@ CHARACTER_CONSTELLATIONS = {
     "Select Character": ["C0"],
     "Faruzan": ["C6"],  # Only C6 available
     "Diona": ["C6"],    # Only C6 available
-    "Mizuki": [f"C{j}" for j in range(7)],
-    "Aether": [f"C{j}" for j in range(7)],
-    "Odette": [f"C{j}" for j in range(7)],
-    "Sucrose": [f"C{j}" for j in range(7)],
+    "Mizuki": ["C0", "C1", "C2", "C3", "C4", "C5", "C6"],
+    "Aether": ["C4", "C5", "C6"],
+    "Odette": ["C0", "C1", "C2", "C3"],
+    "Sucrose": ["C0", "C1", "C2", "C3", "C4", "C5", "C6"],
 }
 
 CHARACTER_ARTIFACT_SETS = {
@@ -950,7 +950,7 @@ with tab3:
         
         from presets import STANDARD_TRIALS, STANDARD_FIELD_SEQUENCES
         from models import FieldSequence, TimedAbilityCall, Rotation, Trial
-        from abilities import aether_skill, aether_n1, aether_n1ca, aether_burst, odette_cast, odette_recast, faruzan_burst, mizuki_skill
+        from abilities import aether_skill, aether_n1, aether_n1ca, aether_burst_enhanced, odette_cast, odette_recast, faruzan_burst, mizuki_skill
         import copy
 
         # Initialize session state pools for custom advanced building if missing
@@ -1131,7 +1131,7 @@ with tab3:
 
             with seq_col_right:
                 char_ability_map = {
-                    "Aether": {"N1": aether_n1, "Charged Attack": aether_n1ca, "Elemental Skill": aether_skill, "Elemental Burst": aether_burst},
+                    "Aether": {"N1": aether_n1, "Charged Attack": aether_n1ca, "Elemental Skill": aether_skill, "Elemental Burst": aether_burst_enhanced},
                     "Odette": {"Skill Cast": odette_cast, "Skill Recast": odette_recast},
                     "Faruzan": {"Elemental Burst": faruzan_burst},
                     "Mizuki": {"Mizuki Skill (Pull Out)": mizuki_skill}

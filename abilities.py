@@ -114,7 +114,7 @@ aether_skill = Ability(
     ]
 )
 
-aether_burst = Ability(
+aether_burst_enhanced = Ability(
     name="Elemental Burst",
     character="Aether",
     cooldown=15.0,
@@ -129,10 +129,23 @@ aether_burst = Ability(
     ]
 )
 
+aether_burst_standard = Ability(
+    name="Elemental Burst",
+    character="Aether",
+    cooldown=15.0,
+    talent_level=13,
+    talent_type="burst_talent",
+    hits=[
+        Hit("Burst_Tick1", 0.000, element="Cryo", elemental_app="1U", category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Aether", "Burst (Stellar Swirl)", "Ice Javelin Single Strike DMG", 13), attack_type=AttackType.BURST, scaling_key=("Aether", "Burst (Stellar Swirl)", "Ice Javelin Single Strike DMG")),
+        Hit("Burst_Tick2", 0.550, element="Cryo",                     category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Aether", "Burst (Stellar Swirl)", "Ice Javelin Single Strike DMG", 13), attack_type=AttackType.BURST, scaling_key=("Aether", "Burst (Stellar Swirl)", "Ice Javelin Single Strike DMG")),
+        Hit("Burst_Tick3", 0.550, element="Cryo",                     category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Aether", "Burst (Stellar Swirl)", "Ice Javelin Single Strike DMG", 13), attack_type=AttackType.BURST, scaling_key=("Aether", "Burst (Stellar Swirl)", "Ice Javelin Single Strike DMG")),
+    ]
+)
+
 aether_ecq = FieldSequence("AetherECQ", "Aether", swap_out_time=3.631)
 aether_ecq.add_ability(0.601, aether_skill)
 aether_ecq.add_ability(1.2, aether_n1ca)
-aether_ecq.add_ability(3.061, aether_burst)
+aether_ecq.add_ability(3.061, aether_burst_enhanced)
 
 aether_en1 = FieldSequence("AetherEN1", "Aether", swap_out_time=1.23)
 aether_en1.add_ability(0.601, aether_skill)
@@ -140,7 +153,7 @@ aether_en1.add_ability(1.2, aether_n1)
 
 aether_cq = FieldSequence("AetherCQ", "Aether", swap_out_time=2.941)
 aether_cq.add_ability(0.51, aether_n1ca)
-aether_cq.add_ability(2.371, aether_burst)
+aether_cq.add_ability(2.371, aether_burst_enhanced)
 
 # --- Odette ---
 odette_cast = Ability(
@@ -185,6 +198,21 @@ odette_recast = Ability(
         Hit("Skill_Recast2", 0.180, element="Cryo",                     category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Coda at Dawn's Tolling DoT", 10), attack_type=AttackType.SKILL, scaling_key=("Odette", "Skill", "Coda at Dawn's Tolling DoT")),
         Hit("Skill_Recast3", 0.300, element="Cryo",                     category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Coda at Dawn's Tolling DoT", 10), attack_type=AttackType.SKILL, scaling_key=("Odette", "Skill", "Coda at Dawn's Tolling DoT")),
         Hit("Skill_Stellar", 0.871, element="Cryo",                     category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Coda at Dawn's Tolling Stellar Swirl DMG", 10), scaling_key=("Odette", "Skill", "Coda at Dawn's Tolling Stellar Swirl DMG")),
+    ]
+)
+
+odette_recast_c1 = Ability(
+    name="Skill Recast",
+    character="Odette",
+    cooldown=0.0,
+    talent_level=10,
+    talent_type="skill_talent",
+    hits=[
+        Hit("Skill_Recast1", 0.000, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Coda at Dawn's Tolling DoT", 10), attack_type=AttackType.SKILL, scaling_key=("Odette", "Skill", "Coda at Dawn's Tolling DoT")),
+        Hit("Skill_Recast2", 0.180, element="Cryo",                     category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Coda at Dawn's Tolling DoT", 10), attack_type=AttackType.SKILL, scaling_key=("Odette", "Skill", "Coda at Dawn's Tolling DoT")),
+        Hit("Skill_Recast3", 0.300, element="Cryo",                     category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Coda at Dawn's Tolling DoT", 10), attack_type=AttackType.SKILL, scaling_key=("Odette", "Skill", "Coda at Dawn's Tolling DoT")),
+        Hit("Skill_Stellar", 0.871, element="Cryo",                     category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Coda at Dawn's Tolling Stellar Swirl DMG", 10), scaling_key=("Odette", "Skill", "Coda at Dawn's Tolling Stellar Swirl DMG")),
+        Hit("Skill_Stellar_c1", 0.875, element="Cryo",                     category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.ATK, motion_value=4.500)
     ]
 )
 

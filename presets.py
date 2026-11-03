@@ -1,6 +1,6 @@
 from models import FieldSequence, Rotation, Trial
 from abilities import (
-    aether_skill, aether_n1, aether_n1ca, aether_burst,
+    aether_skill, aether_n1, aether_n1ca, aether_burst_enhanced,
     aether_ecq as aether_ecq_ability_seq, # imported or built natively
     odette_cast, odette_recast,
     faruzan_burst, faruzan_collapse_ability,
@@ -24,12 +24,12 @@ STANDARD_FIELD_SEQUENCES["Aether EN1"].add_ability(1.2, aether_n1)
 
 # Aether CQ sequence population
 STANDARD_FIELD_SEQUENCES["Aether CQ"].add_ability(0.51, aether_n1ca)
-STANDARD_FIELD_SEQUENCES["Aether CQ"].add_ability(2.371, aether_burst)
+STANDARD_FIELD_SEQUENCES["Aether CQ"].add_ability(2.371, aether_burst_enhanced)
 
 # Aether ECQ sequence population (Completing the 12 abilities transition)
 STANDARD_FIELD_SEQUENCES["Aether ECQ"].add_ability(0.601, aether_skill)
 STANDARD_FIELD_SEQUENCES["Aether ECQ"].add_ability(1.2, aether_n1ca)
-STANDARD_FIELD_SEQUENCES["Aether ECQ"].add_ability(3.061, aether_burst)
+STANDARD_FIELD_SEQUENCES["Aether ECQ"].add_ability(3.061, aether_burst_enhanced)
 
 STANDARD_FIELD_SEQUENCES["Odette EE"].add_ability(0.660, odette_cast)
 STANDARD_FIELD_SEQUENCES["Odette EE"].add_ability(1.170, odette_recast)

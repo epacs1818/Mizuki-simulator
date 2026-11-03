@@ -22,7 +22,7 @@ C1			If she's in DDS she applies a debuff with EVERY hit of her skill (including
 
 C2			non_constant buff. When she's in DDS EVERYONE in the party gains 0.04% of Mizuki's EM as phec element bonus (no anemo bonus). When she's in DDS everyone one gains anemo plus PHEC elements shred.
 
-C6 1			constant buff. When she's in DDS, everyone's STELLAR DAMAGE AND STELLAR REACTION DAMAGE gets 10% bonus crit_rate and 20% bonus crit_dmg.
+C6 1			constant buff. When she's in DDS, everyone's STELLAR DAMAGE AND STELLAR REACTION DAMAGE gets 10% bonus crit_rate and 20% bonus crit_dmg. Because of this we're gonna make a new stat/mult for the characters: stellar_crit_rate and stellar_crit_dmg for easier implementation.
 
 C6 2			Non_constant buff. Additionally, EVEN OUTSIDE OF DDS and active all the time (it's not permanent because it's not constant so mizuki's em check are always needed for this buff), Mizuki gains 0.04% and 0.16% bonus crit_rate and crit_dmg respectively for every point of em she has over 500, up to 20% and 80% respectively at 1000 EM.
 
@@ -31,9 +31,9 @@ C6 2			Non_constant buff. Additionally, EVEN OUTSIDE OF DDS and active all the t
 
 
 #Aether
-Skill			Each hit gives one stack of Frostglow (max 8)
+Skill			Each hit gives one stack of Frostglow (max 8).
 
-Burst			Each stack of frostglow increases the damage of the burst procs. At 8 stacks it increases the number of hits.
+Burst			Each stack of frostglow increases the damage of the burst procs. At 8 stacks it increases the number of hits. In the program the increase corresponds to a mv_increase multiplier. It depends on stacks, in the program it's using a multiplier (number of stacks) of 8. The mv_increase has to add one before (so 1 + 8*0.0586 at talent level 10 and 8 frosglow stacks) either in the definition or in its application, keep consistent with other mv_increases.
 
 A4			non_constant buff. he gains 8% of his atk as EM up to 160 EM (2000 atk)
 
@@ -41,4 +41,59 @@ Jubilee Passive		non_constant buff. The whole party's jubilee_mult increases by 
 
 C2			Two buffs. C2 basic is on FOR THE ACTIVE CHARACTER ONLY and only when Aether's skill ticks (not counting the cast) hits the enemy. This one is costant and gives the active character 60 EM. C2 enhanced is on when C2 basic is on and a character deals Stellar Damage or triggers swirl, it is constant and gives the active character another 60 EM. When the character swaps out the buff turns off, and the next character will have to wait for the conditions to trigger again for them to receive one or two of these buffs.
 
-C6			It's on when Aether uses burst while consuming frostglow stacks for 15s. Each stack of frostglow consumed with Burst increases the whole party's stellar_bonus by 5%, up to 40% at 8 stacks. Constant Buff.
+C6			It's on when Aether uses burst while consuming frostglow stacks for 15s. Each stack of frostglow consumed with Burst increases the whole party's stellar_bonus by 5%, up to 40% at 8 stacks. Constant stack Buff.
+
+So we have the frostglow state tracker column (0 to 8), the jubilee_bonus is always on so no column needed,
+A4 is always on so no column needed. We're gonna need C2_basic and C2_enhanced columns (on and off), remember this is only on for the target of the buff: the active character.
+We'll implement a system where he deploys two different types of Burst abilities when it's called inside a FIELD SEQUENCE: the enhanced burst and the standard burst. The enhanced one is called when frostglow = 8 stacks, the normal one is called otherwise. I renamed and separated both of them in abilities.py.
+Both burst casts gets their motion value increased by the number of stacks.
+
+
+#Odette
+Skill       Has two presses: cast and recast. Cast is the normal call for the periodic attacks, the recast calls a series of quick damage burst. We'll leave the cast recast rules for the good faith of the user so for now let's just put a 15s cooldown for each and treat as separate abilities.
+
+Burst       Deals damage and casts a buff for HERSELF ONLY. The buff lasts 6s and increases her stellar_bonus by the amount referred to the in skill_scalings.py since it depends on the talent level.
+
+A1 (Marvelous Stacks)   She gains 4 stacks of Marvelous Stacks on skill cast or burst cast (not skill recast). The moment she leaves the field her stacks start decreasing at a specific rate: 1 stack/s at C0. As she decreases her stacks, OTHERS in the party get the same amount of stacks with the duration left of Odette's. The Buff duration is 20s starting when it's cast and refreshes on subsequent casts.
+Hit Events with these stacks have their stellar_bonus increased by 15% per stack (the buff owner gets the buff).
+
+A4          Tricky one! Permanent non_constant buff to herself. this is a mv_increase multiplier to all of her stellar attack motion values (Skill_stellar, plume_stelar, wing_stellar). the increase is equal to 1 + (0.00015 of her atk PAST 1000), max at 1.30 mv_increase (3000 atk). We also gotta standardize these mv_increases to be able to be easy to understand, to code, and be compatible with aether's mv_increase and possible future characters.
+
+Jubilee Passive    Similar to Aether's jubilee Passive but twice as strong. It's a non_constant permanent buff of 0.00007 of her atk as jubilee_bonus, max at 0.14 jubilee_bonus (at 2000 atk)
+
+C1 (1)         Different RECAST SKILL when she has this activated. motion_value = 450% of her atk, already added in abilities.py.
+C1 (2)          Marvelous stacks max stacs increased to 6. Transfer rate increased to 2 stacks every second.
+
+C2              Marvelous stacks now also increase the character's atk by 7% per stack. She also gains a new buff cast alongside the 6 stacks of Marvelous Stack (at skill or burst cast) that gives everyone 20% cryo and anemo shred, lasts for 20s just like the marvelous stacks and can be refreshed.
+
+C4 and C6 (We'll work on them later, I removed them from the user's choice for now)
+
+We'll only need columns for her marvelous stacks on and off for the event damage calculation. And a column for her burst_buff (on for some of her attacks).
+
+
+#Faruzan
+Only c6 allowed to the user, so no gatekeeping constellations for now.
+
+She has a buff and a debuff. The buff is casted upon burst cast hit for 22s. The debuff is cast upon burst cast for 22s or on pressurized collapse for 4s, with the bigger number being the priority.
+Her buff gives the wholee party a scaling constant anemo_bonus (already present in skill_scalings.py) and if the event/hit element is anemo then it will get a constant bonus of 40% crit_dmg
+Her buff also makes every character's hits (including non anemo) to be able to proc pressurized collapse (0.72s after the hit), her burst cast being always the first one to trigger it. This can trigger once every 3s.
+Her buff also applies quills equal to 32% of Faruzan's BASE_ATK (important! her atk_percent and atk_flat gets ignored for these) to any ANEMO element and STANDARD type of hit (from a character with the buff of course).
+Her "debuff" (which is also a buff) gives all characters affected by the debuff (aka the whole party) a costant 30% anemo_shred
+
+
+
+
+#sucrose
+
+A1              Constant buff, whenever Sucrose triggers swirl, everyone in the party with elements different than anemo (usually excluding herself and mizuki) gains 50 EM for 8s.
+A4              When her skill or any hit from her burst (not implemented yet in abilities) hits it triggers the buffs, giving OTHERS a non_constant 20% of her EM as EM. Mizuki's VBTD share doesn't consider this buff for her own VBTD share and neither does Sucrose. Only flat buffs gets included in this share, same as Mizuki's.
+C6 (not implemented and not available to the user yet)
+
+
+#Diona
+
+C6 locked.
+
+skill           When she casts skill, she activates her Choice Treasures passive: every time a stellar swirl is triggered, she fires the skill_paws_swirls ability (not implemented yet). this effect has a 3.5s cd.
+
+C6              Her only buff, active on C6 cast, lasts for 12s. Everyone in the party gains a constant 200 EM and 40% stellar_bonus
