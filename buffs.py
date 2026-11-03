@@ -41,10 +41,10 @@ CONDITIONAL_CONSTANT_BUFFS = {
         "electro_shred":0.20,
         "anemo_shred": 0.20,
     },
-    "Mizuki C6 Stellar Crit": {
-        "crit_rate" : 0.100,
-        "crit_dmg" : 0.200,
-    },
+    #"Mizuki C6 Stellar Crit": {
+    #    "crit_rate" : 0.100,
+    #    "crit_dmg" : 0.200,
+    #},
 
     #Aether
     "Aether C2 Buff Initial":{
@@ -157,11 +157,17 @@ CONDITIONAL_CONSTANT_BUFFS = {
 
 CONDITIONAL_NON_CONSTANT_BUFFS = {
     ## Mizuki
-    # Mizuki Skill: e.g., 4.5% of her total EM as stellar bonus
+    # Mizuki Skill Swirl Bonus: dynamic talent scaling off of Mizuki's EM
     "Mizuki Skill": {
         "caster": "Mizuki",
         "target_stat": "stellar_bonus",
-        "compute": lambda stats, ref=1: stats.get("em", 0.0) * 0.045,
+        "compute": lambda stats, ref=1, factor=0.045: stats.get("em", 0.0) * factor,
+    },
+    # VBTD 2: 10% of Mizuki's EM shared to the party during DDS
+    "Mizuki VBTD EM Share": {
+        "caster": "Mizuki",
+        "target_stat": "em",
+        "compute": lambda stats, ref=1: stats.get("em", 0.0) * 0.10,
     },
     "Mizuki C2 Pyro": {
         "caster": "Mizuki",
@@ -236,11 +242,6 @@ TEAM_SHARE_BUFFS = {
         "target_stat": "em",
         "compute": lambda caster_stats: 0.20 * caster_stats.get("em", 0.0)
     },
-    "Mizuki Vast Share": {
-        "caster": "Mizuki",
-        "target_stat": "em",
-        "compute": lambda caster_stats: 0.10 * caster_stats.get("em", 0.0)
-    }
 }
 
 PERMANENT_BUFFS = {

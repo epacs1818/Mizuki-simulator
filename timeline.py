@@ -206,11 +206,12 @@ class RotationTimeline:
         mizuki_c6_unlocked = mizuki_constellation >= 6
 
         mizuki_dreamdrifter_active = False
-        mizuki_a4_triggered = False
+        mizuki_a4_expiration: float = -1.0
         mizuki_nuke_armed = False
         mizuki_nuke_prep_cd_expires: float = -1.0
         mizuki_c1_debuff_expiration: float = -1.0
         mizuki_c1_app_cooldown_expires: float = -1.0
+        mizuki_nuke_armed_time: float = -1.0
        
 
         # Faruzan State Trackers
@@ -273,6 +274,57 @@ class RotationTimeline:
                 active_character = "None"
             else:
                 event["active_character"] = active_character
+
+            fire_vbtd_nuke = False
+            if "Mizuki" in self.party:
+                mizuki_data = self.party.get("Mizuki", {})
+                mizuki_constellation = mizuki_data.get("constellation", 0)
+                mizuki_c1_unlocked = mizuki_constellation >= 1
+                is_mizuki_skill = "Skill" in ability_name or "Mizuki" in ability_name or char == "Mizuki"
+
+                if char == "Mizuki":
+                    # DDS Enters immediately at skill cast
+                    if e_type == "HIT" and is_mizuki_skill and hit_name == "Cast":
+                        mizuki_dreamdrifter_active = True
+
+                    # DDS Exits on Swap Out or last tick (Tick13)
+                    if e_type == "SWAP_OUT" or hit_name == "Tick13":
+                        mizuki_dreamdrifter_active = False
+                        mizuki_a4_expiration = -1.0
+
+                    # C1 Debuff Application on every skill hit during DDS
+                    if mizuki_c1_unlocked and e_type == "HIT" and is_mizuki_skill and mizuki_dreamdrifter_active:
+                        if t >= mizuki_c1_app_cooldown_expires:
+                            mizuki_c1_debuff_expiration = t + 3.0
+                            mizuki_c1_app_cooldown_expires = t + 3.5
+
+                # A4 Refresh Logic: Triggers on Cryo elemental hit during DDS (no gauge check required)
+                if mizuki_dreamdrifter_active and element == "Cryo" and e_type == "HIT":
+                    mizuki_a4_expiration = t + 4.0
+
+                mizuki_a4_active = mizuki_dreamdrifter_active and (t <= mizuki_a4_expiration)
+                c1_debuff_active = mizuki_c1_unlocked and (t <= mizuki_c1_debuff_expiration)
+
+                # VBTD Quill Assignment & Nuke Firing on Subsequent Skill Ticks
+                vbtd_quill_active = False
+                if char == "Mizuki" and is_mizuki_skill and hit_name.startswith("Tick"):
+                    if mizuki_dreamdrifter_active and mizuki_nuke_armed and t > mizuki_nuke_armed_time:
+                        vbtd_quill_active = True
+                        fire_vbtd_nuke = True
+                        mizuki_em = self.char_initial_stats_map.get("Mizuki", {}).get("em", 0.0)
+                        event["quill_damage"] = mizuki_em * 10.0
+                        mizuki_nuke_armed = False
+
+                # Inject Auditable States into Event Dict for UI / Console Table
+                event["dreamdrifter_state"] = "ON" if mizuki_dreamdrifter_active else "OFF"
+                event["mizuki_a4_state"] = "ON" if mizuki_a4_active else "OFF"
+                event["vbtd_state"] = "ON" if vbtd_quill_active else "OFF"
+                event["c1_debuff_state"] = "ON" if c1_debuff_active else "OFF"
+            else:
+                event["dreamdrifter_state"] = "OFF"
+                event["mizuki_a4_state"] = "OFF"
+                event["vbtd_state"] = "OFF"
+                event["c1_debuff_state"] = "OFF"
 
             # 3. Faruzan Buff & Debuff Logic
             if "Faruzan" in self.party:
@@ -347,8 +399,8 @@ class RotationTimeline:
 
                 # Stellar Vortex & Stellar Swirl mechanics
                 if is_stellar_swirl and swirl_meta:
-                    c1_debuff_active = mizuki_c1_unlocked and (t <= mizuki_c1_debuff_expiration)
-                    if c1_debuff_active:
+                    current_c1_active = (event.get("c1_debuff_state") == "ON")
+                    if current_c1_active:
                         mizuki_c1_debuff_expiration = -1.0
 
                     swirl_hit_event = {
@@ -367,17 +419,23 @@ class RotationTimeline:
                         "attack_type": stellar_swirl_hit.attack_type,
                         "reaction": "Stellar Swirl",
                         "swirl_metadata": swirl_meta,
-                        "c1_empowered": c1_debuff_active,
+                        "c1_empowered": current_c1_active,
+                        "dreamdrifter_state": event.get("dreamdrifter_state", "OFF"),
+                        "mizuki_a4_state": event.get("mizuki_a4_state", "OFF"),
+                        "vbtd_state": event.get("vbtd_state", "OFF"),
+                        "c1_debuff_state": event.get("c1_debuff_state", "OFF"),
                         "fanz_buff_state": event.get("fanz_buff_state", "OFF"),
                         "fanz_debuff_state": event.get("fanz_debuff_state", "OFF"),
                         "aether_c2_state": event.get("aether_c2_state", "OFF"),
                         "marvelous_stacks": event.get("marvelous_stacks", 0),
-                        "hotf_state": event.get("hotf_state", "OFF"),
-                        "dreamdrifter_state": event.get("dreamdrifter_state", "OFF")
+                        "hotf_state": event.get("hotf_state", "OFF"),                        
                     }
                     self.global_events.insert(i + 1, swirl_hit_event)
 
-                    if c1_debuff_active:
+                    if current_c1_active:
+                        mizuki_em = self.char_initial_stats_map.get("Mizuki", {}).get("em", 0.0)
+                        swirl_hit_event["quill_damage"] = mizuki_em * 5.5
+
                         mini_nuke_event = {
                             "global_time": t + mizuki_c1_mini_nuke_hit.relative_delay,
                             "active_character": active_character,
@@ -393,12 +451,15 @@ class RotationTimeline:
                             "multiplier": mizuki_c1_mini_nuke_hit.multiplier,
                             "attack_type": mizuki_c1_mini_nuke_hit.attack_type,
                             "reaction": "-",
+                            "dreamdrifter_state": event.get("dreamdrifter_state", "OFF"),
+                            "mizuki_a4_state": event.get("mizuki_a4_state", "OFF"),
+                            "vbtd_state": event.get("vbtd_state", "OFF"),
+                            "c1_debuff_state": event.get("c1_debuff_state", "OFF"),
                             "fanz_buff_state": event.get("fanz_buff_state", "OFF"),
                             "fanz_debuff_state": event.get("fanz_debuff_state", "OFF"),
                             "aether_c2_state": event.get("aether_c2_state", "OFF"),
                             "marvelous_stacks": event.get("marvelous_stacks", 0),
-                            "hotf_state": event.get("hotf_state", "OFF"),
-                            "dreamdrifter_state": event.get("dreamdrifter_state", "OFF")
+                            "hotf_state": event.get("hotf_state", "OFF")
                         }
                         self.global_events.insert(i + 2, mini_nuke_event)
 
@@ -444,6 +505,41 @@ class RotationTimeline:
                     mizuki_nuke_armed = True
                     mizuki_nuke_armed_time = t
                     mizuki_nuke_prep_cd_expires = t + 2.5
+
+            # VBTD Nuke Hit Insertion (fired on subsequent skill tick)
+            if fire_vbtd_nuke:
+                nuke_hit_time = t + mizuki_nuke_hit.relative_delay
+                nuke_event = {
+                    "global_time": nuke_hit_time,
+                    "active_character": active_character,
+                    "character": "Mizuki",
+                    "action": mizuki_nuke_hit.name,
+                    "category": mizuki_nuke_hit.category,
+                    "elem_app": mizuki_nuke_hit.elemental_app if mizuki_nuke_hit.elemental_app else "-",
+                    "element": mizuki_nuke_hit.element,
+                    "event_type": "HIT",
+                    "hit_name": mizuki_nuke_hit.name,
+                    "ability_name": "Mizuki Nuke",
+                    "stat_ref": mizuki_nuke_hit.stat_ref,
+                    "multiplier": mizuki_nuke_hit.multiplier,
+                    "attack_type": mizuki_nuke_hit.attack_type,
+                    "reaction": "-",
+                    "dreamdrifter_state": event.get("dreamdrifter_state", "OFF"),
+                    "mizuki_a4_state": event.get("mizuki_a4_state", "OFF"),
+                    "vbtd_state": "OFF",
+                    "c1_debuff_state": event.get("c1_debuff_state", "OFF"),
+                    "fanz_buff_state": event.get("fanz_buff_state", "OFF"),
+                    "fanz_debuff_state": event.get("fanz_debuff_state", "OFF"),
+                    "aether_c2_state": event.get("aether_c2_state", "OFF"),
+                    "marvelous_stacks": event.get("marvelous_stacks", 0),
+                    "hotf_state": event.get("hotf_state", "OFF"),
+                }
+                nuke_offset = 1
+                if is_stellar_swirl and swirl_meta:
+                    nuke_offset += 1
+                    if current_c1_active:
+                        nuke_offset += 1
+                self.global_events.insert(i + nuke_offset, nuke_event)
 
             event["cryo_aura"] = f"{aura_tracker.current_gauge:.2f}U"
             event["reaction"] = reaction if reaction else "-"
@@ -510,87 +606,6 @@ class RotationTimeline:
             hotf_active = (hotf_expiration_time is not None) and (t <= hotf_expiration_time)
             event["hotf_state"] = "ON" if hotf_active else "OFF"
 
-            # 9. Mizuki Dreamdrifter & Nuke Firing Logic
-            mizuki_data = self.party.get("Mizuki", {})
-            mizuki_c1_unlocked = mizuki_data.get("constellation", 0) >= 1
-
-            if "Mizuki" in self.party:
-                if char == "Mizuki" and e_type == "HIT" and "Mizuki Skill" in ability_name and hit_name == "Cast":
-                            mizuki_dreamdrifter_active = True
-                            mizuki_a4_triggered = False
-                            if t >= mizuki_nuke_prep_cd_expires:
-                                mizuki_nuke_armed = True
-                                mizuki_nuke_prep_cd_expires = t + 2.5
-
-                        if e_type == "SWAP_OUT" and char == "Mizuki":
-                            mizuki_dreamdrifter_active = False
-                        if char == "Mizuki" and e_type == "HIT" and (hit_name == "Tick13" or hit_name == "Tick2"):
-                            mizuki_dreamdrifter_active = False
-
-                        # 2. A4 State Tracking (Requires DDS active + Party Cryo hit)
-                        if mizuki_dreamdrifter_active and element == "Cryo" and gauge_u > 0.0:
-                            mizuki_a4_triggered = True
-
-                        # 3. VBTD & Quill Assignment
-                        vbtd_quill_active = False
-                        if char == "Mizuki" and "Mizuki Skill" in ability_name and hit_name.startswith("Tick"):
-                            if mizuki_dreamdrifter_active and mizuki_nuke_armed:
-                                vbtd_quill_active = True
-                                mizuki_em = self.char_initial_stats_map.get("Mizuki", {}).get("em", 0.0)
-                                event["quill_damage"] = mizuki_em * 10.0
-                                mizuki_nuke_armed = False
-
-                        # 4. C1 Debuff State Management
-                        if mizuki_c1_unlocked and char == "Mizuki" and e_type == "HIT" and "Mizuki Skill" in ability_name and mizuki_dreamdrifter_active:
-                            if t >= mizuki_c1_app_cooldown_expires:
-                                mizuki_c1_debuff_expiration = t + 3.0
-                                mizuki_c1_app_cooldown_expires = t + 3.5
-
-                        c1_debuff_active = mizuki_c1_unlocked and (t <= mizuki_c1_debuff_expiration)
-                        if is_stellar_swirl and c1_debuff_active:
-                            mizuki_em = self.char_initial_stats_map.get("Mizuki", {}).get("em", 0.0)
-                            swirl_hit_event["quill_damage"] = mizuki_em * 5.5
-                            mizuki_c1_debuff_expiration = -1.0
-
-                        # Inject Auditable States into Event Dicts for UI / Console Table
-                        event["dreamdrifter_state"] = "ON" if mizuki_dreamdrifter_active else "OFF"
-                        event["mizuki_a4_state"] = "ON" if (mizuki_dreamdrifter_active and mizuki_a4_triggered) else "OFF"
-                        event["vbtd_state"] = "ON" if vbtd_quill_active else "OFF"
-                        event["c1_debuff_state"] = "ON" if c1_debuff_active else "OFF"
-
-                event["nuke_fired"] = False
-                if char == "Mizuki" and "Mizuki Skill" in ability_name and hit_name.startswith("Tick"):
-                    if mizuki_dreamdrifter_active and mizuki_nuke_armed and t > mizuki_nuke_armed_time:
-                        event["nuke_fired"] = True
-                        mizuki_nuke_armed = False
-
-                        nuke_hit_time = t + mizuki_nuke_hit.relative_delay
-                        self.global_events.insert(i + 1, {
-                            "global_time": nuke_hit_time,
-                            "active_character": active_character,
-                            "character": "Mizuki",
-                            "action": mizuki_nuke_hit.name,
-                            "category": mizuki_nuke_hit.category,
-                            "elem_app": mizuki_nuke_hit.elemental_app if mizuki_nuke_hit.elemental_app else "-",
-                            "element": mizuki_nuke_hit.element,
-                            "event_type": "HIT",
-                            "hit_name": mizuki_nuke_hit.name,
-                            "ability_name": "Mizuki Nuke",
-                            "stat_ref": mizuki_nuke_hit.stat_ref,
-                            "multiplier": mizuki_nuke_hit.multiplier,
-                            "attack_type": mizuki_nuke_hit.attack_type,
-                            "reaction": "-",
-                            "fanz_buff_state": event.get("fanz_buff_state", "OFF"),
-                            "fanz_debuff_state": event.get("fanz_debuff_state", "OFF"),
-                            "aether_c2_state": event.get("aether_c2_state", "OFF"),
-                            "marvelous_stacks": event.get("marvelous_stacks", 0),
-                            "hotf_state": event.get("hotf_state", "OFF"),
-                            "dreamdrifter_state": event.get("dreamdrifter_state", "OFF")
-                        })
-            else:
-                event["dreamdrifter_state"] = "OFF"
-                event["nuke_fired"] = False
-
             i += 1
 
         self._calculate_all_hits_damage()
@@ -644,6 +659,7 @@ class RotationTimeline:
                     hit=event,
                     final_stats=final_stats,
                     enemy_stats=self.enemy_stats,
+                    quill_damage=event.get("quill_damage", 0.0),
                     char_level=char_level,
                     party_dict=party_stats_dict,
                 )
@@ -739,6 +755,13 @@ class RotationTimeline:
         has_c2 = any(ev.get("aether_c2_state") == "ON" for ev in self.global_events)
         has_dream = any(ev.get("dreamdrifter_state") == "ON" for ev in self.global_events)
         has_cryo_resonance = any(ev.get("cryo_resonance_state") == "ON" for ev in self.global_events)
+        has_mizuki = "Mizuki" in self.party or any(
+            ev.get("dreamdrifter_state") == "ON" or
+            ev.get("mizuki_a4_state") == "ON" or
+            ev.get("vbtd_state") == "ON" or
+            ev.get("c1_debuff_state") == "ON"
+            for ev in self.global_events
+        )
 
         # 1. Main category columns
         main_headers = ["Time (s)", "Active", "Owner", "Action", "Aura (Cryo)", "Reaction"]
@@ -751,6 +774,9 @@ class RotationTimeline:
         # 3. Buffs category columns
         buff_headers = []
         buff_widths = []
+        if has_mizuki:
+            buff_headers.extend(["DDS", "A4", "VBTD", "C1 Debuff"])
+            buff_widths.extend([5, 5, 6, 11])
         if has_fanz:
             buff_headers.extend(["FanzBuff", "FanzDebuff"])
             buff_widths.extend([9, 12])
@@ -818,6 +844,13 @@ class RotationTimeline:
                 avg_str,
                 eff_str,
             ]
+            if has_mizuki:
+                row_data.extend([
+                    event.get("dreamdrifter_state", "OFF"),
+                    event.get("mizuki_a4_state", "OFF"),
+                    event.get("vbtd_state", "OFF"),
+                    event.get("c1_debuff_state", "OFF"),
+                ])
             if has_fanz:
                 row_data.extend([event.get("faruzan_buff_state", "OFF"), event.get("faruzan_debuff_state", "OFF")])
             if has_c2:

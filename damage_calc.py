@@ -57,7 +57,7 @@ def calculate_damage(hit, final_stats, enemy_stats=None, quill_damage=0.0, char_
     if "STANDARD" in cat_str_upper:
         return calculate_standard_damage(ctx, final_stats, enemy_stats, quill_damage=quill_damage, char_level=char_level)
     elif "STELLAR_REACTION" in cat_str_upper or "REACTION" in cat_str_upper:
-        return calculate_stellar_reaction_damage(ctx, final_stats, enemy_stats, party_dict=party_dict)
+        return calculate_stellar_reaction_damage(ctx, final_stats, enemy_stats, party_dict=party_dict, quill_damage=quill_damage)
     elif "STELLAR" in cat_str_upper:
         return calculate_stellar_damage(ctx, final_stats, enemy_stats, quill_damage=quill_damage)
     else:
@@ -103,7 +103,7 @@ def calculate_standard_damage(hit, final_stats, enemy_stats, quill_damage=0.0, c
     # 4. DEF Multiplier
     enemy_lv = enemy_stats.get("enemy_lv", 100)
     enemy_def = 500 + enemy_lv * 5
-    def_dmg_mitigation = enemy_def / (enemy_def + 500 + char_level * 500)
+    def_dmg_mitigation = enemy_def / (enemy_def + 500 + char_level * 5)
     def_mult = 1.0 - def_dmg_mitigation
 
     # 5. RES Multiplier
@@ -172,7 +172,7 @@ def calculate_stellar_damage(hit, final_stats, enemy_stats, quill_damage=0.0):
     crit_dmg = final_stats.get("CD", final_stats.get("crit_dmg", 0.50))
 
     # Systematic C6 Part 1 Stellar Crit Override[cite: 1, 3]
-    if final_stats.get("dreamdrifter_state") == "ON":
+    if final_stats.get("mizuki_c6_stellar_crit_active", 0.0) > 0.0:
         crit_rate += 0.10
         crit_dmg += 0.20
 
@@ -233,7 +233,7 @@ def get_base_damage_for_level(level: int) -> float:
     closest_level = min(available_levels, key=lambda x: abs(x - level))
     return level_table[closest_level]
 
-def calculate_stellar_reaction_damage(hit, final_stats, enemy_stats, party_dict=None):
+def calculate_stellar_reaction_damage(hit, final_stats, enemy_stats, party_dict=None, quill_damage=0.0):
     """
     Calculates Stellar Reaction Damage by computing individual contributor stats,
     evaluating all 2^n crit scenarios using pre-sort damages, applying shares, 
@@ -273,7 +273,7 @@ def calculate_stellar_reaction_damage(hit, final_stats, enemy_stats, party_dict=
     em_bonus = (6.0 * em) / (2000.0 + em)
     stellar_bonus = final_stats.get("stellar_bonus", final_stats.get("Stellar Bonus", 0.0))
     bonus_mult = 1.0 + em_bonus + stellar_bonus
-    quill_damage = final_stats.get("quill_damage", 0.0)
+    quill_damage = quill_damage or final_stats.get("quill_damage", 0.0) or (hit.get("quill_damage", 0.0) if isinstance(hit, dict) else getattr(hit, "quill_damage", 0.0))
 
     elevation_val = final_stats.get("elevation_mult", final_stats.get("Elevation Mult", 0.0))
     elevation_mult = elevation_val if elevation_val >= 1.0 else (1.0 + elevation_val)
@@ -322,6 +322,11 @@ def calculate_stellar_reaction_damage(hit, final_stats, enemy_stats, party_dict=
         c_rate = char_info.get("CR", char_info.get("crit_rate", final_stats.get("CR", final_stats.get("crit_rate", 0.05))))
         c_dmg = char_info.get("CD", char_info.get("crit_dmg", final_stats.get("CD", final_stats.get("crit_dmg", 0.50))))
         
+        # Systematic C6 Part 1 Stellar Crit Override for Reactions
+        if final_stats.get("mizuki_c6_stellar_crit_active", 0.0) > 0.0: 
+            c_rate += 0.10
+            c_dmg += 0.20
+
         c_rate = min(max(float(c_rate), 0.0), 1.0)
         c_dmg = float(c_dmg)
         crit_rates_list.append(c_rate)

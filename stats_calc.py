@@ -220,13 +220,15 @@ FLAG_TO_BUFFS = {
     # ---- Mizuki Dreamdrifter active (skill on-field) -----------------------
     "dreamdrifter_state": [
         {"type": "non_constant", "key": "Mizuki Skill",                  "target": "Party",  "caster": "Mizuki"},
-        {"type": "constant",     "key": "Mizuki A4",                     "target": "Mizuki", "caster": "Mizuki"},
+        {"type": "non_constant", "key": "Mizuki VBTD EM Share",          "target": "Party",  "caster": "Mizuki"},
         {"type": "constant",     "key": "Mizuki C2",                     "target": "Party",  "caster": "Mizuki"},
         {"type": "non_constant", "key": "Mizuki C2 Pyro",                "target": "Party",  "caster": "Mizuki"},
         {"type": "non_constant", "key": "Mizuki C2 Hydro",               "target": "Party",  "caster": "Mizuki"},
         {"type": "non_constant", "key": "Mizuki C2 Cryo",                "target": "Party",  "caster": "Mizuki"},
         {"type": "non_constant", "key": "Mizuki C2 Electro",             "target": "Party",  "caster": "Mizuki"},
-        {"type": "constant",     "key": "Mizuki C6 Stellar Crit",        "target": "Party",  "caster": "Mizuki"},
+    ],
+    "mizuki_a4_state": [
+        {"type": "constant",     "key": "Mizuki A4",                     "target": "Mizuki", "caster": "Mizuki"},
     ],
 
     # ---- Weapon passive state flags ----------------------------------------
@@ -345,14 +347,17 @@ def resolve_active_buffs(
     # Retrieve Mizuki party info for constellation & talent checks
     mizuki_data = party.get("Mizuki", {})
     mizuki_constellation = mizuki_data.get("constellation", 0)
-    mizuki_talents = mizuki_data.get("talent_levels", [1, 10, 1])
-    mizuki_skill_lvl = mizuki_talents[1] if len(mizuki_talents) > 1 else 10
 
-    # Systematic C6 Part 2 application for Mizuki
-    if char_name == "Mizuki" and mizuki_constellation >= 6:
-        em_val = initial_stats.get("em", 0.0)
-        add("crit_rate", min(max((em_val - 500.0), 0.0) * 0.0004, 0.20))
-        add("crit_dmg", min(max((em_val - 500.0), 0.0) * 0.0016, 0.80))
+    if event_flags.get("dreamdrifter_state") == "ON" and mizuki_constellation >= 6:
+        add("mizuki_c6_stellar_crit_active", 1.0)
+
+    mizuki_talents = mizuki_data.get("talents") or mizuki_data.get("talent_levels", [1, 10, 1])
+    if isinstance(mizuki_talents, str):
+        mizuki_skill_lvl = int(mizuki_talents.split("/")[1])
+    elif isinstance(mizuki_talents, (list, tuple)) and len(mizuki_talents) > 1:
+        mizuki_skill_lvl = mizuki_talents[1]
+    else:
+        mizuki_skill_lvl = 10
 
     # ------------------------------------------------------------------
     # 1–3. Iterate over FLAG_TO_BUFFS dispatch table
@@ -384,19 +389,13 @@ def resolve_active_buffs(
 
             # ---- 1. CONDITIONAL CONSTANT buffs ---------------------------
             if btype == "constant":
-                if bkey == "Mizuki Skill":
-                    # Dynamic talent-based scaling lookup from skill_scalings.py
-                    skill_scalings_list = [0.18, 0.21, 0.24, 0.27, 0.3, 0.33, 0.36, 0.39, 0.42, 0.45, 0.48, 0.51, 0.54]
-                    stellar_bonus_val = skill_scalings_list[max(0, min(mizuki_skill_lvl - 1, len(skill_scalings_list) - 1))]
-                    add("stellar_bonus", stellar_bonus_val)
-                else:
-                    buff_def = CONDITIONAL_CONSTANT_BUFFS.get(bkey)
-                    if buff_def is None:
+                buff_def = CONDITIONAL_CONSTANT_BUFFS.get(bkey)
+                if buff_def is None:
+                    continue
+                for stat, raw_val in buff_def.items():
+                    if stat in ("target", "caster"):
                         continue
-                    for stat, raw_val in buff_def.items():
-                        if stat in ("target", "caster"):
-                            continue
-                        add(stat, _get_refinement_val(raw_val, refinement))
+                    add(stat, _get_refinement_val(raw_val, refinement))
 
             # ---- 2. CONDITIONAL NON-CONSTANT buffs (lambdas) -------------
             elif btype == "non_constant":
@@ -417,7 +416,13 @@ def resolve_active_buffs(
                 else:
                     source_stats = initial_stats
 
-                computed = buff_def["compute"](source_stats, refinement)
+                if bkey == "Mizuki Skill":
+                    skill_scalings_list = [0.18, 0.21, 0.24, 0.27, 0.3, 0.33, 0.36, 0.39, 0.42, 0.45, 0.48, 0.51, 0.54]
+                    scaling_val = skill_scalings_list[max(0, min(mizuki_skill_lvl - 1, len(skill_scalings_list) - 1))]
+                    factor = scaling_val / 10.0
+                    computed = buff_def["compute"](source_stats, refinement, factor)
+                else:
+                    computed = buff_def["compute"](source_stats, refinement)
                 add(target_stat, computed)
 
             # ---- 3. STACK buffs ------------------------------------------
@@ -465,6 +470,12 @@ def resolve_active_buffs(
 
         shared_val = share_def["compute"](caster_stats)
         add(target_stat, shared_val)
+
+    # Systematic C6 Part 2 application for Mizuki (evaluated dynamically with current EM)
+    if char_name == "Mizuki" and mizuki_constellation >= 6:
+        mizuki_dynamic_em = initial_stats.get("em", 0.0) + applied_buffs.get("em", 0.0)
+        add("crit_rate", min(max((mizuki_dynamic_em - 500.0), 0.0) * 0.0004, 0.20))
+        add("crit_dmg", min(max((mizuki_dynamic_em - 500.0), 0.0) * 0.0016, 0.80))
 
     return applied_buffs
 
