@@ -171,6 +171,11 @@ def calculate_stellar_damage(hit, final_stats, enemy_stats, quill_damage=0.0):
     crit_rate = final_stats.get("CR", final_stats.get("crit_rate", 0.05))
     crit_dmg = final_stats.get("CD", final_stats.get("crit_dmg", 0.50))
 
+    # Systematic C6 Part 1 Stellar Crit Override[cite: 1, 3]
+    if final_stats.get("dreamdrifter_state") == "ON":
+        crit_rate += 0.10
+        crit_dmg += 0.20
+
     crit_mult_average = 1.0 + min(crit_rate, 1.0) * crit_dmg
     crit_mult_absolute = 1.0 + crit_dmg
 

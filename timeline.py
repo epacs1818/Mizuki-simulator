@@ -37,11 +37,12 @@ class RotationTimeline:
     def _prepare_character_stats(self):
         self.char_initial_stats_map = {}
         for char_name, data in self.party.items():
+            char_level = data.get("level")
             weapon = data.get("weapon")
             artifact = data.get("artifact")
             main_stats = data.get("main_stats_total", {})
             subs = data.get("subs_total", {})
-            init_s = build_initial_stats(char_name, weapon, artifact, main_stats, subs)
+            init_s = build_initial_stats(char_name, char_level, weapon, artifact, main_stats, subs)
             init_s = apply_permanent_buffs(init_s, char_name)
             self.char_initial_stats_map[char_name] = init_s
 
@@ -200,15 +201,17 @@ class RotationTimeline:
 
         # Mizuki State Trackers
         mizuki_data = self.party.get("Mizuki", {})
-        mizuki_c1_unlocked = mizuki_data.get("constellation", 0) >= 1
-        mizuki_dreamdrifter_active = False
-        mizuki_nuke_armed = False
-        mizuki_nuke_armed_time: float = -1.0
-        mizuki_nuke_prep_cd_expires: float = -1.0
+        mizuki_constellation = mizuki_data.get("constellation", 0)
+        mizuki_c1_unlocked = mizuki_constellation >= 1
+        mizuki_c6_unlocked = mizuki_constellation >= 6
 
-        # Mizuki C1 State Trackers
+        mizuki_dreamdrifter_active = False
+        mizuki_a4_triggered = False
+        mizuki_nuke_armed = False
+        mizuki_nuke_prep_cd_expires: float = -1.0
         mizuki_c1_debuff_expiration: float = -1.0
         mizuki_c1_app_cooldown_expires: float = -1.0
+       
 
         # Faruzan State Trackers
         faruzan_buff_expiration: Optional[float] = None
@@ -512,22 +515,48 @@ class RotationTimeline:
             mizuki_c1_unlocked = mizuki_data.get("constellation", 0) >= 1
 
             if "Mizuki" in self.party:
-                if char == "Mizuki":
-                    if e_type == "HIT" and "Mizuki Skill" in ability_name and hit_name == "Cast":
-                        mizuki_dreamdrifter_active = True
-                        if t >= mizuki_nuke_prep_cd_expires:
-                            mizuki_nuke_armed = True
-                            mizuki_nuke_prep_cd_expires = t + 2.5
-                    elif e_type == "SWAP_OUT":
-                        mizuki_dreamdrifter_active = False
+                if char == "Mizuki" and e_type == "HIT" and "Mizuki Skill" in ability_name and hit_name == "Cast":
+                            mizuki_dreamdrifter_active = True
+                            mizuki_a4_triggered = False
+                            if t >= mizuki_nuke_prep_cd_expires:
+                                mizuki_nuke_armed = True
+                                mizuki_nuke_prep_cd_expires = t + 2.5
 
-                    if mizuki_c1_unlocked:
-                        if e_type == "HIT" and "Mizuki Skill" in ability_name and mizuki_dreamdrifter_active:
+                        if e_type == "SWAP_OUT" and char == "Mizuki":
+                            mizuki_dreamdrifter_active = False
+                        if char == "Mizuki" and e_type == "HIT" and (hit_name == "Tick13" or hit_name == "Tick2"):
+                            mizuki_dreamdrifter_active = False
+
+                        # 2. A4 State Tracking (Requires DDS active + Party Cryo hit)
+                        if mizuki_dreamdrifter_active and element == "Cryo" and gauge_u > 0.0:
+                            mizuki_a4_triggered = True
+
+                        # 3. VBTD & Quill Assignment
+                        vbtd_quill_active = False
+                        if char == "Mizuki" and "Mizuki Skill" in ability_name and hit_name.startswith("Tick"):
+                            if mizuki_dreamdrifter_active and mizuki_nuke_armed:
+                                vbtd_quill_active = True
+                                mizuki_em = self.char_initial_stats_map.get("Mizuki", {}).get("em", 0.0)
+                                event["quill_damage"] = mizuki_em * 10.0
+                                mizuki_nuke_armed = False
+
+                        # 4. C1 Debuff State Management
+                        if mizuki_c1_unlocked and char == "Mizuki" and e_type == "HIT" and "Mizuki Skill" in ability_name and mizuki_dreamdrifter_active:
                             if t >= mizuki_c1_app_cooldown_expires:
                                 mizuki_c1_debuff_expiration = t + 3.0
                                 mizuki_c1_app_cooldown_expires = t + 3.5
 
-                event["dreamdrifter_state"] = "ON" if mizuki_dreamdrifter_active else "OFF"
+                        c1_debuff_active = mizuki_c1_unlocked and (t <= mizuki_c1_debuff_expiration)
+                        if is_stellar_swirl and c1_debuff_active:
+                            mizuki_em = self.char_initial_stats_map.get("Mizuki", {}).get("em", 0.0)
+                            swirl_hit_event["quill_damage"] = mizuki_em * 5.5
+                            mizuki_c1_debuff_expiration = -1.0
+
+                        # Inject Auditable States into Event Dicts for UI / Console Table
+                        event["dreamdrifter_state"] = "ON" if mizuki_dreamdrifter_active else "OFF"
+                        event["mizuki_a4_state"] = "ON" if (mizuki_dreamdrifter_active and mizuki_a4_triggered) else "OFF"
+                        event["vbtd_state"] = "ON" if vbtd_quill_active else "OFF"
+                        event["c1_debuff_state"] = "ON" if c1_debuff_active else "OFF"
 
                 event["nuke_fired"] = False
                 if char == "Mizuki" and "Mizuki Skill" in ability_name and hit_name.startswith("Tick"):

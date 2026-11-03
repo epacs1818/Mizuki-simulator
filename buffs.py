@@ -183,6 +183,16 @@ CONDITIONAL_NON_CONSTANT_BUFFS = {
         "target_stat": "electro_bonus",
         "compute": lambda stats, ref=1: stats.get("em", 0.0) * 0.0004,
     },
+    "Mizuki C6 EM CR": {
+        "caster": "Mizuki",
+        "target_stat": "crit_rate",
+        "compute": lambda stats, ref=1: min(max((stats.get("em", 0.0) - 500.0), 0.0) * 0.0004, 0.20),
+    },
+    "Mizuki C6 EM CD": {
+        "caster": "Mizuki",
+        "target_stat": "crit_dmg",
+        "compute": lambda stats, ref=1: min(max((stats.get("em", 0.0) - 500.0), 0.0) * 0.0016, 0.80),
+    },
 
     ##Aether
     # Aether A4: EM = 8% of his ATK up to 160

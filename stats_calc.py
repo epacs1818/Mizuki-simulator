@@ -342,6 +342,18 @@ def resolve_active_buffs(
             return char_name
         return caster_field
 
+    # Retrieve Mizuki party info for constellation & talent checks
+    mizuki_data = party.get("Mizuki", {})
+    mizuki_constellation = mizuki_data.get("constellation", 0)
+    mizuki_talents = mizuki_data.get("talent_levels", [1, 10, 1])
+    mizuki_skill_lvl = mizuki_talents[1] if len(mizuki_talents) > 1 else 10
+
+    # Systematic C6 Part 2 application for Mizuki
+    if char_name == "Mizuki" and mizuki_constellation >= 6:
+        em_val = initial_stats.get("em", 0.0)
+        add("crit_rate", min(max((em_val - 500.0), 0.0) * 0.0004, 0.20))
+        add("crit_dmg", min(max((em_val - 500.0), 0.0) * 0.0016, 0.80))
+
     # ------------------------------------------------------------------
     # 1–3. Iterate over FLAG_TO_BUFFS dispatch table
     # ------------------------------------------------------------------
@@ -358,19 +370,33 @@ def resolve_active_buffs(
             target = desc.get("target", "Party")
             caster = resolve_caster(desc.get("caster"))
 
+            # Systematic Constellation Gatekeeping
+            if "Mizuki C1" in bkey and mizuki_constellation < 1:
+                continue
+            if "Mizuki C2" in bkey and mizuki_constellation < 2:
+                continue
+            if "Mizuki C6" in bkey and mizuki_constellation < 6:
+                continue
+
             # Check if this buff applies to char_name
             if not _target_applies(target, char_name, active_character, caster):
                 continue
 
             # ---- 1. CONDITIONAL CONSTANT buffs ---------------------------
             if btype == "constant":
-                buff_def = CONDITIONAL_CONSTANT_BUFFS.get(bkey)
-                if buff_def is None:
-                    continue
-                for stat, raw_val in buff_def.items():
-                    if stat in ("target", "caster"):
+                if bkey == "Mizuki Skill":
+                    # Dynamic talent-based scaling lookup from skill_scalings.py
+                    skill_scalings_list = [0.18, 0.21, 0.24, 0.27, 0.3, 0.33, 0.36, 0.39, 0.42, 0.45, 0.48, 0.51, 0.54]
+                    stellar_bonus_val = skill_scalings_list[max(0, min(mizuki_skill_lvl - 1, len(skill_scalings_list) - 1))]
+                    add("stellar_bonus", stellar_bonus_val)
+                else:
+                    buff_def = CONDITIONAL_CONSTANT_BUFFS.get(bkey)
+                    if buff_def is None:
                         continue
-                    add(stat, _get_refinement_val(raw_val, refinement))
+                    for stat, raw_val in buff_def.items():
+                        if stat in ("target", "caster"):
+                            continue
+                        add(stat, _get_refinement_val(raw_val, refinement))
 
             # ---- 2. CONDITIONAL NON-CONSTANT buffs (lambdas) -------------
             elif btype == "non_constant":
