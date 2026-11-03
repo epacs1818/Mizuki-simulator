@@ -2,9 +2,7 @@ Keep in mind that I want the code to be as sistematic and possible, meaning chan
 
 Additionally, the code must be easier for the programmer (and the user) to review the results and spot errors. Because of that, I created it with the mentality of every mechanic being assigned to either a boolean state (DDS = ON/OFF, mini_nuke_enhanced = ON/OFF, VBTD enhanced = ON/OFF, Mizuki C2 Elemental Buff = ON/OFF, etc) or stacks (buff has this much stacks = integer), etc. This should be printed to the final table if the mechanic is relevant to the setup.
 
-(The design philosophy of keeping the architecture systematic (extensible via state-to-buff mapping) and auditable (every mechanic exposed as a tracked state flag or stack count in the timeline table) is precisely the right approach for a combat simulator. It prevents spaghetti code and makes debugging rotation math straightforward.
-
-The plan outlined previously mostly fits this architecture, but to fully honor your philosophy of avoiding random patches and ensuring total transparency in the results table, let’s formalize how Mizuki’s mechanics will be integrated systematically into the existing engine.)
+The design philosophy of keeping the architecture systematic (extensible via state-to-buff mapping) and auditable (every mechanic exposed as a tracked state flag or stack count in the timeline table.
 
 
 
@@ -12,13 +10,13 @@ The plan outlined previously mostly fits this architecture, but to fully honor y
 
 Dreamdrifter state (DDS)	She enters it immediately BEFORE she casts skill and she leaves it when she Swaps out or the last tick hits, aka while she's casting the skill and she's active.
 
-Skill Swirl bonus	Constant buff. Active to the whole party when she's in DDS. Scales off of her skill talent level. Scalings in the characters.py module.
+Skill Swirl bonus	non_constant buff. Active to the whole party when she's in DDS. Scales off of her skill talent level. Scalings in the characters.py module.
 
 A4			Constant buff. Activate to herself only when she's in DDS and after party member hits with PHEC elements (only cryo in this program). Lasts for 4s and can be refreshed.
 
-Witch passive 1		Two steps: Preparing the nuke and firing the nuke. Nuke is prepared with a Swirl by Mizuki only, when she's in DDS (her cast works because she's already in DDS there). The SUBSEQUENT skill tick will be enhanced with a quill (additive base damage) equal to 1000% of her EM AND WILL FIRE A NUKE that will hit after 0.5s with motion value equal to 1000% of her EM. The nuke preparation has a 2.5s cd.
+VBTD passive 1		Two steps: Preparing the nuke and firing the nuke. Nuke is prepared with a Swirl by Mizuki only, when she's in DDS (her cast works because she's already in DDS there). The SUBSEQUENT skill tick will be enhanced with a quill (additive base damage) equal to 1000% of her EM AND WILL FIRE A NUKE that will hit after 0.5s with motion value equal to 1000% of her EM. The nuke preparation has a 2.5s cd.
 
-Witch passive 2		non_constant buff: If She's in DDS, All the party (including Mizuki) gets 10% of her EM (after flat buffs and before percentage buffs, like sucrose's) as additional EM.
+VBTD passive 2		non_constant buff: If She's in DDS, All the party (including Mizuki) gets 10% of her EM (after flat buffs and before percentage buffs, like sucrose's) as additional EM.
 
 C1			If she's in DDS she applies a debuff with EVERY hit of her skill (including cast) on the enemy for 3s. If ANY character in the party triggers swirl on this debuffed enemy, the swirl will be enhanced by her C1 Quill: 550% of Mizuki's EM. The swirl will also instantly fire a C1 MINI NUKE that hits instantly and deals 400% of Mizuki's EM. The debuff has a 3.5s CD.
 
