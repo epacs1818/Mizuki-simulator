@@ -7,6 +7,23 @@ from abilities import (
     mizuki_skill, mizuki_sacfrag_skill
 )
 
+# Default party used when no saved JSON configuration is available
+# (main_test.py fallback, smoke_test.py).
+DEFAULT_PARTY = {
+    "Mizuki": {"constellation": 6, "level": 90, "refinement": 5,
+               "weapon": "Sacrificial Fragments", "artifact_set": "2p/2p EM",
+               "talents": "10/13/13"},
+    "Aether": {"constellation": 6, "level": 90, "refinement": 1,
+               "weapon": "New Bough", "artifact_set": "2p/2p ATK",
+               "talents": "1/13/13"},
+    "Faruzan": {"constellation": 6, "level": 90, "refinement": 1,
+                "weapon": "Favonius Warbow", "artifact_set": "Instructor",
+                "talents": "1/13/13"},
+    "Odette": {"constellation": 2, "level": 90, "refinement": 1,
+               "weapon": "New Bough", "artifact_set": "2p/2p ATK",
+               "talents": "1/13/13"},
+}
+
 # 1. STANDARD FIELD SEQUENCES (Building Blocks)
 STANDARD_FIELD_SEQUENCES = {
     "Aether EN1": FieldSequence("AetherEN1", "Aether", swap_out_time=1.23),

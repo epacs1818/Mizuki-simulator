@@ -1,0 +1,216 @@
+Here is the OCR data for the character stats and overall results from your images, formatted cleanly in Markdown and text.
+
+---
+
+### ## Character Stats
+
+| Stat | Mizuki (Lv. 90) | Traveler (Lv. 90) | Odette (Lv. 90) | Faruzan (Lv. 90) |
+| --- | --- | --- | --- | --- |
+| **HP** | 20,029
+
+ | 18,458
+
+ | 18,816
+
+ | 14,350
+
+ |
+| **Base ATK** | 670
+
+ | 830
+
+ | 844
+
+ | 651
+
+ |
+| **ATK** | 1,068
+
+ | 2,773
+
+ | 2,601
+
+ | 1,192
+
+ |
+| **Base DEF** | 757
+
+ | 683
+
+ | 787
+
+ | 628
+
+ |
+| **DEF** | 780
+
+ | 953
+
+ | 847
+
+ | 787
+
+ |
+| **Crit Rate** | 165%
+
+ | 188%
+
+ | 180%
+
+ | 169%
+
+ |
+| **Crit Damage** | 192%
+
+ | 277%
+
+ | 182%
+
+ | 97%
+
+ |
+| **Energy Recharge** | 100%
+
+ | 135%
+
+ | 112%
+
+ | 284%
+
+ |
+| **Elemental Mastery** | -
+
+ | -
+
+ | -
+
+ | -
+
+ |
+| **Damage Bonuses** |  |  |  |  |
+| Pyrodmg | 0%
+
+ | 0%
+
+ | 0%
+
+ | 0%
+
+ |
+| HydroDmg | 0%
+
+ | 0%
+
+ | 0%
+
+ | 0%
+
+ |
+| ElectroDmg | 0%
+
+ | 0%
+
+ | 0%
+
+ | 0%
+
+ |
+| CryoDmg | 0%
+
+ | 0%
+
+ | 0%
+
+ | 0%
+
+ |
+| AnemoDmg | 0%
+
+ | 0%
+
+ | 0%
+
+ | 15%
+
+ |
+| GeoDmg | 0%
+
+ | 0%
+
+ | 0%
+
+ | 0%
+
+ |
+| DendroDmg | 0%
+
+ | 0%
+
+ | 0%
+
+ | 0%
+
+ |
+| PhysDmg | 0%
+
+ | 0%
+
+ | 0%
+
+ | 58%
+
+ |
+| **Bonus Stats** | +102.61% C.Rate
+
+ | +102.61% C.Rate
+
+ | +102.61% C.Rate
+
+ | +102.61% C.Rate
+
+ |
+
+---
+
+### ## Overall Results Summary
+
+* **Test Preset:** Abyss 12
+
+
+* **DPS:** 201,201
+
+
+* **Time Elapsed:** 40.71s
+
+
+* **Total Damage:** 8,191,075
+
+
+* **Strongest Hit:** 331,792
+
+
+
+#### **Character Damage Distribution:**
+
+* **Mizuki:** 5,118,806 damage (62%)
+
+
+* **Traveler:** 1,338,039 damage (16%)
+
+
+* **Odette:** 1,267,984 damage (15%)
+
+
+* **Faruzan:** 466,246 damage (6%)
+
+
+
+#### **Elemental Damage Distribution:**
+
+* **Anemo:** 60%
+
+
+* **Cryo:** 40%
+
+
+* **Pyro / Hydro / Electro / Geo / Dendro / Physical:** 0% each

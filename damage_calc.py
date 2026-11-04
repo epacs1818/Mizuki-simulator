@@ -129,6 +129,7 @@ def calculate_standard_damage(hit, final_stats, enemy_stats, quill_damage=0.0, c
         "base_damage": base_damage,
         "quill_damage": quill_damage,
         "bonus_mult": bonus_mult,
+        "elevation_mult": None,  # Standard damage has no elevation multiplier.
         "crit_mult_average": crit_mult_average,
         "crit_mult_absolute": crit_mult_absolute,
         "def_mult": def_mult,
@@ -153,6 +154,11 @@ def calculate_stellar_damage(hit, final_stats, enemy_stats, quill_damage=0.0):
     stat_value = final_stats.get(stat_ref_key, final_stats.get("ATK", 0.0))
     base_damage = stat_value * hit.motion_value
 
+    # 1.5) Odette A4: mv increase multiplier on her stellar attack motion values
+    #      (Skill_stellar / plume_stellar / wing_stellar); default 1.0 for everyone.
+    smv = final_stats.get("stellar_mv_mult", 1.0) or 1.0
+    base_damage *= smv
+
     # 2. Bonus Multiplier (Excludes Quills)
     em = final_stats.get("EM", final_stats.get("em", 0.0))
     em_bonus = (6.0 * em) / (2000.0 + em)
@@ -171,10 +177,10 @@ def calculate_stellar_damage(hit, final_stats, enemy_stats, quill_damage=0.0):
     crit_rate = final_stats.get("CR", final_stats.get("crit_rate", 0.05))
     crit_dmg = final_stats.get("CD", final_stats.get("crit_dmg", 0.50))
 
-    # Systematic C6 Part 1 Stellar Crit Override[cite: 1, 3]
-    if final_stats.get("mizuki_c6_stellar_crit_active", 0.0) > 0.0:
-        crit_rate += 0.10
-        crit_dmg += 0.20
+    # Systematic C6 Part 1 Stellar Crit: applied via dedicated stellar crit stats,
+    # which are resolved for every party member during Mizuki's Dreamdrifter state.
+    crit_rate += final_stats.get("stellar_crit_rate", 0.0)
+    crit_dmg += final_stats.get("stellar_crit_dmg", 0.0)
 
     crit_mult_average = 1.0 + min(crit_rate, 1.0) * crit_dmg
     crit_mult_absolute = 1.0 + crit_dmg
@@ -206,6 +212,7 @@ def calculate_stellar_damage(hit, final_stats, enemy_stats, quill_damage=0.0):
         "elevation_mult": elevation_mult,
         "crit_mult_average": crit_mult_average,
         "crit_mult_absolute": crit_mult_absolute,
+        "def_mult": None,  # Stellar damage has no DEF multiplier.
         "res_mult": res_mult,
         "non_crit": non_crit,
         "crit_damage": crit_damage,
@@ -321,32 +328,35 @@ def calculate_stellar_reaction_damage(hit, final_stats, enemy_stats, party_dict=
         # Crit stats
         c_rate = char_info.get("CR", char_info.get("crit_rate", final_stats.get("CR", final_stats.get("crit_rate", 0.05))))
         c_dmg = char_info.get("CD", char_info.get("crit_dmg", final_stats.get("CD", final_stats.get("crit_dmg", 0.50))))
-        
-        # Systematic C6 Part 1 Stellar Crit Override for Reactions
-        if final_stats.get("mizuki_c6_stellar_crit_active", 0.0) > 0.0: 
-            c_rate += 0.10
-            c_dmg += 0.20
 
-        c_rate = min(max(float(c_rate), 0.0), 1.0)
+        # Systematic C6 Part 1 Stellar Crit for Reactions: party-wide during DDS.
+        c_rate = float(c_rate) + final_stats.get("stellar_crit_rate", 0.0)
+        c_dmg = float(c_dmg) + final_stats.get("stellar_crit_dmg", 0.0)
+
+        c_rate = min(max(c_rate, 0.0), 1.0)
         c_dmg = float(c_dmg)
         crit_rates_list.append(c_rate)
 
         contrib_crit_mult_average[char_name] = 1.0 + c_rate * c_dmg
         contrib_crit_mult_absolute[char_name] = 1.0 + c_dmg
 
-        # Contributor specific pre-share performance metrics
+        # Contributor pre-share metrics. The quill is NOT folded in here: it is applied
+        # once at the AGGREGATE level, after the contribution weighting (see below;
+        # PENDING in-game verification).
+        q_base = b_val * bonus_mult
+
         # non_crit: base with 0% crit (crit factor = 1.0)
-        nc_val = (b_val + quill_damage) * bonus_mult * elevation_mult * res_mult
+        nc_val = q_base * elevation_mult * res_mult
         contrib_non_crit[char_name] = nc_val
         non_crit_damages_list.append(nc_val)
 
         # crit_damage: base with 100% crit (crit factor = 1 + CD)
-        cd_val = (b_val * (1.0 + c_dmg) + quill_damage) * bonus_mult * elevation_mult * res_mult
+        cd_val = q_base * (1.0 + c_dmg) * elevation_mult * res_mult
         contrib_crit_damage[char_name] = cd_val
         crit_damages_list.append(cd_val)
 
         # average_damage (useful for inspection/returning)
-        avg_val = (b_val * (1.0 + c_rate * c_dmg) + quill_damage) * bonus_mult * elevation_mult * res_mult
+        avg_val = q_base * (1.0 + c_rate * c_dmg) * elevation_mult * res_mult
         contrib_average_damage[char_name] = avg_val
 
     non_crit_arr = np.array(non_crit_damages_list, dtype=float)
@@ -385,12 +395,20 @@ def calculate_stellar_reaction_damage(hit, final_stats, enemy_stats, party_dict=
         # Accumulate probability-weighted score into total expected damage
         expected_damage += prob * scenario_score
 
-    # Effective expected damage (expected damage divided by resistance multiplier, 
-    # or representing pre-res mitigation values if preferred; formula uses expected_damage / res_mult)
+    # Quill added POST-contribution (PENDING in-game verification): applied once to the
+    # aggregate. It skips bonus_mult but keeps elevation, res and an expected crit
+    # factor (share-weighted average over the contributors).
+    w1 = weights[:n]
+    wsum = float(w1.sum()) or 1.0
+    exp_crit = float(np.dot(np.array([contrib_crit_mult_average[c] for c in contributors]), w1) / wsum)
+    exp_abs = float(np.dot(np.array([contrib_crit_mult_absolute[c] for c in contributors]), w1) / wsum)
+    q_nc = quill_damage * elevation_mult * res_mult
+
+    expected_damage += q_nc * exp_crit
     effective_expected_damage = expected_damage / res_mult if res_mult > 0 else expected_damage
 
-    non_crit = float(np.dot(np.sort(non_crit_arr)[::-1], weights[:len(non_crit_arr)]))
-    crit_damage = float(np.dot(np.sort(crit_damages_arr)[::-1], weights[:len(crit_damages_arr)]))
+    non_crit = float(np.dot(np.sort(non_crit_arr)[::-1], weights[:len(non_crit_arr)])) + q_nc
+    crit_damage = float(np.dot(np.sort(crit_damages_arr)[::-1], weights[:len(crit_damages_arr)])) + q_nc * exp_abs
     average_damage = float(expected_damage)
     effective_average_damage = float(effective_expected_damage)
 

@@ -39,7 +39,12 @@ CHARACTER_SKILLS = {
         "Burst (Stellar Swirl)": {
             "Ice Javelin Single Strike DMG": {
                 "scaling": get_scaled_list(55.13, "Elemental 1"),
-                "mv_increase": get_scaled_list(2.76, "Elemental 1", multiplier=8)
+                # Per-stack MV increase of the Ice Javelin, applied multiplicatively as
+                # base * (1 + stacks * per_stack). The 2.76 base yields 5.86% per stack
+                # at talent 13 (2.76 * 2.125 = 5.865), i.e. ~46.9% at 8 stacks.
+                # NOTE: additive vs. multiplicative application is PENDING game-test
+                # verification and can be toggled in abilities.get_ability_motion_value.
+                "mv_per_stack": get_scaled_list(2.76, "Elemental 1"),
             }
         }
     },

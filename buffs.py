@@ -7,11 +7,13 @@ CONDITIONAL_CONSTANT_BUFFS = {
     "Instructor": {
         "em": 120.0,
     },
+    # HotF triggers when the holder deals Stellar DMG or triggers a swirl (12s, refresh).
+# The USER (holder) gains +12% ATK; the WHOLE PARTY gains +50% stellar_bonus.
     "Heart Of The Furnace (Self)": {
-        "stellar_bonus": 0.500,
+        "atk_percent": 0.120,
     },
     "Heart Of The Furnace (Party)": {
-        "atk_percent": 0.120,
+        "stellar_bonus": 0.500,
     },
     "Noblesse Oblige": {
         "atk_percent": 0.200,
@@ -50,11 +52,9 @@ CONDITIONAL_CONSTANT_BUFFS = {
     "Aether C2 Buff Initial":{
         "em": 60.0,
     },
+    # C2 Enhanced grants the active character another 60 EM (total 120 with Basic).
     "Aether C2 Buff Enhanced":{
-        "em": 120.0,
-    },
-    "Aether C6": {
-        "stellar_bonus": 0.40,
+        "em": 60.0,
     },
 
     #Odette
@@ -76,8 +76,10 @@ CONDITIONAL_CONSTANT_BUFFS = {
     },
     
     #Faruzan
+    # +40% crit_dmg, applied only to ANEMO-element hits (faruzan_buff_state is gated
+    # to anemo events in the timeline). The talent-scaled party anemo_bonus is
+    # provided separately by "Faruzan C6 Anemo Bonus" (non_constant).
     "Faruzan C6 Buff":{
-        "anemo_bonus": 0.385,
         "crit_dmg" : 0.400,
     },
     "Faruzan C6 Debuff":{
@@ -85,7 +87,8 @@ CONDITIONAL_CONSTANT_BUFFS = {
     },
     
     #Sucrose
-    "Sucrose A2":{
+    # A1: after Sucrose triggers a swirl, non-Anemo party members get +50 EM for 8s.
+    "Sucrose A1":{
         "em":50.0,
     },
     "Sucrose C6":{
@@ -218,8 +221,37 @@ CONDITIONAL_NON_CONSTANT_BUFFS = {
         "target_stat": "jubilee_mult",
         "compute": lambda stats, ref=1: min(0.00007 * ((stats["base_atk"] * (1.0 + stats["atk_percent"])) + stats["atk_flat"]), 0.14),
     },
-    #"Odette_A4":{"mv_increase":}           #For every 100 ATK Odette has over 1,000, her Stellar Glimmer DMG is additionally
-    #                                           #increased by 1.5% of the original DMG. She can deal up to 30% more additional DMG in this way.
+    # Odette Burst: 6s buff for HERSELF ONLY that raises her stellar_bonus.
+    # The talent-scaled value comes from skill_scalings (Snow Swan's Dream),
+    # resolved in resolve_active_buffs and injected via the `factor` arg.
+    "Odette Burst": {
+        "caster":"Odette",
+        "target_stat": "stellar_bonus",
+        "compute": lambda stats, ref=1, factor=0.0: factor,
+    },
+    # Odette A4: mv_increase on ALL her stellar attack motion values
+    # (Skill_stellar, plume_stellar, wing_stellar): 1 + 0.015% of her ATK past
+    # 1000, capped at 1.30 (at 3000 ATK). Uses the same initial-ATK basis as jubilee.
+    "Odette A4": {
+        "caster":"Odette",
+        "target_stat": "stellar_mv_mult",
+        "compute": lambda stats, ref=1: min(1.0 + 0.00015 * max(0.0,
+            (stats.get("base_atk", 0.0) * (1.0 + stats.get("atk_percent", 0.0))) + stats.get("atk_flat", 0.0) - 1000.0), 1.30),
+    },
+    # Faruzan C6: talent-scaled party anemo_bonus (from skill_scalings "Anemo DMG
+    # Bonus", 18%–38.25% by burst level). Value injected via the `factor` arg.
+    "Faruzan C6 Anemo Bonus": {
+        "caster":"Faruzan",
+        "target_stat": "anemo_bonus",
+        "compute": lambda stats, ref=1, factor=0.0: factor,
+    },
+    # Sucrose A4: windowed (8s) share of 20% of her FLAT EM to the OTHERS.
+    # The amount is computed in resolve_active_buffs via compute_flat_em (special-case).
+    "Sucrose A4 Share": {
+        "caster":"Sucrose",
+        "target_stat": "em",
+        "compute": lambda stats, ref=1: 0.0,
+    },
 
     #Weapons
     # Wandering Evenstar: Gain 24% of EM as ATK
@@ -236,22 +268,20 @@ CONDITIONAL_NON_CONSTANT_BUFFS = {
     },
 }
 
-TEAM_SHARE_BUFFS = {
-    "Sucrose A4 Share": {
-        "caster": "Sucrose",
-        "target_stat": "em",
-        "compute": lambda caster_stats: 0.20 * caster_stats.get("em", 0.0)
-    },
-}
+# Sucrose's A4 EM share is now a windowed buff (see "Sucrose A4 Share" in
+# CONDITIONAL_NON_CONSTANT_BUFFS), so the permanent team-share table is empty.
+TEAM_SHARE_BUFFS = {}
 
 PERMANENT_BUFFS = {
     "Aether": {
         "Aether Quest": {
+            "base_atk": 10,
+            "base_hp": 50,
             "crit_rate": 0.100, 
             "crit_dmg": 0.200,
             "atk_percent": 0.20,
             "hp_percent": 0.20,
-            "em":60.0,
+            "em":60.0 + 15.0,
             "er":0.200,
             "def_percent":0.20
         }
@@ -269,6 +299,11 @@ STACK_BUFFS = {
     #Characters
     "Odette A1":{
         "stellar_bonus": 0.15   #per stack
+    },
+    # Aether C6: after Burst consumes Frostglow, each stack gives +5% stellar_bonus
+    # to the whole party (0.40 at 8 stacks) for 15s.
+    "Aether C6": {
+        "stellar_bonus": 0.05    #per stack
     },
     "Odette C2": {
         "atk_percent": 0.07    #per stack of marvelous splendor

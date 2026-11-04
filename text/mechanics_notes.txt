@@ -33,7 +33,7 @@ C6 2			Non_constant buff. Additionally, EVEN OUTSIDE OF DDS and active all the t
 #Aether
 Skill			Each hit gives one stack of Frostglow (max 8).
 
-Burst			Each stack of frostglow increases the damage of the burst procs. At 8 stacks it increases the number of hits. In the program the increase corresponds to a mv_increase multiplier. It depends on stacks, in the program it's using a multiplier (number of stacks) of 8. The mv_increase has to add one before (so 1 + 8*0.0586 at talent level 10 and 8 frosglow stacks) either in the definition or in its application, keep consistent with other mv_increases.
+Burst			Each stack of frostglow increases the damage of the burst procs. At 8 stacks it increases the number of hits. In the program the increase corresponds to a mv_increase multiplier. It depends on stacks, in the program it's using a multiplier (number of stacks) of 8. The mv_increase has to add one before (so 1 + 8*0.0586 at talent level 13 and 8 frosglow stacks) either in the definition or in its application, keep consistent with other mv_increases.
 
 A4			non_constant buff. he gains 8% of his atk as EM up to 160 EM (2000 atk)
 
@@ -47,6 +47,7 @@ So we have the frostglow state tracker column (0 to 8), the jubilee_bonus is alw
 A4 is always on so no column needed. We're gonna need C2_basic and C2_enhanced columns (on and off), remember this is only on for the target of the buff: the active character.
 We'll implement a system where he deploys two different types of Burst abilities when it's called inside a FIELD SEQUENCE: the enhanced burst and the standard burst. The enhanced one is called when frostglow = 8 stacks, the normal one is called otherwise. I renamed and separated both of them in abilities.py.
 Both burst casts gets their motion value increased by the number of stacks.
+
 
 
 #Odette
@@ -71,6 +72,8 @@ C4 and C6 (We'll work on them later, I removed them from the user's choice for n
 We'll only need columns for her marvelous stacks on and off for the event damage calculation. And a column for her burst_buff (on for some of her attacks).
 
 
+
+
 #Faruzan
 Only c6 allowed to the user, so no gatekeeping constellations for now.
 
@@ -81,19 +84,7 @@ Her buff also applies quills equal to 32% of Faruzan's BASE_ATK (important! her 
 Her "debuff" (which is also a buff) gives all characters affected by the debuff (aka the whole party) a costant 30% anemo_shred
 
 
-
-
 #sucrose
-
 A1              Constant buff, whenever Sucrose triggers swirl, everyone in the party with elements different than anemo (usually excluding herself and mizuki) gains 50 EM for 8s.
-A4              When her skill or any hit from her burst (not implemented yet in abilities) hits it triggers the buffs, giving OTHERS a non_constant 20% of her EM as EM. Mizuki's VBTD share doesn't consider this buff for her own VBTD share and neither does Sucrose. Only flat buffs gets included in this share, same as Mizuki's.
-C6 (not implemented and not available to the user yet)
-
-
-#Diona
-
-C6 locked.
-
-skill           When she casts skill, she activates her Choice Treasures passive: every time a stellar swirl is triggered, she fires the skill_paws_swirls ability (not implemented yet). this effect has a 3.5s cd.
-
-C6              Her only buff, active on C6 cast, lasts for 12s. Everyone in the party gains a constant 200 EM and 40% stellar_bonus
+A4              When her skill or any hit from her burst hits it triggers the buffs, giving OTHERS a non_constant 20% of her EM as EM. It's temporary and lasts for 8s. Mizuki's VBTD share doesn't consider this buff for her own VBTD share and neither does Sucrose. Only flat buffs gets included in this share, same as Mizuki's (percentages don't feed into each other).
+C6              She casts a buff to everyone giving them cryo_bonus (for standard damage obviously) for 6s from the burst cast hit. (now implemented and available to the user)

@@ -9,6 +9,7 @@ from buffs import (
     STACK_BUFFS,
     TEAM_SHARE_BUFFS,
 )
+from skill_scalings import CHARACTER_SKILLS
 
 
 # ---------------------------------------------------------------------------
@@ -54,10 +55,13 @@ def _target_applies(target: str, char_name: str, active_character: str,
 # ---------------------------------------------------------------------------
 
 def build_initial_stats(char_name, level, weapon_full_name, artifact_set_name,
-                        main_stats_total, subs_total):
+                        main_stats_total, subs_total, refinement=1):
     """
     Combines Character Base + Weapon + Artifacts into a clean initial_stats
     dictionary separating base, percentages, and flats for future buff injection.
+
+    `refinement` resolves list-valued weapon secondaries (R1..R5) via get_weapon_stat,
+    e.g. Exaiphanes Blade's refinement-keyed crit_damage.
     """
     raw_char_base = CHARACTER_BASE_STATS.get(char_name, {
         "base_hp": 10000.0, "base_atk": 250.0, "base_def": 700.0,
@@ -77,22 +81,27 @@ def build_initial_stats(char_name, level, weapon_full_name, artifact_set_name,
     base_def = char_base["base_def"]
     
     # 4. Build Percentage Pools
-    hp_percent = char_base.get("hp_percent", 0.0) + weapon_base.get("hp_percent", 0.0) + artifact_bonus.get("hp_percent", 0.0) + main_stats_total.get("hp_percent", 0.0) + subs_total.get("hp_percent", 0.0)
-    atk_percent = char_base.get("atk_percent", 0.0) + weapon_base.get("atk_percent", 0.0) + artifact_bonus.get("atk_percent", 0.0) + main_stats_total.get("atk_percent", 0.0) + subs_total.get("atk_percent", 0.0)
-    def_percent = char_base.get("def_percent", 0.0) + weapon_base.get("def_percent", 0.0) + artifact_bonus.get("def_percent", 0.0) + main_stats_total.get("def_percent", 0.0) + subs_total.get("def_percent", 0.0)
+    hp_percent = char_base.get("hp_percent", 0.0) + get_weapon_stat(weapon_base, "hp_percent", refinement) + artifact_bonus.get("hp_percent", 0.0) + main_stats_total.get("hp_percent", 0.0) + subs_total.get("hp_percent", 0.0)
+    atk_percent = char_base.get("atk_percent", 0.0) + get_weapon_stat(weapon_base, "atk_percent", refinement) + artifact_bonus.get("atk_percent", 0.0) + main_stats_total.get("atk_percent", 0.0) + subs_total.get("atk_percent", 0.0)
+    def_percent = char_base.get("def_percent", 0.0) + get_weapon_stat(weapon_base, "def_percent", refinement) + artifact_bonus.get("def_percent", 0.0) + main_stats_total.get("def_percent", 0.0) + subs_total.get("def_percent", 0.0)
     
     # 5. Build Flat Pools
-    hp_flat =  weapon_base.get("hp_flat", 0.0) + main_stats_total.get("hp_flat", 0.0) + subs_total.get("hp_flat", 0.0)
-    atk_flat = weapon_base.get("atk_flat", 0.0) + main_stats_total.get("atk_flat", 0.0) + subs_total.get("atk_flat", 0.0)
-    def_flat = weapon_base.get("def_flat", 0.0) + subs_total.get("def_flat", 0.0)
+    hp_flat =  get_weapon_stat(weapon_base, "hp_flat", refinement) + main_stats_total.get("hp_flat", 0.0) + subs_total.get("hp_flat", 0.0)
+    atk_flat = get_weapon_stat(weapon_base, "atk_flat", refinement) + main_stats_total.get("atk_flat", 0.0) + subs_total.get("atk_flat", 0.0)
+    def_flat = get_weapon_stat(weapon_base, "def_flat", refinement) + subs_total.get("def_flat", 0.0)
     
     # 6. Secondary Stats (EM, Crit, ER, Bonus Dmg)
-    em = char_base.get("em", 0.0) + weapon_base.get("em", 0.0) + artifact_bonus.get("em", 0.0) + main_stats_total.get("em", 0.0) + subs_total.get("em", 0.0)
-    crit_rate = char_base.get("crit_rate") + weapon_base.get("crit_rate", 0.0) + main_stats_total.get("crit_rate", 0.0) + subs_total.get("crit_rate", 0.0)
-    crit_dmg = char_base.get("crit_dmg") + weapon_base.get("crit_dmg", 0.0) + main_stats_total.get("crit_dmg", 0.0) + subs_total.get("crit_dmg", 0.0)
-    er = char_base.get("er") + weapon_base.get("er", 0.0) + main_stats_total.get("er", 0.0) + subs_total.get("er", 0.0)
+    em = char_base.get("em", 0.0) + get_weapon_stat(weapon_base, "em", refinement) + artifact_bonus.get("em", 0.0) + main_stats_total.get("em", 0.0) + subs_total.get("em", 0.0)
+    crit_rate = char_base.get("crit_rate") + get_weapon_stat(weapon_base, "crit_rate", refinement) + main_stats_total.get("crit_rate", 0.0) + subs_total.get("crit_rate", 0.0)
+    # Some weapons store crit damage under "crit_damage" (e.g. Exaiphanes Blade,
+    # refinement-keyed). Prefer "crit_damage" if present, else fall back to "crit_dmg".
+    weapon_crit_dmg = get_weapon_stat(weapon_base, "crit_dmg", refinement)
+    if weapon_base.get("crit_damage", None) is not None:
+        weapon_crit_dmg = get_weapon_stat(weapon_base, "crit_damage", refinement)
+    crit_dmg = char_base.get("crit_dmg") + weapon_crit_dmg + main_stats_total.get("crit_dmg", 0.0) + subs_total.get("crit_dmg", 0.0)
+    er = char_base.get("er") + get_weapon_stat(weapon_base, "er", refinement) + main_stats_total.get("er", 0.0) + subs_total.get("er", 0.0)
         
-    physical_bonus =char_base.get("physical_bonus", 0.0) + main_stats_total.get("physical_bonus", 0.0)
+    physical_bonus = char_base.get("physical_bonus", 0.0) + get_weapon_stat(weapon_base, "physical_bonus", refinement) + main_stats_total.get("physical_bonus", 0.0)
     pyro_bonus = char_base.get("pyro_bonus", 0.0) + main_stats_total.get("pyro_bonus", 0.0)
     cryo_bonus = char_base.get("cryo_bonus", 0.0) + main_stats_total.get("cryo_bonus", 0.0)
     geo_bonus = char_base.get("geo_bonus", 0.0) + main_stats_total.get("geo_bonus", 0.0)
@@ -201,20 +210,46 @@ FLAG_TO_BUFFS = {
     ],
 
     # ---- Faruzan -----------------------------------------------------------
+    # Buff (crit_dmg + talent-scaled anemo_bonus) is gated to ANEMO hits in the
+    # timeline, and applies to the whole party (so off-field collapse hits get it).
     "faruzan_buff_state": [
-        {"type": "constant",     "key": "Faruzan C6 Buff",               "target": "Active", "caster": "Faruzan"},
-        {"type": "constant",     "key": "Faruzan C6 Debuff",             "target": "Party",  "caster": "Faruzan"},
+        {"type": "constant",     "key": "Faruzan C6 Buff",               "target": "Party", "caster": "Faruzan"},
+        {"type": "non_constant", "key": "Faruzan C6 Anemo Bonus",        "target": "Party", "caster": "Faruzan"},
+    ],
+    # Faruzan debuff (anemo_shred) is party-wide for the duration of the debuff window.
+    "faruzan_debuff_state": [
+        {"type": "constant",     "key": "Faruzan C6 Debuff",             "target": "Party", "caster": "Faruzan"},
     ],
 
     # ---- Aether C2 ---------------------------------------------------------
+    # C2 Basic (+60 EM) arms for the active character on a skill TICK.
+    # C2 Enhanced (+60 EM, cumulative) arms additionally when that active
+    # character deals Stellar DMG or triggers a swirl.
     "aether_c2_state": [
         {"type": "constant",     "key": "Aether C2 Buff Initial",        "target": "Active", "caster": "Aether"},
+    ],
+    "aether_c2_enhanced_state": [
+        {"type": "constant",     "key": "Aether C2 Buff Enhanced",       "target": "Active", "caster": "Aether"},
+    ],
+
+    # ---- Permanent / always-on dynamic buffs -------------------------------
+    # These are always active and recomputed per event (e.g. Odette A4 mv_increase,
+    # Odette Jubilee). A plus over conditional flags: no timeline flag needed.
+    "always_on": [
+        {"type": "non_constant", "key": "Odette A4",                     "target": "Self",   "caster": "Odette"},
+        {"type": "non_constant", "key": "Odette_jubilee",                "target": "Party",  "caster": "Odette"},
+    ],
+
+    # Odette Burst: 6s self stellar_bonus buff (target Self so it only helps her).
+    "odette_burst_state": [
+        {"type": "non_constant", "key": "Odette Burst",                  "target": "Self",   "caster": "Odette"},
     ],
 
     # ---- Odette Marvelous Stacks -------------------------------------------
     "marvelous_stacks": [
         {"type": "stack",        "key": "Odette A1",                     "target": "Party",  "caster": "Odette", "stack_flag": "marvelous_stacks"},
-        {"type": "stack",        "key": "Odette C2",                     "target": "Party",  "caster": "Odette", "stack_flag": "marvelous_stacks"},
+        # C2: the holder's ATK also scales +7% per stack (only if Odette is C2).
+        {"type": "stack",        "key": "Odette C2",                     "target": "Party",  "caster": "Odette", "stack_flag": "marvelous_stacks", "min_constellation": 2},
     ],
 
     # ---- Mizuki Dreamdrifter active (skill on-field) -----------------------
@@ -260,8 +295,19 @@ FLAG_TO_BUFFS = {
     "tenacity_state": [
         {"type": "constant",     "key": "Tenacity Of The Millelith",         "target": "Party",  "caster": None},
     ],
-    "sucrose_a2_state": [
-        {"type": "constant",     "key": "Sucrose A2",                        "target": "Others", "caster": "Sucrose"},
+    # Silver Light (sword): +1 stack per skill cast/recast, EM per stack (12s each).
+    # Targets the USER (holder) via the `silver_light_stacks` stack count.
+    "silver_light_stacks": [
+        {"type": "stack",        "key": "Silver Light",                      "target": "User",   "caster": "user", "stack_flag": "silver_light_stacks"},
+    ],
+    # ---- Sucrose -----------------------------------------------------------
+    "sucrose_a1_state": [
+        # A1: +50 EM to non-Anemo party members for 8s after Sucrose triggers swirl.
+        {"type": "constant",     "key": "Sucrose A1",                        "target": "Party",  "caster": "Sucrose", "exclude_elements": ["Anemo"]},
+    ],
+    # A4: 8s window sharing 20% of Sucrose's flat EM to the OTHERS.
+    "sucrose_a4_state": [
+        {"type": "non_constant", "key": "Sucrose A4 Share",                  "target": "Others", "caster": "Sucrose"},
     ],
     "sucrose_c6_state": [
         {"type": "constant",     "key": "Sucrose C6",                        "target": "Party",  "caster": "Sucrose"},
@@ -272,13 +318,89 @@ FLAG_TO_BUFFS = {
     "aether_a4_state": [
         {"type": "non_constant", "key": "Aether A4",                        "target": "User",   "caster": "Aether"},
     ],
+    # Aether C6 is a timed (15s) stack buff: each Frostglow stack consumed by
+    # Burst adds +5% party stellar_bonus (0.05/stack via STACK_BUFFS).
     "aether_c6_state": [
-        {"type": "constant",     "key": "Aether C6",                        "target": "Party",  "caster": "Aether"},
+        {"type": "stack",        "key": "Aether C6",                        "target": "Party",  "caster": "Aether", "stack_flag": "aether_c6_stacks"},
     ],
     "odette_c2_state": [
-        {"type": "constant",     "key": "Odette C2",                        "target": "Party",  "caster": "Odette"},
+        # C2 party shred (20s window set on her skill/burst cast), gated to C2+.
+        {"type": "constant",     "key": "Odette C2",                        "target": "Party",  "caster": "Odette", "min_constellation": 2},
     ],
 }
+
+
+# ---------------------------------------------------------------------------
+# compute_flat_em  –  generalized flat-EM basis (Mizuki C6-2/VBTD2, Sucrose A4)
+# ---------------------------------------------------------------------------
+
+def compute_flat_em(char_name, event_flags, active_character, party, char_initial_stats_map, refinement=1):
+    """
+    Returns a character's *flat* EM basis = base + weapon + artifact EM +
+    strictly-flat EM buffs (CONSTANT and STACK buffs only).
+
+    Percentage-derived EM sources are intentionally excluded, as they do not belong
+    to the "after flat buffs, before percentage buffs" tier:
+      - Mizuki VBTD2 10% self-share (non_constant)
+      - Sucrose A4 20% share (non_constant)
+      - Aether A4 (8% of ATK -> EM conversion)
+
+    Percentages never feed into one another (no infinite Sucrose/Mizuki EM loop).
+    Used as the basis for Mizuki's VBTD2 share & C6-2 and Sucrose's A4 share.
+    """
+    stats = char_initial_stats_map.get(char_name) or {}
+    if not stats:
+        return 0.0
+
+    em = stats.get("em", 0.0)
+    mizuki_const = (party or {}).get("Mizuki", {}).get("constellation", 0)
+
+    for flag_key, descriptors in FLAG_TO_BUFFS.items():
+        flag_val = event_flags.get(flag_key)
+        if flag_val in (None, "OFF", 0, False):
+            continue
+        for desc in descriptors:
+            btype = desc["type"]
+            if btype not in ("constant", "stack"):
+                continue
+            bkey = desc.get("key", "")
+
+            # Legacy name-based gates (Mizuki C1/C2/C6) check Mizuki's own const,
+            # regardless of which character is being evaluated.
+            if ("Mizuki C1" in bkey and mizuki_const < 1) or \
+               ("Mizuki C2" in bkey and mizuki_const < 2) or \
+               ("Mizuki C6" in bkey and mizuki_const < 6):
+                continue
+            # Generic caster gate.
+            min_c = desc.get("min_constellation")
+            if min_c is not None and (party or {}).get(desc.get("caster"), {}).get("constellation", 0) < int(min_c):
+                continue
+
+            if not _target_applies(desc.get("target", "Party"), char_name, active_character, desc.get("caster")):
+                continue
+            # Element-exclusion filter (mirrors resolve_active_buffs), e.g. Sucrose's
+            # A1 never boosts Anemo chars (incl. Sucrose herself -> no feedback loop).
+            excluded = desc.get("exclude_elements")
+            if excluded:
+                char_elem = CHARACTER_BASE_STATS.get(char_name, {}).get("element", "")
+                if char_elem in excluded:
+                    continue
+
+            if btype == "constant":
+                buff_def = CONDITIONAL_CONSTANT_BUFFS.get(bkey) or {}
+                for stat, raw_val in buff_def.items():
+                    if stat == "em":
+                        em += _get_refinement_val(raw_val, refinement)
+            else:  # stack
+                stack_count = int(event_flags.get(desc.get("stack_flag", flag_key), 0))
+                if stack_count <= 0:
+                    continue
+                buff_def = STACK_BUFFS.get(bkey) or {}
+                for stat, raw_val in buff_def.items():
+                    if stat == "em":
+                        em += _get_refinement_val(raw_val, refinement) * stack_count
+
+    return em
 
 
 # ---------------------------------------------------------------------------
@@ -348,8 +470,12 @@ def resolve_active_buffs(
     mizuki_data = party.get("Mizuki", {})
     mizuki_constellation = mizuki_data.get("constellation", 0)
 
+    # C6 Part 1: while she is in Dreamdrifter state, every party member's
+    # STELLAR damage and STELLAR reaction damage gets bonus crit (resolved as
+    # dedicated stellar_crit_rate / stellar_crit_dmg stats, consumed in damage_calc).
     if event_flags.get("dreamdrifter_state") == "ON" and mizuki_constellation >= 6:
-        add("mizuki_c6_stellar_crit_active", 1.0)
+        add("stellar_crit_rate", 0.10)
+        add("stellar_crit_dmg", 0.20)
 
     mizuki_talents = mizuki_data.get("talents") or mizuki_data.get("talent_levels", [1, 10, 1])
     if isinstance(mizuki_talents, str):
@@ -359,14 +485,54 @@ def resolve_active_buffs(
     else:
         mizuki_skill_lvl = 10
 
+    # Mizuki's flat EM basis (base + gear + strictly-flat EM adds). This
+    # intentionally excludes percentage-derived EM sources (her own VBTD2 10%
+    # self-share, Sucrose A4 share, Aether A4 conversion). It is the basis for
+    # both VBTD2's 10% party share and Mizuki's C6-2 crit scaling.
+    mizuki_flat_em = compute_flat_em(
+        "Mizuki", event_flags, active_character, party, char_initial_stats_map, refinement
+    )
+
+    # Odette talent levels (skill = index 1, burst = index 2 of N/S/B config).
+    odette_data = party.get("Odette", {})
+    odette_talents = odette_data.get("talents") or odette_data.get("talent_levels", [1, 10, 1])
+    if isinstance(odette_talents, str):
+        _parts = odette_talents.split("/")
+        odette_skill_lvl = int(_parts[1]) if len(_parts) > 1 else 10
+        odette_burst_lvl = int(_parts[2]) if len(_parts) > 2 else 10
+    elif isinstance(odette_talents, (list, tuple)) and len(odette_talents) >= 3:
+        odette_skill_lvl = int(odette_talents[1])
+        odette_burst_lvl = int(odette_talents[2])
+    else:
+        odette_skill_lvl = 10
+        odette_burst_lvl = 10
+
+    # Faruzan talent levels (skill = index 1, burst = index 2 of N/S/B config).
+    faruzan_data = party.get("Faruzan", {})
+    faruzan_talents = faruzan_data.get("talents") or faruzan_data.get("talent_levels", [1, 10, 1])
+    if isinstance(faruzan_talents, str):
+        _fp = faruzan_talents.split("/")
+        faruzan_skill_lvl = int(_fp[1]) if len(_fp) > 1 else 10
+        faruzan_burst_lvl = int(_fp[2]) if len(_fp) > 2 else 10
+    elif isinstance(faruzan_talents, (list, tuple)) and len(faruzan_talents) >= 3:
+        faruzan_skill_lvl = int(faruzan_talents[1])
+        faruzan_burst_lvl = int(faruzan_talents[2])
+    else:
+        faruzan_skill_lvl = 10
+        faruzan_burst_lvl = 10
+
     # ------------------------------------------------------------------
     # 1–3. Iterate over FLAG_TO_BUFFS dispatch table
     # ------------------------------------------------------------------
     for flag_key, buff_descriptors in FLAG_TO_BUFFS.items():
-        flag_val = event_flags.get(flag_key)
-
-        # Treat "OFF", 0, None, False as inactive
-        if flag_val in (None, "OFF", 0, False):
+        if flag_key == "always_on":
+            # Permanent/dynamic buffs have no event gate; always resolve them.
+            active = True
+        else:
+            flag_val = event_flags.get(flag_key)
+            # Treat "OFF", 0, None, False as inactive
+            active = flag_val not in (None, "OFF", 0, False)
+        if not active:
             continue
 
         for desc in buff_descriptors:
@@ -376,6 +542,23 @@ def resolve_active_buffs(
             caster = resolve_caster(desc.get("caster"))
 
             # Systematic Constellation Gatekeeping
+            # Generic gate: buff only applies if its CASTER is at the required
+            # constellation (e.g. Odette C2 must be C2+). Future characters can
+            # declare "min_constellation" on any descriptor.
+            min_c = desc.get("min_constellation")
+            if min_c is not None:
+                gate_const = (party or {}).get(caster, {}).get("constellation", 0) if caster else 0
+                if gate_const < int(min_c):
+                    continue
+
+            # Element-exclusion filter (e.g. Sucrose A1 -> non-Anemo allies only).
+            excluded = desc.get("exclude_elements")
+            if excluded:
+                char_elem = CHARACTER_BASE_STATS.get(char_name, {}).get("element", "")
+                if char_elem in excluded:
+                    continue
+
+            # Legacy name-based gates (Mizuki C1/C2/C6).
             if "Mizuki C1" in bkey and mizuki_constellation < 1:
                 continue
             if "Mizuki C2" in bkey and mizuki_constellation < 2:
@@ -417,10 +600,30 @@ def resolve_active_buffs(
                     source_stats = initial_stats
 
                 if bkey == "Mizuki Skill":
-                    skill_scalings_list = [0.18, 0.21, 0.24, 0.27, 0.3, 0.33, 0.36, 0.39, 0.42, 0.45, 0.48, 0.51, 0.54]
-                    scaling_val = skill_scalings_list[max(0, min(mizuki_skill_lvl - 1, len(skill_scalings_list) - 1))]
+                    # Single source of truth lives in skill_scalings.CHARACTER_SKILLS.
+                    scaling_list = CHARACTER_SKILLS["Mizuki"]["Skill"]["Elemental Mastery-Based Swirl DMG Increase"]["scaling"]
+                    scaling_val = scaling_list[max(0, min(mizuki_skill_lvl - 1, len(scaling_list) - 1))]
                     factor = scaling_val / 10.0
                     computed = buff_def["compute"](source_stats, refinement, factor)
+                elif bkey == "Mizuki VBTD EM Share":
+                    # VBTD2 share = 10% of Mizuki's flat EM basis
+                    # ("after flat buffs, before percentage buffs").
+                    computed = mizuki_flat_em * 0.10
+                elif bkey == "Odette Burst":
+                    # 6s self stellar_bonus buff, talent-scaled from skill_scalings.
+                    od_sc = CHARACTER_SKILLS["Odette"]["Burst"]["Snow Swan's Dream Stellar Glimmer Reaction DMG Bonus"]["scaling"]
+                    sv = od_sc[max(0, min(odette_burst_lvl - 1, len(od_sc) - 1))]
+                    computed = sv / 100.0
+                elif bkey == "Faruzan C6 Anemo Bonus":
+                    # Talent-scaled party anemo_bonus from skill_scalings (burst talent).
+                    fa_sc = CHARACTER_SKILLS["Faruzan"]["Burst"]["Anemo DMG Bonus"]["scaling"]
+                    sv = fa_sc[max(0, min(faruzan_burst_lvl - 1, len(fa_sc) - 1))]
+                    computed = sv / 100.0
+                elif bkey == "Sucrose A4 Share":
+                    # 20% of Sucrose's FLAT EM shared to the others (8s window).
+                    # Percentage-derived EM never feeds into itself, so this basis
+                    # excludes VBTD2/A4 etc. (no infinite Sucrose/Mizuki loop).
+                    computed = 0.20 * compute_flat_em("Sucrose", event_flags, active_character, party, char_initial_stats_map, refinement)
                 else:
                     computed = buff_def["compute"](source_stats, refinement)
                 add(target_stat, computed)
@@ -471,11 +674,12 @@ def resolve_active_buffs(
         shared_val = share_def["compute"](caster_stats)
         add(target_stat, shared_val)
 
-    # Systematic C6 Part 2 application for Mizuki (evaluated dynamically with current EM)
+    # Systematic C6 Part 2 application for Mizuki (always on, recomputed per event).
+    # Uses her FLAT EM basis only (excludes %-derived EM sources), per design notes.
     if char_name == "Mizuki" and mizuki_constellation >= 6:
-        mizuki_dynamic_em = initial_stats.get("em", 0.0) + applied_buffs.get("em", 0.0)
-        add("crit_rate", min(max((mizuki_dynamic_em - 500.0), 0.0) * 0.0004, 0.20))
-        add("crit_dmg", min(max((mizuki_dynamic_em - 500.0), 0.0) * 0.0016, 0.80))
+        mb = max(mizuki_flat_em - 500.0, 0.0)
+        add("crit_rate", min(mb * 0.0004, 0.20))
+        add("crit_dmg",  min(mb * 0.0016, 0.80))
 
     return applied_buffs
 
@@ -549,6 +753,8 @@ def compute_final_stats(snapshot_stats: dict) -> dict:
         "Stellar Bonus":  snapshot_stats.get("stellar_bonus",  0.0),
         "Jubilee Mult":   snapshot_stats.get("jubilee_mult",   0.0),
         "Elevation Mult": snapshot_stats.get("elevation_mult", 0.0),
+        "Stellar CR":     snapshot_stats.get("stellar_crit_rate", 0.0),
+        "Stellar CD":     snapshot_stats.get("stellar_crit_dmg",  0.0),
     })
     return res
 

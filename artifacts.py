@@ -27,6 +27,7 @@ ARTIFACTS_BONUSES = {
         "atk_percent": 0.180
     },
     "Viridescent Venerer": {
-        "anemo_bonus": 0.150
+        "anemo_bonus": 0.150,
+        "stellar_bonus": 0.200
     }
 }

@@ -7,7 +7,14 @@ from models import Hit, Ability, FieldSequence
 from skill_scalings import CHARACTER_SKILLS
 
 
-def get_ability_motion_value(character: str, category: str, sub_ability: str, level: int) -> float:
+def get_ability_motion_value(character: str, category: str, sub_ability: str, level: int, stacks: Optional[int] = None) -> float:
+    """
+    Resolves a hit's motion value at a given talent level.
+
+    stacks (optional) is used for per-stack mv increases (e.g. Aether's Burst
+    Frostglow scaling). When omitted, per-stack entries fall back to their full
+    stack count so legacy call-sites keep working unchanged.
+    """
     skill_entry = CHARACTER_SKILLS[character][category][sub_ability]
     
     # 1. Get the base scaled value for the specific level (Level 10 -> index 9)
@@ -16,7 +23,6 @@ def get_ability_motion_value(character: str, category: str, sub_ability: str, le
     
     # 2. Check for an optional mv_increase using .get()
     mv_increase = skill_entry.get("mv_increase")
-    
     if mv_increase is not None:
         if isinstance(mv_increase, (int, float)):
             # e.g., Aether's Charged Attack (mv_increase = 1.4)
@@ -25,8 +31,16 @@ def get_ability_motion_value(character: str, category: str, sub_ability: str, le
             # e.g., Aether's Burst Frostglow bonus list pre-multiplied by 8
             bonus_value = mv_increase[level - 1] / 100.0
             return base_value * (1.0 + bonus_value)
-            
-    # If mv_increase is None or not present, just return the base scaled value
+        return base_value
+
+    # 3. Per-stack mv increase (e.g. Aether's Burst, scales with Frostglow stacks)
+    mv_per_stack = skill_entry.get("mv_per_stack")
+    if mv_per_stack is not None:
+        n = stacks if stacks is not None else 8  # default = full stacks for legacy calls
+        bonus_value = mv_per_stack[level - 1] / 100.0 * n
+        return base_value * (1.0 + bonus_value)
+
+    # If no mv modifier is present, just return the base scaled value
     return base_value
 
 
@@ -216,9 +230,48 @@ odette_recast_c1 = Ability(
     ]
 )
 
+odette_burst = Ability(
+    name="Odette Burst",
+    character="Odette",
+    cooldown=15.0,
+    talent_level=10,
+    talent_type="burst_talent",
+    hits=[
+        Hit("Burst_tick1", 0.000, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Burst", "Slash DMG (Per Hit)", 10), attack_type=AttackType.BURST, scaling_key=("Odette", "Burst", "Slash DMG (Per Hit)")),
+        Hit("Burst_tick2", 0.301, element="Cryo",                     category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Burst", "Slash DMG (Per Hit)", 10), attack_type=AttackType.BURST, scaling_key=("Odette", "Burst", "Slash DMG (Per Hit)")),
+        Hit("Burst_tick3", 0.421, element="Cryo",                     category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Burst", "Slash DMG (Per Hit)", 10), attack_type=AttackType.BURST, scaling_key=("Odette", "Burst", "Slash DMG (Per Hit)")),
+        Hit("Burst_final_hit", 0.51, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Burst", "Final Slash DMG", 10), attack_type=AttackType.BURST, scaling_key=("Odette", "Burst", "Final Slash DMG")),
+        Hit("Plume_1",         2.220, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Plume Dance Move DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Odette", "Skill", "Plume Dance Move DMG")),
+        Hit("Plume_Stellar_1", 2.220, element="Cryo",                     category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Plume Dance Move Stellar Swirl DMG", 10), scaling_key=("Odette", "Skill", "Plume Dance Move Stellar Swirl DMG")),
+        Hit("Wing_1",          4.080, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Wing Dance Move DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Odette", "Skill", "Wing Dance Move DMG")),
+        Hit("Wing_Stellar_1",  4.080, element="Cryo",                     category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Wing Dance Move Stellar Swirl DMG", 10), scaling_key=("Odette", "Skill", "Wing Dance Move Stellar Swirl DMG")),
+        Hit("Plume_2",         6.180, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Plume Dance Move DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Odette", "Skill", "Plume Dance Move DMG")),
+        Hit("Plume_Stellar_2", 6.180, element="Cryo",                     category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Plume Dance Move Stellar Swirl DMG", 10), scaling_key=("Odette", "Skill", "Plume Dance Move Stellar Swirl DMG")),
+        Hit("Wing_2",          8.010, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Wing Dance Move DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Odette", "Skill", "Wing Dance Move DMG")),
+        Hit("Wing_Stellar_2",  8.010, element="Cryo",                     category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Wing Dance Move Stellar Swirl DMG", 10), scaling_key=("Odette", "Skill", "Wing Dance Move Stellar Swirl DMG")),
+        Hit("Plume_3",        10.110, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Plume Dance Move DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Odette", "Skill", "Plume Dance Move DMG")),
+        Hit("Plume_Stellar_3",10.110, element="Cryo",                     category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Plume Dance Move Stellar Swirl DMG", 10), scaling_key=("Odette", "Skill", "Plume Dance Move Stellar Swirl DMG")),
+        Hit("Wing_3",         11.940, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Wing Dance Move DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Odette", "Skill", "Wing Dance Move DMG")),
+        Hit("Wing_Stellar_3", 11.940, element="Cryo",                     category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Wing Dance Move Stellar Swirl DMG", 10), scaling_key=("Odette", "Skill", "Wing Dance Move Stellar Swirl DMG")),
+        Hit("Plume_4",        14.040, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Plume Dance Move DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Odette", "Skill", "Plume Dance Move DMG")),
+        Hit("Plume_Stellar_4",14.040, element="Cryo",                     category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Plume Dance Move Stellar Swirl DMG", 10), scaling_key=("Odette", "Skill", "Plume Dance Move Stellar Swirl DMG")),
+        Hit("Wing_4",         15.901, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Wing Dance Move DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Odette", "Skill", "Wing Dance Move DMG")),
+        Hit("Wing_Stellar_4", 15.901, element="Cryo",                     category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Wing Dance Move Stellar Swirl DMG", 10), scaling_key=("Odette", "Skill", "Wing Dance Move Stellar Swirl DMG")),
+        Hit("Plume_5",        17.940, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Plume Dance Move DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Odette", "Skill", "Plume Dance Move DMG")),
+        Hit("Plume_Stellar_5",17.940, element="Cryo",                     category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Plume Dance Move Stellar Swirl DMG", 10), scaling_key=("Odette", "Skill", "Plume Dance Move Stellar Swirl DMG")),
+        Hit("Wing_5",         19.800, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Wing Dance Move DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Odette", "Skill", "Wing Dance Move DMG")),
+        Hit("Wing_Stellar_5", 19.800, element="Cryo",                     category=ActionCategory.STELLAR_DMG,  stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Wing Dance Move Stellar Swirl DMG", 10), scaling_key=("Odette", "Skill", "Wing Dance Move Stellar Swirl DMG")),
+    ]
+)
+
+
 odette_ee = FieldSequence("OdetteEE", "Odette", swap_out_time=2.371)
 odette_ee.add_ability(0.660, odette_cast)
 odette_ee.add_ability(1.170, odette_recast)
+
+odette_qe = FieldSequence("OdetteQE", "Odette", swap_out_time=2.371)
+odette_qe.add_ability(2.16, odette_burst)
+odette_qe.add_ability(2.851, odette_recast)
 
 # --- Faruzan ---
 faruzan_burst = Ability(
@@ -302,6 +355,41 @@ mizuki_sacfrag_fill.add_ability(0.000, mizuki_sacfrag_skill)
 mizuki_nuke_hit = Hit("Mizuki Nuke Hit", 0.500, element="Anemo", category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.EM, motion_value=10.00)
 mizuki_c1_mini_nuke_hit = Hit("Mizuki C1 Mini Nuke", 0.0, element="Anemo", category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.EM, motion_value=4.00)
 
+#Sucrose
+sucrose_skill = Ability(
+    name="Sucrose Skill",
+    character="Sucrose",
+    cooldown=15.0,
+    talent_level=10,
+    talent_type="skill_talent",
+    hits=[
+        Hit("Cast",  0.000, element="Anemo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Sucrose", "Skill", "Skill DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Sucrose", "Skill", "Skill DMG")),
+    ]
+)
+
+sucrose_burst = Ability(
+    name="Sucrose Burst",
+    character="Sucrose",
+    cooldown=20.0,
+    talent_level=10,
+    talent_type="burst_talent",
+    hits=[
+        Hit("DoT",  0.000, element="Anemo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Sucrose", "Burst", "DoT", 10), attack_type=AttackType.BURST, scaling_key=("Sucrose", "Burst", "DoT")),
+        Hit("Absorption",  0.000, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Sucrose", "Burst", "Additional Elemental DMG", 10), attack_type=AttackType.BURST, scaling_key=("Sucrose", "Burst", "Additional Elemental DMG")),
+        Hit("DoT",  1.889, element="Anemo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Sucrose", "Burst", "DoT", 10), attack_type=AttackType.BURST, scaling_key=("Sucrose", "Burst", "DoT")),
+        Hit("Absorption",  1.889, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Sucrose", "Burst", "Additional Elemental DMG", 10), attack_type=AttackType.BURST, scaling_key=("Sucrose", "Burst", "Additional Elemental DMG")),
+        Hit("DoT",  3.869, element="Anemo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Sucrose", "Burst", "DoT", 10), attack_type=AttackType.BURST, scaling_key=("Sucrose", "Burst", "DoT")),
+        Hit("Absorption",  3.869, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Sucrose", "Burst", "Additional Elemental DMG", 10), attack_type=AttackType.BURST, scaling_key=("Sucrose", "Burst", "Additional Elemental DMG")),
+        Hit("DoT",  5.729, element="Anemo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Sucrose", "Burst", "DoT", 10), attack_type=AttackType.BURST, scaling_key=("Sucrose", "Burst", "DoT")),
+        Hit("Absorption",  5.729, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Sucrose", "Burst", "Additional Elemental DMG", 10), attack_type=AttackType.BURST, scaling_key=("Sucrose", "Burst", "Additional Elemental DMG")),
+    ]
+)
+sucrose_e = FieldSequence("Sucrose E", "Sucrose", swap_out_time=1.259)
+sucrose_e.add_ability(1.02, sucrose_skill)
+
+sucrose_eq = FieldSequence("Sucrose EQ", "Sucrose", swap_out_time=1.59)
+sucrose_eq.add_ability(1.02, sucrose_skill)
+sucrose_eq.add_ability(3.119, sucrose_burst)
 
 def configure_field_sequence_talents(field_sequence: FieldSequence, talents: Union[str, Tuple[int, int, int], list]) -> FieldSequence:
     """

@@ -32,10 +32,8 @@ def go_to_rotation_tab():
 WEAPON_STATS.setdefault("Select Weapon", {"base_atk": 0.0})
 
 # Set page layout to wide
+# Note: st.set_page_config may only be called once per app run.
 st.set_page_config(page_title="Yumemizuki Mizuki's Rotation Damage Calculator", layout="wide")
-
-# Set page layout to wide
-st.set_page_config(page_title="Genshin Rotation Simulator", layout="wide")
 
 import base64
 
@@ -344,15 +342,23 @@ def build_timeline_dataframe(timeline_events):
             "A4": event.get("mizuki_a4_state", "OFF"),
             "VBTD": event.get("vbtd_state", "OFF"),
             "C1 Debuff": event.get("c1_debuff_state", "OFF"),
-            "Fanz Buff": event.get("faruzan_buff_state", "OFF"),
-            "Fanz Debuff": event.get("faruzan_debuff_state", "OFF"),
+            "Faruzan Buff": event.get("faruzan_buff_state", "OFF"),
+            "Faruzan Debuff": event.get("faruzan_debuff_state", "OFF"),
             "Aether C2": event.get("aether_c2_state", "OFF"),
+            "Aether C2+": event.get("aether_c2_enhanced_state", "OFF"),
+            "Frostglow": event.get("frostglow_stacks", 0),
+            "Aether C6": event.get("aether_c6_state", "OFF"),
             "Marvelous Stacks": event.get("marvelous_stacks", 0),
             "HotF": event.get("hotf_state", "OFF"),
             "Dream": event.get("dreamdrifter_state", "OFF"),
             "VV": event.get("vv_state", "OFF"),
             "Instructor": event.get("instructor_state", "OFF"),
             "Cryo Res": event.get("cryo_resonance_state", "OFF"),
+            "Sucrose A1": event.get("sucrose_a1_state", "OFF"),
+            "Sucrose A4": event.get("sucrose_a4_state", "OFF"),
+            "Sucrose C6": event.get("sucrose_c6_state", "OFF"),
+            "Exaiphanes": event.get("exaiphanes_blade_state", "OFF"),
+            "Silver Light": event.get("silver_light_stacks", 0),
         }
         rows.append(row)
     
@@ -389,7 +395,7 @@ tab1, tab2, tab3, tab4 = st.tabs([
     "Enemy Configuration", 
     "Rotation Setup", 
     "Simulation Results"
-], key="main_tabs", on_change="rerun")
+], key="main_tabs", on_change=st.rerun)
 
 # =========================================================
 # TAB 1: TEAM & GEAR SETUP
@@ -420,13 +426,13 @@ with tab1:
             
             # Rebuild Custom Field Sequences from raw recipe data
             from models import FieldSequence, Rotation, Trial
-            from abilities import aether_skill, aether_n1, aether_n1ca, aether_burst, odette_cast, odette_recast, faruzan_burst, mizuki_skill
+            from abilities import aether_skill, aether_n1, aether_n1ca, aether_burst_enhanced, odette_cast, odette_recast, faruzan_burst, mizuki_skill
             
             ability_lookup = {
                 "N1": aether_n1,
                 "Charged Attack": aether_n1ca,
                 "Elemental Skill": aether_skill,
-                "Elemental Burst": aether_burst,
+                "Elemental Burst": aether_burst_enhanced,
                 "Skill Cast": odette_cast,
                 "Skill Recast": odette_recast,
                 "Mizuki Skill": mizuki_skill,
@@ -776,7 +782,7 @@ with tab1:
                                     numeric_val = numeric_val / 100.0
                                 subs_total[sub_key] = subs_total.get(sub_key, 0.0) + numeric_val
 
-                    initial_stats = build_initial_stats(char_name, data["level"], weapon, artifact_set, main_stats_total, subs_total)
+                    initial_stats = build_initial_stats(char_name, data["level"], weapon, artifact_set, main_stats_total, subs_total, refinement=data["refinement"])
                     card_stats = compute_card_stats(initial_stats)
 
                     my_party[char_name] = {
