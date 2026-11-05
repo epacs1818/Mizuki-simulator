@@ -26,7 +26,7 @@ def get_ability_motion_value(character: str, category: str, sub_ability: str, le
     if mv_increase is not None:
         if isinstance(mv_increase, (int, float)):
             # e.g., Aether's Charged Attack (mv_increase = 1.4)
-            return base_value * mv_increase
+            return base_value + mv_increase  # Aether CA: ADDITIVE (base + 1.4)
         elif isinstance(mv_increase, list):
             # e.g., Aether's Burst Frostglow bonus list pre-multiplied by 8
             bonus_value = mv_increase[level - 1] / 100.0

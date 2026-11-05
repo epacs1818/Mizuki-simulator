@@ -472,7 +472,8 @@ class RotationTimeline:
                         vbtd_quill_active = True
                         fire_vbtd_nuke = True
                         mizuki_em = self.char_initial_stats_map.get("Mizuki", {}).get("em", 0.0)
-                        event["quill_damage"] = mizuki_em * 10.0
+                        # Nuke base scales on Mizuki's EFFECTIVE DDS EM (initial * VBTD2 self-share).
+                        event["quill_damage"] = mizuki_em * 10.0 * 1.10
                         mizuki_nuke_armed = False
 
                 # Inject Auditable States into Event Dict for UI / Console Table
@@ -497,6 +498,10 @@ class RotationTimeline:
 
                 # Faruzan's BASE ATK (character + weapon base, ignoring atk% / flat).
                 faruzan_base_atk = self.char_initial_stats_map.get("Faruzan", {}).get("base_atk", 0.0)
+
+                # Resolve the DEBUFF state from the PRIOR expiration (before this event's
+                # own refresh), so the applying hit never benefits from the shred it spawned.
+                faruzan_debuff_active = (faruzan_debuff_expiration is not None) and (t <= faruzan_debuff_expiration)
 
                 # Helper function to build the dynamic collapse event dictionary
                 def create_collapse_event(c_time):
@@ -549,7 +554,6 @@ class RotationTimeline:
                     faruzan_quill = 0.32 * faruzan_base_atk
                     event["quill_damage"] = event.get("quill_damage", 0.0) + faruzan_quill
 
-                faruzan_debuff_active = (faruzan_debuff_expiration is not None) and (t <= faruzan_debuff_expiration)
                 # Buff stat effects (crit_dmg / anemo_bonus) apply only to ANEMO hits,
                 # so the buff state is shown as ON for Anemo-element events only.
                 event["faruzan_buff_state"] = "ON" if (faruzan_buff_active and element == "Anemo") else "OFF"
@@ -612,7 +616,8 @@ class RotationTimeline:
 
                     if current_c1_active:
                         mizuki_em = self.char_initial_stats_map.get("Mizuki", {}).get("em", 0.0)
-                        swirl_hit_event["quill_damage"] = mizuki_em * 5.5
+                        # C1 quill = 550% of Mizuki's EFFECTIVE DDS EM (initial * VBTD2 self-share).
+                        swirl_hit_event["quill_damage"] = mizuki_em * 5.5 * 1.10
 
                         mini_nuke_event = {
                             "global_time": t + mizuki_c1_mini_nuke_hit.relative_delay,
@@ -735,6 +740,13 @@ class RotationTimeline:
             aether_data = self.party.get("Aether", {})
             aether_c2_ok = aether_data.get("constellation", 0) >= 2
 
+            # C2 Enhanced state is resolved from the PRE-arm value, so the applying hit does
+            # NOT benefit from a C2E it just triggered (the game deals damage first).
+            c2_enh_on = (aether_c2_ok
+                         and aether_c2_basic_holder is not None
+                         and aether_c2_basic_holder == active_character
+                         and aether_c2_enhanced_holder == active_character)
+
             if aether_c2_ok:
                 # C2 Basic arms for the ACTIVE character on a skill TICK (not the cast).
                 if e_type == "HIT" and char == "Aether" and ability_name == "Elemental Skill" and hit_name != "Skill_Initial":
@@ -751,14 +763,15 @@ class RotationTimeline:
             c2_basic_on = (aether_c2_ok
                            and aether_c2_basic_holder is not None
                            and aether_c2_basic_holder == active_character)
-            c2_enh_on = c2_basic_on and aether_c2_enhanced_holder == active_character
             event["aether_c2_state"] = "ON" if c2_basic_on else "OFF"
             event["aether_c2_enhanced_state"] = "ON" if c2_enh_on else "OFF"
 
             # Frostglow + Aether C6 (15s window) audit columns.
             c6_on = (aether_data.get("constellation", 0) >= 6
                      and aether_c6_expiration is not None and t <= aether_c6_expiration)
-            event["frostglow_stacks"] = aether_frostglow
+            # On burst events show the number of stacks that were consumed (pre-reset);
+            # otherwise the current stack count.
+            event["frostglow_stacks"] = event.get("frostglow_consumed", aether_frostglow)
             event["aether_c6_state"] = "ON" if c6_on else "OFF"
             event["aether_c6_stacks"] = aether_c6_stacks if c6_on else 0
 
@@ -790,12 +803,14 @@ class RotationTimeline:
             # 6c. Weapon passives (holder-only): Exaiphanes Blade ATK proc + Silver Light stacks.
             #      Exaiphanes: the holder's HITS grant +40% ATK for 8s, internal 5s CD.
             exaiphanes_holder = (char if (self.party.get(char, {}).get("weapon") or "").split(" (")[0] == "Exaiphanes Blade" else None)
+            # "after every hit": the flag reflects a buff already active BEFORE this
+            # hit proc, so the triggering hit itself does NOT get the +40% ATK.
+            exaiphanes_on = (exaiphanes_atk_expiration is not None
+                             and t < exaiphanes_atk_expiration and exaiphanes_holder is not None)
+            event["exaiphanes_blade_state"] = "ON" if exaiphanes_on else "OFF"
             if e_type == "HIT" and exaiphanes_holder is not None and t >= exaiphanes_atk_proc_cd:
                 exaiphanes_atk_expiration = t + 8.0
                 exaiphanes_atk_proc_cd = t + 5.0
-            exaiphanes_on = (exaiphanes_atk_expiration is not None
-                             and t <= exaiphanes_atk_expiration and exaiphanes_holder is not None)
-            event["exaiphanes_blade_state"] = "ON" if exaiphanes_on else "OFF"
 
             #      Silver Light: the holder gains +1 stack per skill cast (and Odette
             #      recast), each stack expiring after 12s.
@@ -876,11 +891,14 @@ class RotationTimeline:
             # 8. Heart of the Furnace (HotF) Gear Effect Logic
             # Triggers when whoever holds the piece deals Stellar DMG OR triggers a
             # swirl (Stellar Reaction). Refreshes the 12s window on each new cast.
+            # The applying hit must NOT benefit from the buff (the game deals damage
+            # before casting/refreshing it), so resolve the state from the PRIOR window.
+            hotf_active = (hotf_expiration_time is not None) and (t <= hotf_expiration_time)
+
             if hotf_holder and char == hotf_holder and e_type == "HIT" and (
                     cat == ActionCategory.STELLAR_DMG or is_stellar_swirl):
                 hotf_expiration_time = t + 12.0
 
-            hotf_active = (hotf_expiration_time is not None) and (t <= hotf_expiration_time)
             event["hotf_state"] = "ON" if hotf_active else "OFF"
 
             i += 1
@@ -957,6 +975,11 @@ class RotationTimeline:
                 event["crit_mult_avg"] = dmg.get("crit_mult_average")
                 event["def_mult"] = dmg.get("def_mult")
                 event["res_mult"] = dmg.get("res_mult")
+                # Snapshot stats used for this hit's damage (owner, after buffs).
+                event["stat_atk"] = final_stats.get("ATK", 0.0)
+                event["stat_em"] = final_stats.get("EM", 0.0)
+                event["stat_cr"] = final_stats.get("CR", 0.05)
+                event["stat_cd"] = final_stats.get("CD", 0.50)
             else:
                 event["non_crit"] = None
                 event["crit_damage"] = None
@@ -969,6 +992,10 @@ class RotationTimeline:
                 event["crit_mult_avg"] = None
                 event["def_mult"] = None
                 event["res_mult"] = None
+                event["stat_atk"] = None
+                event["stat_em"] = None
+                event["stat_cr"] = None
+                event["stat_cd"] = None
 
     def get_analytics_summary(self, trial_end_time: float) -> dict:
         """

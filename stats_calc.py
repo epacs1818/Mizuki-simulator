@@ -238,6 +238,8 @@ FLAG_TO_BUFFS = {
     "always_on": [
         {"type": "non_constant", "key": "Odette A4",                     "target": "Self",   "caster": "Odette"},
         {"type": "non_constant", "key": "Odette_jubilee",                "target": "Party",  "caster": "Odette"},
+        {"type": "non_constant", "key": "Aether A4",                     "target": "Self",   "caster": "Aether"},
+        {"type": "non_constant", "key": "Aether_jubilee",                "target": "Party",  "caster": "Aether"},
     ],
 
     # Odette Burst: 6s self stellar_bonus buff (target Self so it only helps her).
@@ -603,8 +605,11 @@ def resolve_active_buffs(
                     # Single source of truth lives in skill_scalings.CHARACTER_SKILLS.
                     scaling_list = CHARACTER_SKILLS["Mizuki"]["Skill"]["Elemental Mastery-Based Swirl DMG Increase"]["scaling"]
                     scaling_val = scaling_list[max(0, min(mizuki_skill_lvl - 1, len(scaling_list) - 1))]
-                    factor = scaling_val / 10.0
-                    computed = buff_def["compute"](source_stats, refinement, factor)
+                    factor = scaling_val / 1000.0  # swirl bonus = 4.5% of EM as a decimal (0.00045 * EM)
+                    # The swirl-bonus EM basis is her EFFECTIVE DDS EM, which includes her own
+                    # VBTD2 self-share (her EM gains +10% while it is being shared to the party).
+                    em_basis = source_stats.get("em", 0.0) * 1.10
+                    computed = buff_def["compute"]({**source_stats, "em": em_basis}, refinement, factor)
                 elif bkey == "Mizuki VBTD EM Share":
                     # VBTD2 share = 10% of Mizuki's flat EM basis
                     # ("after flat buffs, before percentage buffs").

@@ -332,12 +332,24 @@ def build_timeline_dataframe(timeline_events):
             "Active": event.get("active_character", "None"),
             "Owner": event.get("character", ""),
             "Action": event.get("action", ""),
+            "Elemental App": event.get("elem_app", "-"),
             "Cryo Aura": event.get("cryo_aura", "-"),
             "Reaction": event.get("reaction", "-"),
             "Non-Crit DMG": f"{nc:.1f}" if nc is not None else "-",
             "Crit DMG": f"{cd:.1f}" if cd is not None else "-",
             "Average DMG": f"{avg:.1f}" if avg is not None else "-",
             "Effective Avg DMG": f"{eff:.1f}" if eff is not None else "-",
+            "Base DMG": f"{event["base_damage"]:.1f}" if event.get("base_damage") is not None else "-",
+            "Quills": f"{event["quills_total"]:.1f}" if event.get("quills_total") is not None else "-",
+            "Bonus Mult": f"{event["bonus_mult"]:.3f}" if event.get("bonus_mult") is not None else "-",
+            "Elev": f"{event["elevation_mult"]:.3f}" if event.get("elevation_mult") is not None else "-",
+            "Crit Mult": f"{event["crit_mult_avg"]:.3f}" if event.get("crit_mult_avg") is not None else "-",
+            "DEF Mult": f"{event["def_mult"]:.3f}" if event.get("def_mult") is not None else "-",
+            "Res Mult": f"{event["res_mult"]:.3f}" if event.get("res_mult") is not None else "-",
+            "ATK": f"{event["stat_atk"]:.0f}" if event.get("stat_atk") is not None else "-",
+            "EM": f"{event["stat_em"]:.0f}" if event.get("stat_em") is not None else "-",
+            "CR%": f"{event["stat_cr"]*100:.1f}" if event.get("stat_cr") is not None else "-",
+            "CD%": f"{event["stat_cd"]*100:.1f}" if event.get("stat_cd") is not None else "-",
             "DDS": event.get("dreamdrifter_state", "OFF"),
             "A4": event.get("mizuki_a4_state", "OFF"),
             "VBTD": event.get("vbtd_state", "OFF"),
@@ -1352,7 +1364,12 @@ with tab4:
                 if "timeline_events" in entry and entry["timeline_events"]:
                     st.markdown("##### Rotation Timeline Table")
                     df_timeline = build_timeline_dataframe(entry["timeline_events"])
-                    st.dataframe(df_timeline, use_container_width=True)
+                    show_advanced = st.checkbox("Show detailed columns", value=False, key=f"show_detail_{real_idx}")
+                    if show_advanced:
+                        st.dataframe(df_timeline, use_container_width=True)
+                    else:
+                        del_cols = ["Time (s)", "Active", "Owner", "Action", "Elemental App", "Reaction", "Average DMG"]
+                        st.dataframe(df_timeline[del_cols], use_container_width=True)
 
                     st.markdown("<br><hr>", unsafe_allow_html=True)
                                         

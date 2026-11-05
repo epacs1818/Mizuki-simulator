@@ -340,10 +340,10 @@ def calculate_stellar_reaction_damage(hit, final_stats, enemy_stats, party_dict=
         contrib_crit_mult_average[char_name] = 1.0 + c_rate * c_dmg
         contrib_crit_mult_absolute[char_name] = 1.0 + c_dmg
 
-        # Contributor pre-share metrics. The quill is NOT folded in here: it is applied
-        # once at the AGGREGATE level, after the contribution weighting (see below;
-        # PENDING in-game verification).
-        q_base = b_val * bonus_mult
+        # Contributor pre-share metrics. Quill is applied PER-CONTRIBUTION (after the
+        # (stellar+em) bonus, but before crit/elevation/res/share): the swirl quill
+        # boosts EVERY contribution independently.
+        q_base = b_val * bonus_mult + quill_damage
 
         # non_crit: base with 0% crit (crit factor = 1.0)
         nc_val = q_base * elevation_mult * res_mult
@@ -395,20 +395,10 @@ def calculate_stellar_reaction_damage(hit, final_stats, enemy_stats, party_dict=
         # Accumulate probability-weighted score into total expected damage
         expected_damage += prob * scenario_score
 
-    # Quill added POST-contribution (PENDING in-game verification): applied once to the
-    # aggregate. It skips bonus_mult but keeps elevation, res and an expected crit
-    # factor (share-weighted average over the contributors).
-    w1 = weights[:n]
-    wsum = float(w1.sum()) or 1.0
-    exp_crit = float(np.dot(np.array([contrib_crit_mult_average[c] for c in contributors]), w1) / wsum)
-    exp_abs = float(np.dot(np.array([contrib_crit_mult_absolute[c] for c in contributors]), w1) / wsum)
-    q_nc = quill_damage * elevation_mult * res_mult
-
-    expected_damage += q_nc * exp_crit
     effective_expected_damage = expected_damage / res_mult if res_mult > 0 else expected_damage
 
-    non_crit = float(np.dot(np.sort(non_crit_arr)[::-1], weights[:len(non_crit_arr)])) + q_nc
-    crit_damage = float(np.dot(np.sort(crit_damages_arr)[::-1], weights[:len(crit_damages_arr)])) + q_nc * exp_abs
+    non_crit = float(np.dot(np.sort(non_crit_arr)[::-1], weights[:len(non_crit_arr)]))
+    crit_damage = float(np.dot(np.sort(crit_damages_arr)[::-1], weights[:len(crit_damages_arr)]))
     average_damage = float(expected_damage)
     effective_average_damage = float(effective_expected_damage)
 
