@@ -550,13 +550,16 @@ class RotationTimeline:
                 # 3. Faruzan Quill: 32% of her BASE_ATK added to any ANEMO + STANDARD hit
                 #    from a buffed character (base = character+weapon, ignores atk% / flat).
                 if (e_type == "HIT" and faruzan_buff_active and element == "Anemo"
-                        and cat == ActionCategory.STANDARD_DMG):
+                        and cat == ActionCategory.STANDARD_DMG and char == active_character):
                     faruzan_quill = 0.32 * faruzan_base_atk
                     event["quill_damage"] = event.get("quill_damage", 0.0) + faruzan_quill
 
                 # Buff stat effects (crit_dmg / anemo_bonus) apply only to ANEMO hits,
                 # so the buff state is shown as ON for Anemo-element events only.
-                event["faruzan_buff_state"] = "ON" if (faruzan_buff_active and element == "Anemo") else "OFF"
+                event["faruzan_buff_state"] = "ON" if (faruzan_buff_active and element == "Anemo" and char == active_character) else "OFF"
+                # Window-only flag: gates Faruzan's buff PER-CONTRIBUTOR in swirl reactions
+                # (the buff only reaches the ACTIVE character).
+                event["faruzan_buff_window"] = "ON" if faruzan_buff_active else "OFF"
                 event["faruzan_debuff_state"] = "ON" if faruzan_debuff_active else "OFF"
             else:
                 event["faruzan_buff_state"] = "OFF"
@@ -607,6 +610,7 @@ class RotationTimeline:
                         "vbtd_state": event.get("vbtd_state", "OFF"),
                         "c1_debuff_state": event.get("c1_debuff_state", "OFF"),
                         "faruzan_buff_state": event.get("faruzan_buff_state", "OFF"),
+                        "faruzan_buff_window": event.get("faruzan_buff_window", "OFF"),
                         "faruzan_debuff_state": event.get("faruzan_debuff_state", "OFF"),
                         "aether_c2_state": event.get("aether_c2_state", "OFF"),
                         "marvelous_stacks": event.get("marvelous_stacks", 0),
@@ -615,9 +619,9 @@ class RotationTimeline:
                     self.global_events.insert(i + 1, swirl_hit_event)
 
                     if current_c1_active:
-                        mizuki_em = self.char_initial_stats_map.get("Mizuki", {}).get("em", 0.0)
-                        # C1 quill = 550% of Mizuki's EFFECTIVE DDS EM (initial * VBTD2 self-share).
-                        swirl_hit_event["quill_damage"] = mizuki_em * 5.5 * 1.10
+                        # C1 quill = 550% of Mizuki's EM at the swirl moment; its base is
+                        # computed in the reaction calc from Mizuki's event-time stats.
+                        swirl_hit_event["c1_quill"] = True
 
                         mini_nuke_event = {
                             "global_time": t + mizuki_c1_mini_nuke_hit.relative_delay,
@@ -639,6 +643,7 @@ class RotationTimeline:
                             "vbtd_state": event.get("vbtd_state", "OFF"),
                             "c1_debuff_state": event.get("c1_debuff_state", "OFF"),
                             "faruzan_buff_state": event.get("faruzan_buff_state", "OFF"),
+                        "faruzan_buff_window": event.get("faruzan_buff_window", "OFF"),
                             "faruzan_debuff_state": event.get("faruzan_debuff_state", "OFF"),
                             "aether_c2_state": event.get("aether_c2_state", "OFF"),
                             "marvelous_stacks": event.get("marvelous_stacks", 0),
@@ -672,6 +677,7 @@ class RotationTimeline:
                                     "level": active_vortex.level
                                 },
                                 "faruzan_buff_state": event.get("faruzan_buff_state", "OFF"),
+                        "faruzan_buff_window": event.get("faruzan_buff_window", "OFF"),
                                 "faruzan_debuff_state": event.get("faruzan_debuff_state", "OFF"),
                                 "aether_c2_state": event.get("aether_c2_state", "OFF"),
                                 "marvelous_stacks": event.get("marvelous_stacks", 0),
@@ -947,6 +953,7 @@ class RotationTimeline:
                         "CD": p_init.get("crit_dmg", 0.50),
                         "crit_rate": p_init.get("crit_rate", 0.05),
                         "crit_dmg": p_init.get("crit_dmg", 0.50),
+                        "EM": p_init.get("em", p_init.get("EM", 0.0)),
                         "rv_mode": bool(p_d.get("rv_mode", False)),
                     }
                     if event.get("cryo_resonance_state") == "ON":
@@ -956,7 +963,53 @@ class RotationTimeline:
                 if char in party_stats_dict:
                     party_stats_dict[char]["CR"] = final_stats.get("CR", party_stats_dict[char]["CR"])
                     party_stats_dict[char]["CD"] = final_stats.get("CD", party_stats_dict[char]["CD"])
+                    party_stats_dict[char]["crit_rate"] = final_stats.get("CR", party_stats_dict[char]["crit_rate"])
+                    party_stats_dict[char]["crit_dmg"] = final_stats.get("CD", party_stats_dict[char]["crit_dmg"])
+                    party_stats_dict[char]["EM"] = final_stats.get("EM", final_stats.get("em", party_stats_dict[char]["EM"]))
                     party_stats_dict[char]["rv_mode"] = bool(char_data.get("rv_mode", False))
+
+                # Reaction contributors resolve their buffed stats AT THIS EVENT (swirls
+                # and vortex explosions), so each contributor's crit / EM is taken from
+                # the moment of the hit. Faruzan's buff reaches only the ACTIVE char.
+                vmeta = event.get("vortex_metadata")
+                smeta = event.get("swirl_metadata")
+                contributor_names = []
+                if vmeta:
+                    contributor_names = [c for c in set(
+                        (vmeta.get("anemo_contributors") or []) + (vmeta.get("cryo_contributors") or [])) if c]
+                elif smeta:
+                    ac = smeta.get("anemo_contributor")
+                    cl = smeta.get("cryo_contributors", []) or []
+                    contributor_names = list(dict.fromkeys(([ac] if ac else []) + [c for c in cl if c]))
+
+                for cname in contributor_names:
+                    if cname not in party_stats_dict:
+                        continue
+                    c_data = self.party.get(cname, {})
+                    c_init = self.char_initial_stats_map.get(cname)
+                    if c_init is None:
+                        c_init = build_initial_stats(cname, None, None, {}, {})
+                        c_init = apply_permanent_buffs(c_init, cname)
+                        self.char_initial_stats_map[cname] = c_init
+                    c_flags = dict(event)
+                    c_flags["faruzan_buff_state"] = (
+                        "ON" if (cname == active_char and event.get("faruzan_buff_window") == "ON") else "OFF"
+                    )
+                    c_snap = build_snapshot_stats(
+                        initial_stats=c_init,
+                        event_flags=c_flags,
+                        party=self.party,
+                        refinement=c_data.get("refinement", 1),
+                        char_name=cname,
+                        active_character=active_char,
+                        char_initial_stats_map=self.char_initial_stats_map,
+                    )
+                    c_final = compute_final_stats(c_snap)
+                    party_stats_dict[cname]["CR"] = c_final.get("CR", party_stats_dict[cname]["CR"])
+                    party_stats_dict[cname]["CD"] = c_final.get("CD", party_stats_dict[cname]["CD"])
+                    party_stats_dict[cname]["crit_rate"] = c_final.get("CR", party_stats_dict[cname]["crit_rate"])
+                    party_stats_dict[cname]["crit_dmg"] = c_final.get("CD", party_stats_dict[cname]["crit_dmg"])
+                    party_stats_dict[cname]["EM"] = c_final.get("EM", c_final.get("em", party_stats_dict[cname]["EM"]))
 
                 dmg = calculate_damage(
                     hit=event,

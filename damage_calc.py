@@ -13,6 +13,7 @@ class HitDamageContext:
             self.character = obj.get("character")
             self.swirl_metadata = obj.get("swirl_metadata")
             self.vortex_metadata = obj.get("vortex_metadata")
+            self.c1_quill = bool(obj.get("c1_quill", False))
             self.action = obj.get("action", "")
             self.name = obj.get("hit_name", obj.get("action", ""))
         else:
@@ -25,6 +26,7 @@ class HitDamageContext:
             self.character = getattr(obj, "character", None)
             self.swirl_metadata = getattr(obj, "swirl_metadata", None)
             self.vortex_metadata = getattr(obj, "vortex_metadata", None)
+            self.c1_quill = bool(getattr(obj, "c1_quill", False))
             self.action = getattr(obj, "name", "")
             self.name = getattr(obj, "name", "")
 
@@ -321,7 +323,9 @@ def calculate_stellar_reaction_damage(hit, final_stats, enemy_stats, party_dict=
     em = final_stats.get("EM", final_stats.get("em", 0.0))
     em_bonus = (6.0 * em) / (2000.0 + em)
     stellar_bonus = final_stats.get("stellar_bonus", final_stats.get("Stellar Bonus", 0.0))
-    bonus_mult = 1.0 + em_bonus + stellar_bonus
+    jubilee_mult = final_stats.get("jubilee_mult", final_stats.get("Jubilee Mult", 0.0))
+    # The team Jubilee (Aether + Odette) multiplies the swirl reaction bonus too.
+    bonus_mult = (1.0 + jubilee_mult) * (1.0 + em_bonus + stellar_bonus)
     quill_damage = quill_damage or final_stats.get("quill_damage", 0.0) or (hit.get("quill_damage", 0.0) if isinstance(hit, dict) else getattr(hit, "quill_damage", 0.0))
 
     elevation_val = final_stats.get("elevation_mult", final_stats.get("Elevation Mult", 0.0))
@@ -363,7 +367,12 @@ def calculate_stellar_reaction_damage(hit, final_stats, enemy_stats, party_dict=
         # Base damage for this contributor
         b_val = get_base_damage_for_level(char_level) * reaction_coef
         contrib_base_damage[char_name] = b_val
-        contrib_bonus_mult[char_name] = bonus_mult
+        # em_bonus uses THIS contributor's EM at the event moment; the swirl-wide
+        # stellar_bonus and team Jubilee stay constant across contributors.
+        em_c = float(char_info.get("EM", char_info.get("em", em)))
+        em_bonus_c = (6.0 * em_c) / (2000.0 + em_c)
+        bonus_mult_c = (1.0 + jubilee_mult) * (1.0 + em_bonus_c + stellar_bonus)
+        contrib_bonus_mult[char_name] = bonus_mult_c
         contrib_elevation_mult[char_name] = elevation_mult
         contrib_res_mult[char_name] = res_mult
 
@@ -391,7 +400,7 @@ def calculate_stellar_reaction_damage(hit, final_stats, enemy_stats, party_dict=
         # Contributor pre-share metrics. The quill is NOT folded in here: it is applied
         # once at the AGGREGATE level, after the contribution weighting (see below;
         # PENDING in-game verification).
-        q_base = b_val * bonus_mult
+        q_base = b_val * bonus_mult_c
 
         # non_crit: base with 0% crit (crit factor = 1.0)
         nc_val = q_base * elevation_mult * res_mult
@@ -417,9 +426,9 @@ def calculate_stellar_reaction_damage(hit, final_stats, enemy_stats, party_dict=
     elif n == 3:
         weights = np.array([0.6, 0.3, 0.1])
     elif n == 2:
-        weights = np.array([0.7, 0.3])
+        weights = np.array([0.6, 0.3])
     else:
-        weights = np.array([1.0])
+        weights = np.array([0.6])
 
     # 5. Statistical Expected Value loop over all 2^n crit combinations
     expected_damage = 0.0
@@ -450,13 +459,17 @@ def calculate_stellar_reaction_damage(hit, final_stats, enemy_stats, party_dict=
     wsum = float(w1.sum()) or 1.0
     exp_crit = float(np.dot(np.array([contrib_crit_mult_average[c] for c in contributors]), w1) / wsum)
     exp_abs = float(np.dot(np.array([contrib_crit_mult_absolute[c] for c in contributors]), w1) / wsum)
-    q_nc = quill_damage * elevation_mult * res_mult
+    if getattr(hit, "c1_quill", False):
+        mizuki_em_at_event = float(party_dict.get("Mizuki", {}).get("EM", 0.0) or 0.0)
+        quill_damage = 5.5 * mizuki_em_at_event
+    quill_crit = contrib_crit_mult_average.get("Mizuki", exp_crit)
+    q_nc = quill_damage * res_mult * quill_crit
 
-    expected_damage += q_nc * exp_crit
+    expected_damage += q_nc
     effective_expected_damage = expected_damage / res_mult if res_mult > 0 else expected_damage
 
     non_crit = float(np.dot(np.sort(non_crit_arr)[::-1], weights[:len(non_crit_arr)])) + q_nc
-    crit_damage = float(np.dot(np.sort(crit_damages_arr)[::-1], weights[:len(crit_damages_arr)])) + q_nc * exp_abs
+    crit_damage = float(np.dot(np.sort(crit_damages_arr)[::-1], weights[:len(crit_damages_arr)])) + q_nc
     average_damage = float(expected_damage)
     effective_average_damage = float(effective_expected_damage)
 

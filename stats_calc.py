@@ -606,9 +606,10 @@ def resolve_active_buffs(
                     scaling_list = CHARACTER_SKILLS["Mizuki"]["Skill"]["Elemental Mastery-Based Swirl DMG Increase"]["scaling"]
                     scaling_val = scaling_list[max(0, min(mizuki_skill_lvl - 1, len(scaling_list) - 1))]
                     factor = scaling_val / 1000.0  # swirl bonus = 4.5% of EM as a decimal (0.00045 * EM)
-                    # The swirl-bonus EM basis is her EFFECTIVE DDS EM, which includes her own
-                    # VBTD2 self-share (her EM gains +10% while it is being shared to the party).
-                    em_basis = source_stats.get("em", 0.0) * 1.10
+                    # Swirl-bonus EM basis = Mizuki's buffed FLAT EM (permanent + gear +
+                    # flat buffs like Aether C2/C2E and her A4). Her OWN VBTD2 self-share
+                    # does NOT feed this conversion (test note: 4.5% * 1180 * 1% = 0.531).
+                    em_basis = mizuki_flat_em
                     computed = buff_def["compute"]({**source_stats, "em": em_basis}, refinement, factor)
                 elif bkey == "Mizuki VBTD EM Share":
                     # VBTD2 share = 10% of Mizuki's flat EM basis

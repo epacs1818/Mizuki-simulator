@@ -15,7 +15,4 @@ As a reference, for a 960 EM Mizuki, her DDS turns that into 1.1*960=1056, so 10
 1056 EM a total of 4.5%*1056*1%=0.4752 stellar_bonus. She also gets 0.50 from HotF and 0.60 from 4 stacks of Odette's stacks, so she totals 1.5752 stellar_bonus. 1056 EM also gives 6*1056/(2000+1056)=2.0733 em_bonus. This sum (2.0733+1.5752) gets multiplied by the jubilee passive of the team 1.21 for aether+odette, so 1.21*(2.0733+1.5752)=5.6246 bonus_mult (not 53!).
 When Aether hits with his ticks, she gains both his c2 buff and her A4 passive at the same time, if she triggers a swirl aether's c2 gets enhanced! So she can go from 960(1056) to 1180(1298) EM, which will give a bonus_mult of 6.105 at the same conditions.
 
-
-How Mizuki's C1 Swirl quills works. The swirl base damage is multiplied by the character's (stellar_bonuses+em_bonuses) than summed up to the quill base damage (mizuki's em*550%) then they are muliplied by the character's crit, elevation, enemy res, elevation, and then all gets reduced by the order share (60% for the maximum character). The quill is applied to every contribution.
-
 Faruzan's debuff doesn't affect the applying hit.
