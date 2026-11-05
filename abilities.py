@@ -25,8 +25,9 @@ def get_ability_motion_value(character: str, category: str, sub_ability: str, le
     mv_increase = skill_entry.get("mv_increase")
     if mv_increase is not None:
         if isinstance(mv_increase, (int, float)):
-            # e.g., Aether's Charged Attack (mv_increase = 1.4)
-            return base_value + mv_increase  # Aether CA: ADDITIVE (base + 1.4)
+            # e.g., Aether's Charged Attack (mv_increase = 1.4): the increase is ADDED to the
+            # decimal MV, i.e. final MV = base_value + mv_increase (not base * mv_increase).
+            return base_value + mv_increase
         elif isinstance(mv_increase, list):
             # e.g., Aether's Burst Frostglow bonus list pre-multiplied by 8
             bonus_value = mv_increase[level - 1] / 100.0
@@ -316,7 +317,7 @@ mizuki_skill = Ability(
     talent_level=10,
     talent_type="skill_talent",
     hits=[
-        Hit("Cast",   0.301, element="Anemo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Skill", "Skill DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Mizuki", "Skill", "Skill DMG")),
+        Hit("Cast",   0.000, element="Anemo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Skill", "Skill DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Mizuki", "Skill", "Skill DMG")),
         Hit("Tick1",  1.230, element="Anemo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Skill", "Continuous Attack DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Mizuki", "Skill", "Continuous Attack DMG")),
         Hit("Tick2",  1.920, element="Anemo",                     category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Skill", "Continuous Attack DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Mizuki", "Skill", "Continuous Attack DMG")),
         Hit("Tick3",  2.940, element="Anemo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Skill", "Continuous Attack DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Mizuki", "Skill", "Continuous Attack DMG")),
@@ -334,7 +335,7 @@ mizuki_skill = Ability(
 )
 
 mizuki_burstless_pull_out = FieldSequence("BurstlessPullOut", "Mizuki", swap_out_time=10.0)
-mizuki_burstless_pull_out.add_ability(0.000, mizuki_skill)
+mizuki_burstless_pull_out.add_ability(0.301, mizuki_skill)
 
 mizuki_sacfrag_skill = Ability(
     name="Mizuki Skill (SacFrag)",
@@ -343,14 +344,14 @@ mizuki_sacfrag_skill = Ability(
     talent_level=10,
     talent_type="skill_talent",
     hits=[
-        Hit("Cast",  0.301, element="Anemo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Skill", "Skill DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Mizuki", "Skill", "Skill DMG")),
+        Hit("Cast",  0.000, element="Anemo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Skill", "Skill DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Mizuki", "Skill", "Skill DMG")),
         Hit("Tick1", 1.230, element="Anemo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Skill", "Continuous Attack DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Mizuki", "Skill", "Continuous Attack DMG")),
         Hit("Tick2", 1.920, element="Anemo",                     category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Skill", "Continuous Attack DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Mizuki", "Skill", "Continuous Attack DMG")),
     ]
 )
 
 mizuki_sacfrag_fill = FieldSequence("SacFragFill", "Mizuki", swap_out_time=1.75)
-mizuki_sacfrag_fill.add_ability(0.000, mizuki_sacfrag_skill)
+mizuki_sacfrag_fill.add_ability(0.301, mizuki_sacfrag_skill)
 
 mizuki_nuke_hit = Hit("Mizuki Nuke Hit", 0.500, element="Anemo", category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.EM, motion_value=10.00)
 mizuki_c1_mini_nuke_hit = Hit("Mizuki C1 Mini Nuke", 0.0, element="Anemo", category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.EM, motion_value=4.00)

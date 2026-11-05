@@ -41,6 +41,22 @@ DEFAULT_ENEMY_STATS = {
 }
 enemy_stats = DEFAULT_ENEMY_STATS
 
+
+def crit_mult_from_crit_value(cr: float, cd: float) -> float:
+    """Crit multiplier under the '100% RV' model.
+
+    A carry's crit is modeled as a single Crit Value CV = 2*CR + CD (decimal).
+    With the optimal crit split this is the damage multiplier:
+        crit_mult = 1 + CV^2/8            for CV <= 4.0
+        crit_mult = CV - 1                for CV >  4.0
+    The two branches are continuous at CV = 4.0 (both equal 3.0).
+    """
+    cv = 2.0 * cr + cd
+    if cv <= 4.0:
+        return 1.0 + cv * cv / 8.0
+    return cv - 1.0
+
+
 def calculate_damage(hit, final_stats, enemy_stats=None, quill_damage=0.0, char_level=90, party_dict=None):
     """
     Dispatcher function that routes damage calculation based on the damage category.
@@ -97,8 +113,14 @@ def calculate_standard_damage(hit, final_stats, enemy_stats, quill_damage=0.0, c
     crit_rate = final_stats.get("CR", final_stats.get("crit_rate", 0.05))
     crit_dmg = final_stats.get("CD", final_stats.get("crit_dmg", 0.50))
 
-    crit_mult_average = 1.0 + min(crit_rate, 1.0) * crit_dmg
-    crit_mult_absolute = 1.0 + crit_dmg
+    if final_stats.get("rv_mode"):
+        # 100% RV mode: single Crit Value, no crit/non-crit variance.
+        crit_mult = crit_mult_from_crit_value(crit_rate, crit_dmg)
+        crit_mult_average = crit_mult
+        crit_mult_absolute = crit_mult
+    else:
+        crit_mult_average = 1.0 + min(crit_rate, 1.0) * crit_dmg
+        crit_mult_absolute = 1.0 + crit_dmg
 
     # 4. DEF Multiplier
     enemy_lv = enemy_stats.get("enemy_lv", 100)
@@ -120,10 +142,17 @@ def calculate_standard_damage(hit, final_stats, enemy_stats, quill_damage=0.0, c
         res_mult = 1.0 / (1.0 + 4.0 * net_res)
 
     # 6. Final Standard Damage Calculations
-    non_crit = total_base * bonus_mult * def_mult * res_mult
-    crit_damage = total_base * bonus_mult * crit_mult_absolute * def_mult * res_mult
-    average_damage = total_base * bonus_mult * crit_mult_average * def_mult * res_mult
-    effective_average_damage = total_base * bonus_mult * crit_mult_average * def_mult
+    if final_stats.get("rv_mode"):
+        # 100% RV: deterministic (no crit variance) using the Crit Value crit_mult.
+        non_crit = total_base * bonus_mult * crit_mult_average * def_mult * res_mult
+        crit_damage = non_crit
+        average_damage = non_crit
+        effective_average_damage = total_base * bonus_mult * crit_mult_average * def_mult
+    else:
+        non_crit = total_base * bonus_mult * def_mult * res_mult
+        crit_damage = total_base * bonus_mult * crit_mult_absolute * def_mult * res_mult
+        average_damage = total_base * bonus_mult * crit_mult_average * def_mult * res_mult
+        effective_average_damage = total_base * bonus_mult * crit_mult_average * def_mult
 
     return {
         "base_damage": base_damage,
@@ -182,8 +211,14 @@ def calculate_stellar_damage(hit, final_stats, enemy_stats, quill_damage=0.0):
     crit_rate += final_stats.get("stellar_crit_rate", 0.0)
     crit_dmg += final_stats.get("stellar_crit_dmg", 0.0)
 
-    crit_mult_average = 1.0 + min(crit_rate, 1.0) * crit_dmg
-    crit_mult_absolute = 1.0 + crit_dmg
+    if final_stats.get("rv_mode"):
+        # 100% RV mode: single Crit Value, no crit/non-crit variance.
+        crit_mult = crit_mult_from_crit_value(crit_rate, crit_dmg)
+        crit_mult_average = crit_mult
+        crit_mult_absolute = crit_mult
+    else:
+        crit_mult_average = 1.0 + min(crit_rate, 1.0) * crit_dmg
+        crit_mult_absolute = 1.0 + crit_dmg
 
     # 5. RES Multiplier (No DEF multiplier for Stellar Damage)
     elem_lower = hit.element.lower() if hit.element else "physical"
@@ -199,10 +234,17 @@ def calculate_stellar_damage(hit, final_stats, enemy_stats, quill_damage=0.0):
         res_mult = 1.0 / (1.0 + 4.0 * net_res)
 
     # Final Stellar Damage Calculations (Bonus multiplier does not apply to quills)
-    non_crit = (base_damage * bonus_mult + quill_damage) * elevation_mult * res_mult
-    crit_damage = (base_damage * bonus_mult + quill_damage) * elevation_mult * crit_mult_absolute * res_mult
-    average_damage = (base_damage * bonus_mult + quill_damage) * elevation_mult * crit_mult_average * res_mult
-    effective_average_damage = (base_damage * bonus_mult + quill_damage) * elevation_mult * crit_mult_average
+    if final_stats.get("rv_mode"):
+        # 100% RV: deterministic (no crit variance) using the Crit Value crit_mult.
+        non_crit = (base_damage * bonus_mult + quill_damage) * elevation_mult * res_mult * crit_mult_average
+        crit_damage = non_crit
+        average_damage = non_crit
+        effective_average_damage = (base_damage * bonus_mult + quill_damage) * elevation_mult * crit_mult_average
+    else:
+        non_crit = (base_damage * bonus_mult + quill_damage) * elevation_mult * res_mult
+        crit_damage = (base_damage * bonus_mult + quill_damage) * elevation_mult * crit_mult_absolute * res_mult
+        average_damage = (base_damage * bonus_mult + quill_damage) * elevation_mult * crit_mult_average * res_mult
+        effective_average_damage = (base_damage * bonus_mult + quill_damage) * elevation_mult * crit_mult_average
 
     return {
         "base_damage": base_damage,
@@ -337,13 +379,19 @@ def calculate_stellar_reaction_damage(hit, final_stats, enemy_stats, party_dict=
         c_dmg = float(c_dmg)
         crit_rates_list.append(c_rate)
 
-        contrib_crit_mult_average[char_name] = 1.0 + c_rate * c_dmg
-        contrib_crit_mult_absolute[char_name] = 1.0 + c_dmg
+        if party_dict.get(char_name, {}).get("rv_mode"):
+            # 100% RV contributor: single Crit Value, no crit/non-crit variance.
+            crit_mult = crit_mult_from_crit_value(c_rate, c_dmg)
+            contrib_crit_mult_average[char_name] = crit_mult
+            contrib_crit_mult_absolute[char_name] = crit_mult
+        else:
+            contrib_crit_mult_average[char_name] = 1.0 + c_rate * c_dmg
+            contrib_crit_mult_absolute[char_name] = 1.0 + c_dmg
 
-        # Contributor pre-share metrics. Quill is applied PER-CONTRIBUTION (after the
-        # (stellar+em) bonus, but before crit/elevation/res/share): the swirl quill
-        # boosts EVERY contribution independently.
-        q_base = b_val * bonus_mult + quill_damage
+        # Contributor pre-share metrics. The quill is NOT folded in here: it is applied
+        # once at the AGGREGATE level, after the contribution weighting (see below;
+        # PENDING in-game verification).
+        q_base = b_val * bonus_mult
 
         # non_crit: base with 0% crit (crit factor = 1.0)
         nc_val = q_base * elevation_mult * res_mult
@@ -395,10 +443,20 @@ def calculate_stellar_reaction_damage(hit, final_stats, enemy_stats, party_dict=
         # Accumulate probability-weighted score into total expected damage
         expected_damage += prob * scenario_score
 
+    # Quill added POST-contribution (PENDING in-game verification): applied once to the
+    # aggregate. It skips bonus_mult but keeps elevation, res and an expected crit
+    # factor (share-weighted average over the contributors).
+    w1 = weights[:n]
+    wsum = float(w1.sum()) or 1.0
+    exp_crit = float(np.dot(np.array([contrib_crit_mult_average[c] for c in contributors]), w1) / wsum)
+    exp_abs = float(np.dot(np.array([contrib_crit_mult_absolute[c] for c in contributors]), w1) / wsum)
+    q_nc = quill_damage * elevation_mult * res_mult
+
+    expected_damage += q_nc * exp_crit
     effective_expected_damage = expected_damage / res_mult if res_mult > 0 else expected_damage
 
-    non_crit = float(np.dot(np.sort(non_crit_arr)[::-1], weights[:len(non_crit_arr)]))
-    crit_damage = float(np.dot(np.sort(crit_damages_arr)[::-1], weights[:len(crit_damages_arr)]))
+    non_crit = float(np.dot(np.sort(non_crit_arr)[::-1], weights[:len(non_crit_arr)])) + q_nc
+    crit_damage = float(np.dot(np.sort(crit_damages_arr)[::-1], weights[:len(crit_damages_arr)])) + q_nc * exp_abs
     average_damage = float(expected_damage)
     effective_average_damage = float(effective_expected_damage)
 

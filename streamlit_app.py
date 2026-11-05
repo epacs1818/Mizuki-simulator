@@ -20,6 +20,7 @@ if not hasattr(buffs, "TEAM_BUFFS"):
 from artifacts import ARTIFACTS_BONUSES
 from weapons import WEAPON_STATS
 from stats_calc import build_initial_stats, compute_card_stats
+from substats_standards import CARRIES, build_recommended_subs, build_kqm_subs
 
 # Callback functions for seamless programmatic tab switching
 def go_to_enemy_tab():
@@ -600,12 +601,33 @@ with tab1:
                 key=f"art_set_{slot_num}"
             )
 
+            # 100% RV + KQM Standards toggles (carries only). Both lock the manual substat
+            # rows; their confirm-step configs come from substats_standards.
+            rv_on = False
+            kqm_on = False
+            if char_name in CARRIES:
+                tog1, tog2 = st.columns(2)
+                with tog1:
+                    rv_on = st.toggle(
+                        "100% RV (Crit Value)",
+                        value=False,
+                        key=f"rv_{slot_num}",
+                        help="Auto-optimizes mains + substats to a standard Crit-Value build; disables manual substats.",
+                    )
+                with tog2:
+                    kqm_on = st.toggle(
+                        "Use KQM Standards?",
+                        value=False,
+                        key=f"kqm_{slot_num}",
+                        help="Locks substats to the KQM 40-roll standard (20 fixed + 20 flexible) using Crit-Value damage.",
+                    )
+            subs_locked = rv_on or kqm_on
 
             st.markdown("")
             pieces_data = {}
             f_col, fe_col, s_col, g_col, c_col = st.columns(5)
             
-            def render_piece_inputs(piece_name, main_stat_widget):
+            def render_piece_inputs(piece_name, main_stat_widget, disable_subs=False):
                 st.markdown(f"**{piece_name}**")
                 
                 if main_stat_widget == "locked_hp":
@@ -635,7 +657,8 @@ with tab1:
                             f"Sub {sub_idx}", 
                             SUBSTAT_OPTIONS, 
                             key=f"sub_type_{piece_name}_{slot_num}_{sub_idx}",
-                            label_visibility="collapsed"
+                            label_visibility="collapsed",
+                            disabled=disable_subs
                         )
                     is_pct = "%" in sub_type
                     with sub_col2:
@@ -643,13 +666,14 @@ with tab1:
                             f"Val {sub_idx}", 
                             placeholder="%" if is_pct else "Value", 
                             key=f"sub_val_{piece_name}_{slot_num}_{sub_idx}",
-                            label_visibility="collapsed"
+                            label_visibility="collapsed",
+                            disabled=disable_subs
                         )
                     with sub_col3:
                         if is_pct:
                             st.markdown("**%**")
 
-                    if sub_type != "None":
+                    if not disable_subs and sub_type != "None":
                         substats_list.append({"stat": sub_type, "value": sub_val})
                         
                 return {
@@ -659,15 +683,15 @@ with tab1:
                 }
 
             with f_col:
-                pieces_data["Flower"] = render_piece_inputs("Flower", "locked_hp")
+                pieces_data["Flower"] = render_piece_inputs("Flower", "locked_hp", disable_subs=subs_locked)
             with fe_col:
-                pieces_data["Feather"] = render_piece_inputs("Feather", "locked_atk")
+                pieces_data["Feather"] = render_piece_inputs("Feather", "locked_atk", disable_subs=subs_locked)
             with s_col:
-                pieces_data["Sands"] = render_piece_inputs("Sands", SANDS_MAINS)
+                pieces_data["Sands"] = render_piece_inputs("Sands", SANDS_MAINS, disable_subs=subs_locked)
             with g_col:
-                pieces_data["Goblet"] = render_piece_inputs("Goblet", GOBLET_MAINS)
+                pieces_data["Goblet"] = render_piece_inputs("Goblet", GOBLET_MAINS, disable_subs=subs_locked)
             with c_col:
-                pieces_data["Circlet"] = render_piece_inputs("Circlet", CIRCLET_MAINS)
+                pieces_data["Circlet"] = render_piece_inputs("Circlet", CIRCLET_MAINS, disable_subs=subs_locked)
                 
             team_data[f"Slot {slot_num}"]["artifacts"] = {
                 "Set": selected_set,
@@ -770,29 +794,41 @@ with tab1:
                     artifact_set = data.get("artifacts", {}).get("Set", "Select Set")
                     pieces = data.get("artifacts", {}).get("Pieces", {})
                     
-                    main_stats_total = {}
-                    subs_total = {}
-                    
-                    for piece_name, piece_info in pieces.items():
-                        main_stat = piece_info.get("main_stat", "")
-                        substats = piece_info.get("substats", [])
-                        piece_rarity = piece_info.get("rarity", "5★")
+                    rv_on = char_name in CARRIES and st.session_state.get(f"rv_{slot_num}", False)
+                    kqm_on = char_name in CARRIES and st.session_state.get(f"kqm_{slot_num}", False)
+                    rv_mode = rv_on or kqm_on
 
-                        active_stats_dict = STANDARD_4STAR_MAIN_STATS if piece_rarity == "4★" else STANDARD_MAIN_STATS
-                        
-                        if main_stat:
-                            stat_key = STAT_KEY_MAP.get(main_stat)
-                            if stat_key and stat_key in active_stats_dict:
-                                main_stats_total[stat_key] = main_stats_total.get(stat_key, 0.0) + active_stats_dict[stat_key]
-                        
-                        for sub in substats:
-                            sub_type = sub.get("stat")
-                            numeric_val = parse_val(sub.get("value"))
-                            if sub_type and sub_type != "None":
-                                sub_key = STAT_KEY_MAP.get(sub_type, sub_type.lower().replace(" ", "_"))
-                                if "%" in sub_type or sub_key in ["hp_percent", "atk_percent", "def_percent", "crit_rate", "crit_dmg", "er"]:
-                                    numeric_val = numeric_val / 100.0
-                                subs_total[sub_key] = subs_total.get(sub_key, 0.0) + numeric_val
+                    if rv_on:
+                        # 100% RV: auto mains + substats per the carry standard (5★ defaults).
+                        main_stats_total, subs_total = build_recommended_subs(char_name)
+                    else:
+                        main_stats_total = {}
+                        subs_total = {}
+                        for piece_name, piece_info in pieces.items():
+                            main_stat = piece_info.get("main_stat", "")
+                            substats = piece_info.get("substats", [])
+                            piece_rarity = piece_info.get("rarity", "5★")
+
+                            active_stats_dict = STANDARD_4STAR_MAIN_STATS if piece_rarity == "4★" else STANDARD_MAIN_STATS
+                            
+                            if main_stat:
+                                stat_key = STAT_KEY_MAP.get(main_stat)
+                                if stat_key and stat_key in active_stats_dict:
+                                    main_stats_total[stat_key] = main_stats_total.get(stat_key, 0.0) + active_stats_dict[stat_key]
+                            
+                            for sub in substats:
+                                sub_type = sub.get("stat")
+                                numeric_val = parse_val(sub.get("value"))
+                                if sub_type and sub_type != "None":
+                                    sub_key = STAT_KEY_MAP.get(sub_type, sub_type.lower().replace(" ", "_"))
+                                    if "%" in sub_type or sub_key in ["hp_percent", "atk_percent", "def_percent", "crit_rate", "crit_dmg", "er"]:
+                                        numeric_val = numeric_val / 100.0
+                                    subs_total[sub_key] = subs_total.get(sub_key, 0.0) + numeric_val
+
+                    # KQM Standards: keep the user-selected mains, lock the subs to
+                    # the 40-roll standard (takes precedence over the manual subs).
+                    if kqm_on and not rv_on:
+                        subs_total = build_kqm_subs(char_name)
 
                     initial_stats = build_initial_stats(char_name, data["level"], weapon, artifact_set, main_stats_total, subs_total, refinement=data["refinement"])
                     card_stats = compute_card_stats(initial_stats)
@@ -805,6 +841,7 @@ with tab1:
                         "talents": data["talents"] if data["talents"] else "10/13/13",
                         "talent_levels": parsed_talents[slot_num],
                         "artifact_set": artifact_set if artifact_set != "Select Set" else "None",
+                        "rv_mode": rv_mode,
                         "initial_stats": initial_stats,  
                         "card_stats": card_stats         
                     }

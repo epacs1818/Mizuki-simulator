@@ -15,10 +15,12 @@ CHARACTER_SKILLS = {
     "Aether": {
         "Charged Attack": {
             "C1_Hit": {
-                "scaling": get_scaled_list(55.9, "Physical 1") + 1.4,
+                "scaling": get_scaled_list(55.9, "Physical 1"),
+                "mv_increase": 1.4,  # added to the decimal MV: base + 1.4
             },
             "C2_Hit": {
-                "scaling": get_scaled_list(60.7, "Physical 1") + 1.4,
+                "scaling": get_scaled_list(60.7, "Physical 1"),
+                "mv_increase": 1.4,  # added to the decimal MV: base + 1.4
             }
         },
         "Normal Attack": {

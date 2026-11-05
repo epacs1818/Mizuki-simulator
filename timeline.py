@@ -934,6 +934,8 @@ class RotationTimeline:
                     char_initial_stats_map=self.char_initial_stats_map,
                 )
                 final_stats = compute_final_stats(snapshot)
+                # 100% RV mode flag for this hit's owner (carries only).
+                final_stats["rv_mode"] = bool(char_data.get("rv_mode", False))
 
                 # Prepare party_stats_dict for reaction contributors
                 party_stats_dict = {}
@@ -945,6 +947,7 @@ class RotationTimeline:
                         "CD": p_init.get("crit_dmg", 0.50),
                         "crit_rate": p_init.get("crit_rate", 0.05),
                         "crit_dmg": p_init.get("crit_dmg", 0.50),
+                        "rv_mode": bool(p_d.get("rv_mode", False)),
                     }
                     if event.get("cryo_resonance_state") == "ON":
                         party_stats_dict[p_name]["CR"] += 0.15
@@ -953,6 +956,7 @@ class RotationTimeline:
                 if char in party_stats_dict:
                     party_stats_dict[char]["CR"] = final_stats.get("CR", party_stats_dict[char]["CR"])
                     party_stats_dict[char]["CD"] = final_stats.get("CD", party_stats_dict[char]["CD"])
+                    party_stats_dict[char]["rv_mode"] = bool(char_data.get("rv_mode", False))
 
                 dmg = calculate_damage(
                     hit=event,
