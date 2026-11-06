@@ -152,3 +152,38 @@ def build_kqm_subs(char_name: str) -> dict:
         subs["em"] = subs.get("em", 0.0) + rolls["em"] * KQM_FLEX_UTILITY_ROLLS
 
     return subs
+
+# UI labels for locked main stats (mirrors the app selectbox wording).
+_MAIN_LABELS = {
+    "hp_flat": "Flat HP",
+    "atk_flat": "Flat ATK",
+    "atk_percent": "ATK%",
+    "em": "EM",
+    "crit_dmg": "Crit Damage%",
+}
+
+
+def build_standard_mains(char_name: str) -> dict:
+    """Mains shared by every standard (100% RV and KQM): flat HP + flat ATK,
+    the carry recommended Sands/Goblet and a Crit Damage% circlet."""
+    return build_recommended_subs(char_name)[0]
+
+
+def standard_piece_mains(char_name: str) -> dict:
+    """Locked main-stat labels per piece, for the artifact UI."""
+    std = CARRY_STANDARDS[char_name]
+    return {
+        "Flower": "Flat HP",
+        "Feather": "Flat ATK",
+        "Sands": _MAIN_LABELS[std["utility"]],
+        "Goblet": _MAIN_LABELS.get(std["goblet_main"], "ATK%"),
+        "Circlet": _MAIN_LABELS.get(std["circlet_main"], "Crit Damage%"),
+    }
+
+
+def build_kqm_build(char_name: str):
+    """(mains_total, subs_total) for the KQM standard. Mains are locked to the
+    same recommended set as 100% RV because mains stop mattering once a
+    standard is selected."""
+    return build_standard_mains(char_name), build_kqm_subs(char_name)
+

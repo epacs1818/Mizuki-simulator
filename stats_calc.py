@@ -127,10 +127,14 @@ def build_initial_stats(char_name, level, weapon_full_name, artifact_set_name,
 # compute_card_stats  (unchanged – simple resolution for UI display)
 # ---------------------------------------------------------------------------
 
-def compute_card_stats(initial_stats):
+def compute_card_stats(initial_stats, standard_mode=False):
     """
     Resolves initial_stats into formatted final values for the user-facing card.
-    No buffs applied – pure gear stats.
+    No buffs applied - pure gear stats.
+
+    When standard_mode is True the build uses the 100% RV / KQM Crit-Value model:
+    CR and CD are not meaningful on their own, so the card reports a single CV
+    line (CV = 2*CR + CD, 1 decimal) instead of separate CR and CD rows.
     """
     card_hp = (initial_stats["base_hp"] * (1.0 + initial_stats["hp_percent"])) + initial_stats["hp_flat"]
     card_atk = (initial_stats["base_atk"] * (1.0 + initial_stats["atk_percent"])) + initial_stats["atk_flat"]
@@ -141,10 +145,15 @@ def compute_card_stats(initial_stats):
         "ATK": round(card_atk, 1),
         "DEF": round(card_def, 1),
         "EM": round(initial_stats["em"], 1),
-        "CR": f"{round(initial_stats['crit_rate'] * 100, 1)}%",
-        "CD": f"{round(initial_stats['crit_dmg'] * 100, 1)}%",
-        "ER": f"{round(initial_stats['er'] * 100, 1)}%",
     }
+    if standard_mode:
+        cv = 2.0 * initial_stats.get("crit_rate", 0.0) + initial_stats.get("crit_dmg", 0.0)
+        # CV is expressed in points: 1 point = 1% Crit DMG = 0.5% Crit Rate.
+        card_stats_calculated["CV"] = f"{round(cv * 100, 1)}"
+    else:
+        card_stats_calculated["CR"] = f"{round(initial_stats['crit_rate'] * 100, 1)}%"
+        card_stats_calculated["CD"] = f"{round(initial_stats['crit_dmg'] * 100, 1)}%"
+    card_stats_calculated["ER"] = f"{round(initial_stats['er'] * 100, 1)}%"
 
     for elem in ["physical", "pyro", "cryo", "geo", "electro", "dendro", "hydro", "anemo"]:
         val = initial_stats.get(f"{elem}_bonus", 0.0)

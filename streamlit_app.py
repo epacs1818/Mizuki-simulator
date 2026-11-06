@@ -20,7 +20,15 @@ if not hasattr(buffs, "TEAM_BUFFS"):
 from artifacts import ARTIFACTS_BONUSES
 from weapons import WEAPON_STATS
 from stats_calc import build_initial_stats, compute_card_stats
-from substats_standards import CARRIES, build_recommended_subs, build_kqm_subs
+from substats_standards import (
+    CARRIES,
+    build_recommended_subs,
+    build_kqm_subs,
+    build_kqm_build,
+    standard_piece_mains,
+)
+import buff_registry
+from characters import get_character_element
 
 # Callback functions for seamless programmatic tab switching
 def go_to_enemy_tab():
@@ -317,65 +325,122 @@ FIELD_SEQUENCE_OBJ_MAP = {
     "mizuki_burstless_pull_out": mizuki_burstless_pull_out,
 }
 
-def build_timeline_dataframe(timeline_events):
+_BUFF_GROUP_TAG = {"Character": "", "Weapon": "[W] ", "Artifact": "[A] ", "Team": "[T] "}
+
+
+def _buff_is_active(value):
+    """True when a buff audit cell is not OFF / 0 / empty."""
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return value.strip() not in ("", "OFF", "-")
+    return value != 0
+
+
+def build_timeline_dataframe(timeline_events, party=None):
+    """Flat audit table ordered by block:
+        time -> description (active/owner/action) -> reaction (app/aura/reaction)
+        -> stats (HP/ATK/DEF/EM/CR/CD) -> multipliers -> output damage -> buffs.
+
+    Buff columns come from buff_registry: only effects whose owner character,
+    weapon, artifact set or resonance is present, AND that actually trigger
+    somewhere in this run, are ever built into the table.
+    """
     if not timeline_events:
         return pd.DataFrame()
-    
+
+    buff_entries = [
+        entry for entry in buff_registry.visible_buffs(party or {})
+        if any(_buff_is_active(ev.get(entry["key"])) for ev in timeline_events)
+    ]
+
     rows = []
     for event in timeline_events:
         nc = event.get("non_crit")
         cd = event.get("crit_damage")
         avg = event.get("average_damage")
         eff = event.get("effective_average_damage")
-        
-        row = {
-            "Time (s)": round(event["global_time"], 3),
-            "Active": event.get("active_character", "None"),
-            "Owner": event.get("character", ""),
-            "Action": event.get("action", ""),
-            "Elemental App": event.get("elem_app", "-"),
-            "Cryo Aura": event.get("cryo_aura", "-"),
-            "Reaction": event.get("reaction", "-"),
-            "Non-Crit DMG": f"{nc:.1f}" if nc is not None else "-",
-            "Crit DMG": f"{cd:.1f}" if cd is not None else "-",
-            "Average DMG": f"{avg:.1f}" if avg is not None else "-",
-            "Effective Avg DMG": f"{eff:.1f}" if eff is not None else "-",
-            "Base DMG": f"{event["base_damage"]:.1f}" if event.get("base_damage") is not None else "-",
-            "Quills": f"{event["quills_total"]:.1f}" if event.get("quills_total") is not None else "-",
-            "Bonus Mult": f"{event["bonus_mult"]:.3f}" if event.get("bonus_mult") is not None else "-",
-            "Elev": f"{event["elevation_mult"]:.3f}" if event.get("elevation_mult") is not None else "-",
-            "Crit Mult": f"{event["crit_mult_avg"]:.3f}" if event.get("crit_mult_avg") is not None else "-",
-            "DEF Mult": f"{event["def_mult"]:.3f}" if event.get("def_mult") is not None else "-",
-            "Res Mult": f"{event["res_mult"]:.3f}" if event.get("res_mult") is not None else "-",
-            "ATK": f"{event["stat_atk"]:.0f}" if event.get("stat_atk") is not None else "-",
-            "EM": f"{event["stat_em"]:.0f}" if event.get("stat_em") is not None else "-",
-            "CR%": f"{event["stat_cr"]*100:.1f}" if event.get("stat_cr") is not None else "-",
-            "CD%": f"{event["stat_cd"]*100:.1f}" if event.get("stat_cd") is not None else "-",
-            "DDS": event.get("dreamdrifter_state", "OFF"),
-            "A4": event.get("mizuki_a4_state", "OFF"),
-            "VBTD": event.get("vbtd_state", "OFF"),
-            "C1 Debuff": event.get("c1_debuff_state", "OFF"),
-            "Faruzan Buff": event.get("faruzan_buff_state", "OFF"),
-            "Faruzan Debuff": event.get("faruzan_debuff_state", "OFF"),
-            "Aether C2": event.get("aether_c2_state", "OFF"),
-            "Aether C2+": event.get("aether_c2_enhanced_state", "OFF"),
-            "Frostglow": event.get("frostglow_stacks", 0),
-            "Aether C6": event.get("aether_c6_state", "OFF"),
-            "Marvelous Stacks": event.get("marvelous_stacks", 0),
-            "HotF": event.get("hotf_state", "OFF"),
-            "Dream": event.get("dreamdrifter_state", "OFF"),
-            "VV": event.get("vv_state", "OFF"),
-            "Instructor": event.get("instructor_state", "OFF"),
-            "Cryo Res": event.get("cryo_resonance_state", "OFF"),
-            "Sucrose A1": event.get("sucrose_a1_state", "OFF"),
-            "Sucrose A4": event.get("sucrose_a4_state", "OFF"),
-            "Sucrose C6": event.get("sucrose_c6_state", "OFF"),
-            "Exaiphanes": event.get("exaiphanes_blade_state", "OFF"),
-            "Silver Light": event.get("silver_light_stacks", 0),
-        }
+
+        row = {}
+        row["Time (s)"] = f"{event['global_time']:.3f}"
+        row["Active"] = event.get("active_character", "None")
+        row["Owner"] = event.get("character", "")
+        row["Action"] = event.get("action", "")
+        row["Elemental App"] = event.get("elem_app", "-")
+        row["Aura"] = event.get("cryo_aura", "-")
+        row["Reaction"] = event.get("reaction", "-")
+        row["HP"] = f"{event['stat_hp']:.0f}" if event.get("stat_hp") is not None else "-"
+        row["ATK"] = f"{event['stat_atk']:.0f}" if event.get("stat_atk") is not None else "-"
+        row["DEF"] = f"{event['stat_def']:.0f}" if event.get("stat_def") is not None else "-"
+        row["EM"] = f"{event['stat_em']:.0f}" if event.get("stat_em") is not None else "-"
+        row["CR%"] = f"{event['stat_cr']*100:.1f}" if event.get("stat_cr") is not None else "-"
+        row["CD%"] = f"{event['stat_cd']*100:.1f}" if event.get("stat_cd") is not None else "-"
+        row["Base DMG"] = f"{event['base_damage']:.1f}" if event.get("base_damage") is not None else "-"
+        row["Quills"] = f"{event['quills_total']:.1f}" if event.get("quills_total") is not None else "-"
+        row["Bonus Mult"] = f"{event['bonus_mult']:.3f}" if event.get("bonus_mult") is not None else "-"
+        row["Elev Mult"] = f"{event['elevation_mult']:.3f}" if event.get("elevation_mult") is not None else "-"
+        row["Crit Mult"] = f"{event['crit_mult_avg']:.3f}" if event.get("crit_mult_avg") is not None else "-"
+        row["DEF Mult"] = f"{event['def_mult']:.3f}" if event.get("def_mult") is not None else "-"
+        row["Res Mult"] = f"{event['res_mult']:.3f}" if event.get("res_mult") is not None else "-"
+        row["Average DMG"] = f"{avg:.1f}" if avg is not None else "-"
+        row["Non-Crit DMG"] = f"{nc:.1f}" if nc is not None else "-"
+        row["Crit DMG"] = f"{cd:.1f}" if cd is not None else "-"
+        row["Effective Avg DMG"] = f"{eff:.1f}" if eff is not None else "-"
+        for entry in buff_entries:
+            label = _BUFF_GROUP_TAG.get(entry["group"], "") + entry["label"]
+            row[label] = event.get(entry["key"], "OFF")
+
         rows.append(row)
-    
+
     return pd.DataFrame(rows)
+
+_AUDIT_BLOCKS = {
+    "time": {"Time (s)"},
+    "desc": {"Active", "Owner", "Action"},
+    "reaction": {"Elemental App", "Aura", "Reaction"},
+    "stats": {"HP", "ATK", "DEF", "EM", "CR%", "CD%"},
+    "mult": {"Base DMG", "Quills", "Bonus Mult", "Elev Mult", "Crit Mult", "DEF Mult", "Res Mult"},
+    "output": {"Average DMG", "Non-Crit DMG", "Crit DMG", "Effective Avg DMG"},
+}
+
+# One dark tint per party member: consecutive characters get different row colours.
+_OWNER_BG = ("#0b3d2e", "#1e3a8a", "#4c1d95", "#7c2d12", "#0f766e", "#831843", "#3f6212", "#1e40af")
+
+def _column_block(column):
+    """Map an audit-table column to its block (buff = everything not core)."""
+    for block, columns in _AUDIT_BLOCKS.items():
+        if column in columns:
+            return block
+    return "buff"
+
+
+def style_timeline_dataframe(df):
+    """Colour-code the audit table for st.dataframe.
+
+    Each party member gets its own dark row tint, so consecutive characters are
+    visually separated. Buff cells are muted grey when OFF/0 and highlighted
+    green when the effect is active.
+    """
+    owners = list(dict.fromkeys(df["Owner"].tolist())) if "Owner" in df.columns else []
+    owner_bg = {owner: _OWNER_BG[i % len(_OWNER_BG)] for i, owner in enumerate(owners)}
+    columns = list(df.columns)
+
+    def _paint(row):
+        background = owner_bg.get(row.get("Owner"), "#111827")
+        cells = []
+        for column in columns:
+            css = [f"background-color: {background}", "color: #f8fafc"]
+            if _column_block(column) == "buff":
+                value = str(row.get(column, "")).strip()
+                if value in ("OFF", "0", "", "-", "None", "nan"):
+                    css.append("color: #64748b")
+                else:
+                    css.append("color: #86efac; font-weight: 600")
+            cells.append("; ".join(css))
+        return cells
+
+    return df.style.apply(_paint, axis=1)
+
 
 def validate_talents(talent_str):
     if not talent_str or not isinstance(talent_str, str) or not talent_str.strip():
@@ -601,33 +666,30 @@ with tab1:
                 key=f"art_set_{slot_num}"
             )
 
-            # 100% RV + KQM Standards toggles (carries only). Both lock the manual substat
-            # rows; their confirm-step configs come from substats_standards.
-            rv_on = False
-            kqm_on = False
+            # Substat standard selector (carries only). The options are mutually
+            # exclusive by construction: RV and KQM both lock mains AND substats,
+            # because neither matters once a standard is selected.
+            standard_mode = "Manual"
+            locked_mains = None
             if char_name in CARRIES:
-                tog1, tog2 = st.columns(2)
-                with tog1:
-                    rv_on = st.toggle(
-                        "100% RV (Crit Value)",
-                        value=False,
-                        key=f"rv_{slot_num}",
-                        help="Auto-optimizes mains + substats to a standard Crit-Value build; disables manual substats.",
-                    )
-                with tog2:
-                    kqm_on = st.toggle(
-                        "Use KQM Standards?",
-                        value=False,
-                        key=f"kqm_{slot_num}",
-                        help="Locks substats to the KQM 40-roll standard (20 fixed + 20 flexible) using Crit-Value damage.",
-                    )
-            subs_locked = rv_on or kqm_on
+                standard_mode = st.radio(
+                    "Substat standard",
+                    options=["Manual", "100% RV (Crit Value)", "KQM Standards (40 rolls)"],
+                    index=0,
+                    horizontal=True,
+                    key=f"std_{slot_num}",
+                    help="RV/KQM lock mains + substats and model crit as a single Crit Value (CV).",
+                )
+                if standard_mode != "Manual":
+                    locked_mains = standard_piece_mains(char_name)
+            subs_locked = standard_mode != "Manual"
+            mains_locked = subs_locked
 
             st.markdown("")
             pieces_data = {}
             f_col, fe_col, s_col, g_col, c_col = st.columns(5)
             
-            def render_piece_inputs(piece_name, main_stat_widget, disable_subs=False):
+            def render_piece_inputs(piece_name, main_stat_widget, disable_subs=False, locked_main=None):
                 st.markdown(f"**{piece_name}**")
                 
                 if main_stat_widget == "locked_hp":
@@ -636,14 +698,19 @@ with tab1:
                 elif main_stat_widget == "locked_atk":
                     st.text_input("Main Stat", value="Flat ATK", key=f"main_{piece_name}_{slot_num}", disabled=True)
                     main_stat = "Flat ATK"
+                elif locked_main is not None:
+                    st.text_input("Main Stat", value=locked_main, key=f"main_locked_{piece_name}_{slot_num}", disabled=True)
+                    main_stat = locked_main
                 else:
                     main_stat = st.selectbox("Main Stat", main_stat_widget, key=f"main_{piece_name}_{slot_num}")
 
                 rarity = st.radio(
                     "Artifact Rarity",
                     options=["5★", "4★"],
+                    index=0 if disable_subs else None,
                     horizontal=True,
-                    key=f"rarity_{piece_name}_{slot_num}"
+                    key=(f"rarity_locked_{piece_name}_{slot_num}" if disable_subs else f"rarity_{piece_name}_{slot_num}"),
+                    disabled=disable_subs,
                 )
                     
                 st.markdown("---")
@@ -683,15 +750,15 @@ with tab1:
                 }
 
             with f_col:
-                pieces_data["Flower"] = render_piece_inputs("Flower", "locked_hp", disable_subs=subs_locked)
+                pieces_data["Flower"] = render_piece_inputs("Flower", "locked_hp", disable_subs=subs_locked, locked_main=(locked_mains["Flower"] if locked_mains else None))
             with fe_col:
-                pieces_data["Feather"] = render_piece_inputs("Feather", "locked_atk", disable_subs=subs_locked)
+                pieces_data["Feather"] = render_piece_inputs("Feather", "locked_atk", disable_subs=subs_locked, locked_main=(locked_mains["Feather"] if locked_mains else None))
             with s_col:
-                pieces_data["Sands"] = render_piece_inputs("Sands", SANDS_MAINS, disable_subs=subs_locked)
+                pieces_data["Sands"] = render_piece_inputs("Sands", SANDS_MAINS, disable_subs=subs_locked, locked_main=(locked_mains["Sands"] if locked_mains else None))
             with g_col:
-                pieces_data["Goblet"] = render_piece_inputs("Goblet", GOBLET_MAINS, disable_subs=subs_locked)
+                pieces_data["Goblet"] = render_piece_inputs("Goblet", GOBLET_MAINS, disable_subs=subs_locked, locked_main=(locked_mains["Goblet"] if locked_mains else None))
             with c_col:
-                pieces_data["Circlet"] = render_piece_inputs("Circlet", CIRCLET_MAINS, disable_subs=subs_locked)
+                pieces_data["Circlet"] = render_piece_inputs("Circlet", CIRCLET_MAINS, disable_subs=subs_locked, locked_main=(locked_mains["Circlet"] if locked_mains else None))
                 
             team_data[f"Slot {slot_num}"]["artifacts"] = {
                 "Set": selected_set,
@@ -794,13 +861,16 @@ with tab1:
                     artifact_set = data.get("artifacts", {}).get("Set", "Select Set")
                     pieces = data.get("artifacts", {}).get("Pieces", {})
                     
-                    rv_on = char_name in CARRIES and st.session_state.get(f"rv_{slot_num}", False)
-                    kqm_on = char_name in CARRIES and st.session_state.get(f"kqm_{slot_num}", False)
-                    rv_mode = rv_on or kqm_on
+                    standard_mode = (st.session_state.get(f"std_{slot_num}", "Manual")
+                                     if char_name in CARRIES else "Manual")
+                    rv_mode = standard_mode != "Manual"
 
-                    if rv_on:
+                    if standard_mode == "100% RV (Crit Value)":
                         # 100% RV: auto mains + substats per the carry standard (5★ defaults).
                         main_stats_total, subs_total = build_recommended_subs(char_name)
+                    elif standard_mode == "KQM Standards (40 rolls)":
+                        # KQM: same locked mains, 40-roll substat standard.
+                        main_stats_total, subs_total = build_kqm_build(char_name)
                     else:
                         main_stats_total = {}
                         subs_total = {}
@@ -825,13 +895,8 @@ with tab1:
                                         numeric_val = numeric_val / 100.0
                                     subs_total[sub_key] = subs_total.get(sub_key, 0.0) + numeric_val
 
-                    # KQM Standards: keep the user-selected mains, lock the subs to
-                    # the 40-roll standard (takes precedence over the manual subs).
-                    if kqm_on and not rv_on:
-                        subs_total = build_kqm_subs(char_name)
-
                     initial_stats = build_initial_stats(char_name, data["level"], weapon, artifact_set, main_stats_total, subs_total, refinement=data["refinement"])
-                    card_stats = compute_card_stats(initial_stats)
+                    card_stats = compute_card_stats(initial_stats, standard_mode=rv_mode)
 
                     my_party[char_name] = {
                         "constellation": const_val,
@@ -841,7 +906,8 @@ with tab1:
                         "talents": data["talents"] if data["talents"] else "10/13/13",
                         "talent_levels": parsed_talents[slot_num],
                         "artifact_set": artifact_set if artifact_set != "Select Set" else "None",
-                        "rv_mode": rv_mode,
+                        "element": get_character_element(char_name),
+                        "standard_mode": standard_mode,
                         "initial_stats": initial_stats,  
                         "card_stats": card_stats         
                     }
@@ -869,7 +935,7 @@ with tab1:
                     st.subheader(f"{char_name} (C{data['constellation']})")
                     st.caption(f"**Level:** {data.get('level', 90)}")
                     st.caption(f"**Weapon:** {data['weapon']} R{data['refinement']} (Lv 90)")
-                    st.caption(f"**Talents:** {data['talents']}")
+                    st.caption(f"**Element:** {data.get('element', '?')}")
                     st.caption(f"**Artifacts:** {data['artifact_set']}")
                     st.markdown("---")
                     
@@ -1053,7 +1119,8 @@ with tab3:
             analytics = timeline.get_analytics_summary(trial_duration)
 
             char_summary = ", ".join(
-                f"{name} Lv{data.get('level',90)} C{data['constellation']} {data['weapon']} T{data['talents']}"
+                f"{name} Lv{data.get('level', 90)} C{data['constellation']} {data['talents']} "
+                f"{data['weapon']} R{data.get('refinement', 1)}"
                 for name, data in party.items()
             )
             enemy_summary = f"Lv{enemy.get('enemy_lv','?')} | Cryo {int(enemy.get('cryo_res',0.1)*100)}% | Anemo {int(enemy.get('anemo_res',0.1)*100)}%"
@@ -1400,13 +1467,21 @@ with tab4:
                 # Timeline Dataframe Table
                 if "timeline_events" in entry and entry["timeline_events"]:
                     st.markdown("##### Rotation Timeline Table")
-                    df_timeline = build_timeline_dataframe(entry["timeline_events"])
+                    sim_party = entry.get("snapshot_party") or st.session_state.get("my_party", {})
+                    df_timeline = build_timeline_dataframe(
+                        entry["timeline_events"],
+                        party=sim_party,
+                    )
                     show_advanced = st.checkbox("Show detailed columns", value=False, key=f"show_detail_{real_idx}")
                     if show_advanced:
-                        st.dataframe(df_timeline, use_container_width=True)
+                        view = df_timeline
                     else:
-                        del_cols = ["Time (s)", "Active", "Owner", "Action", "Elemental App", "Reaction", "Average DMG"]
-                        st.dataframe(df_timeline[del_cols], use_container_width=True)
+                        preview_order = [
+                            "Time (s)", "Active", "Owner", "Action",
+                            "Elemental App", "Aura", "Reaction", "Average DMG",
+                        ]
+                        view = df_timeline[[c for c in preview_order if c in df_timeline.columns]]
+                    st.dataframe(style_timeline_dataframe(view), use_container_width=True, hide_index=True)
 
                     st.markdown("<br><hr>", unsafe_allow_html=True)
                                         

@@ -677,7 +677,7 @@ class RotationTimeline:
                                     "level": active_vortex.level
                                 },
                                 "faruzan_buff_state": event.get("faruzan_buff_state", "OFF"),
-                        "faruzan_buff_window": event.get("faruzan_buff_window", "OFF"),
+                                "faruzan_buff_window": event.get("faruzan_buff_window", "OFF"),
                                 "faruzan_debuff_state": event.get("faruzan_debuff_state", "OFF"),
                                 "aether_c2_state": event.get("aether_c2_state", "OFF"),
                                 "marvelous_stacks": event.get("marvelous_stacks", 0),
@@ -1033,7 +1033,9 @@ class RotationTimeline:
                 event["def_mult"] = dmg.get("def_mult")
                 event["res_mult"] = dmg.get("res_mult")
                 # Snapshot stats used for this hit's damage (owner, after buffs).
+                event["stat_hp"] = final_stats.get("HP", 0.0)
                 event["stat_atk"] = final_stats.get("ATK", 0.0)
+                event["stat_def"] = final_stats.get("DEF", 0.0)
                 event["stat_em"] = final_stats.get("EM", 0.0)
                 event["stat_cr"] = final_stats.get("CR", 0.05)
                 event["stat_cd"] = final_stats.get("CD", 0.50)
@@ -1049,7 +1051,9 @@ class RotationTimeline:
                 event["crit_mult_avg"] = None
                 event["def_mult"] = None
                 event["res_mult"] = None
+                event["stat_hp"] = None
                 event["stat_atk"] = None
+                event["stat_def"] = None
                 event["stat_em"] = None
                 event["stat_cr"] = None
                 event["stat_cd"] = None
@@ -1159,69 +1163,21 @@ class RotationTimeline:
         main_widths = [10, 8, 8, 36, 11, 24]
 
         # 2. Damage calcs category columns
-        dmg_headers = ["non_crit", "crit_damage", "average_damage", "effective_average_damage"]
+        dmg_headers = ["average_damage", "non_crit", "crit_damage", "effective_average_damage"]
         dmg_widths = [12, 13, 16, 26]
 
         # 2b. Mults category columns (multiplier audit; "—" = not applicable)
         mult_headers = ["Base", "Quills", "Bonus", "Elev", "Crit", "DEF", "Res"]
         mult_widths = [10, 10, 9, 8, 9, 9, 9]
 
-        # 3. Buffs category columns
-        buff_headers = []
-        buff_widths = []
-        if has_mizuki:
-            buff_headers.extend(["DDS", "A4", "VBTD", "C1 Debuff"])
-            buff_widths.extend([5, 5, 6, 11])
-        if has_faruzan:
-            buff_headers.extend(["FaruzanBuff", "FaruzanDebuff"])
-            buff_widths.extend([9, 12])
-        if has_c2:
-            buff_headers.append("AetherC2")
-            buff_widths.append(9)
-        if has_c2_enhanced:
-            buff_headers.append("AetherC2E")
-            buff_widths.append(10)
-        if has_frostglow:
-            buff_headers.append("Frostglow")
-            buff_widths.append(10)
-        buff_headers.append("Marvelous")
-        buff_widths.append(10)
-        if has_odette_burst:
-            buff_headers.append("OdetteBurst")
-            buff_widths.append(11)
-        if has_odette_c2:
-            buff_headers.append("OdetteC2")
-            buff_widths.append(9)
-        if has_sucrose_a1:
-            buff_headers.append("SucA1")
-            buff_widths.append(6)
-        if has_sucrose_a4:
-            buff_headers.append("SucA4")
-            buff_widths.append(6)
-        if has_sucrose_c6:
-            buff_headers.append("SucC6")
-            buff_widths.append(6)
-        if has_exaiphanes:
-            buff_headers.append("Exaiph")
-            buff_widths.append(7)
-        if has_silver_light:
-            buff_headers.append("Silver")
-            buff_widths.append(7)
-        if has_hotf:
-            buff_headers.append("HotF")
-            buff_widths.append(5)
-        if has_dream:
-            buff_headers.append("Dream")
-            buff_widths.append(7)
-        if has_vv:
-            buff_headers.append("VV")
-            buff_widths.append(5)
-        if has_instructor:
-            buff_headers.append("Instructor")
-            buff_widths.append(10)
-        if has_cryo_resonance:
-            buff_headers.append("CryoResonance")
-            buff_widths.append(13)
+        # 3. Buffs category columns -- registry-driven: technical names, grouped
+        #    characters -> weapons -> artifacts -> team, and only for effects whose
+        #    owner (character/constellation, weapon, artifact set, resonance) is in
+        #    the party.
+        import buff_registry
+        buff_columns = buff_registry.visible_buffs(getattr(self, "party", {}) or {})
+        buff_headers = [entry["label"] for entry in buff_columns]
+        buff_widths = [min(max(len(header), 6), 14) for header in buff_headers]
 
         # Spans for the 2-tier Category Header
         main_span = sum(main_widths) + 3 * (len(main_widths) - 1)
@@ -1275,9 +1231,9 @@ class RotationTimeline:
                 str(event.get("action", "")),
                 str(event.get("cryo_aura", "-")),
                 str(event.get("reaction", "-")),
+                avg_str,
                 nc_str,
                 cd_str,
-                avg_str,
                 eff_str,
                 base_str,
                 q_str,
@@ -1287,46 +1243,9 @@ class RotationTimeline:
                 def_str,
                 res_str,
             ]
-            if has_mizuki:
-                row_data.extend([
-                    event.get("dreamdrifter_state", "OFF"),
-                    event.get("mizuki_a4_state", "OFF"),
-                    event.get("vbtd_state", "OFF"),
-                    event.get("c1_debuff_state", "OFF"),
-                ])
-            if has_faruzan:
-                row_data.extend([event.get("faruzan_buff_state", "OFF"), event.get("faruzan_debuff_state", "OFF")])
-            if has_c2:
-                row_data.append(event.get("aether_c2_state", "OFF"))
-            if has_c2_enhanced:
-                row_data.append(event.get("aether_c2_enhanced_state", "OFF"))
-            if has_frostglow:
-                row_data.append(str(event.get("frostglow_stacks", 0)))
-            row_data.append(str(event.get("marvelous_stacks", 0)))
-            if has_odette_burst:
-                row_data.append(event.get("odette_burst_state", "OFF"))
-            if has_odette_c2:
-                row_data.append(event.get("odette_c2_state", "OFF"))
-            if has_sucrose_a1:
-                row_data.append(event.get("sucrose_a1_state", "OFF"))
-            if has_sucrose_a4:
-                row_data.append(event.get("sucrose_a4_state", "OFF"))
-            if has_sucrose_c6:
-                row_data.append(event.get("sucrose_c6_state", "OFF"))
-            if has_exaiphanes:
-                row_data.append(event.get("exaiphanes_blade_state", "OFF"))
-            if has_silver_light:
-                row_data.append(str(event.get("silver_light_stacks", 0)))
-            if has_hotf:
-                row_data.append(event.get("hotf_state", "OFF"))
-            if has_dream:
-                row_data.append(event.get("dreamdrifter_state", "OFF"))
-            if has_vv:
-                row_data.append(event.get("vv_state", "OFF"))
-            if has_instructor:
-                row_data.append(event.get("instructor_state", "OFF"))
-            if has_cryo_resonance:
-                row_data.append(event.get("cryo_resonance_state", "OFF"))
+            for entry in buff_columns:
+                value = event.get(entry["key"], "OFF")
+                row_data.append("OFF" if value is None else str(value))
 
             row_str = " | ".join(f"{val:<{w}}" for val, w in zip(row_data, all_widths))
             print(row_str)

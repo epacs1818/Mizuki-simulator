@@ -69,3 +69,33 @@ CHARACTER_BASE_STATS = {
         "cryo_bonus": [0.12, 0.12, 0.18, 0.24, 0.24, 0.24]
     }
 }
+# ---------------------------------------------------------------------------
+# Element helpers -- used by the buff registry to gate team auras/resonances.
+# ---------------------------------------------------------------------------
+def get_character_element(char_name: str) -> str:
+    """Return the Vision/element of a character (empty string when unknown)."""
+    return CHARACTER_BASE_STATS.get(char_name, {}).get("element", "")
+
+
+# Resonance requirements: element -> minimum number of matching characters.
+RESONANCE_REQUIREMENTS = {
+    "Cryo": 2,
+}
+
+
+def party_element_counts(party):
+    """Count party members per element (accepts a list of names or a party dict)."""
+    names = party.keys() if isinstance(party, dict) else party
+    counts = {}
+    for name in names:
+        element = get_character_element(name)
+        if element:
+            counts[element] = counts.get(element, 0) + 1
+    return counts
+
+
+def has_element_resonance(party, element: str) -> bool:
+    """True when the party has enough members of element for its resonance."""
+    required = RESONANCE_REQUIREMENTS.get(element, 2)
+    return party_element_counts(party).get(element, 0) >= required
+

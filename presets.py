@@ -4,13 +4,14 @@ from abilities import (
     aether_ecq as aether_ecq_ability_seq, # imported or built natively
     odette_cast, odette_recast,
     faruzan_burst, faruzan_collapse_ability,
-    mizuki_skill, mizuki_sacfrag_skill
+    mizuki_skill, mizuki_sacfrag_skill,
+    sucrose_skill, sucrose_burst
 )
 
 # Default party used when no saved JSON configuration is available
 # (main_test.py fallback, smoke_test.py).
 DEFAULT_PARTY = {
-    "Mizuki": {"constellation": 6, "level": 90, "refinement": 5,
+    "Mizuki": {"constellation": 2, "level": 90, "refinement": 5,
                "weapon": "Sacrificial Fragments", "artifact_set": "2p/2p EM",
                "talents": "10/13/13"},
     "Aether": {"constellation": 6, "level": 90, "refinement": 1,
@@ -31,7 +32,7 @@ STANDARD_FIELD_SEQUENCES = {
     "Aether ECQ": FieldSequence("AetherECQ", "Aether", swap_out_time=3.631),
     "Faruzan Q": FieldSequence("FaruzanQSwap", "Faruzan", swap_out_time=1.410),
     "Odette EE": FieldSequence("OdetteEE", "Odette", swap_out_time=2.371),
-    "Mizuki E (Sac Frag Proc)": FieldSequence("SacFragFill", "Mizuki", swap_out_time=1.75),
+    "Mizuki E (Sac Frag Proc)": FieldSequence("SacFragFill", "Mizuki", swap_out_time=1.750),
     "Mizuki E (Pullout)": FieldSequence("BurstlessPullOut", "Mizuki", swap_out_time=10.0),
 }
 
@@ -70,7 +71,7 @@ STANDARD_ROTATIONS = {
             STANDARD_FIELD_SEQUENCES["Aether CQ"],            
             STANDARD_FIELD_SEQUENCES["Mizuki E (Pullout)"]
         ],
-        repetitions=2,
+        repetitions=6,
         description="Core double-swirl team rotation looped twice."
     )
 }
