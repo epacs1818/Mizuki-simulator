@@ -1,6 +1,17 @@
 import itertools
 import numpy as np
 
+# Attack-type DMG bonuses (artifacts can grant e.g. "burst_bonus"). They are
+# STANDARD-damage only: they never enter stellar or stellar-reaction damage.
+_ATTACK_TYPE_BONUS_KEYS = {
+    "Normal Attack": "normal_bonus",
+    "Charged Attack": "charged_bonus",
+    "Plunging Attack": "plunging_bonus",
+    "Elemental Skill": "skill_bonus",
+    "Elemental Burst": "burst_bonus",
+}
+
+
 class HitDamageContext:
     """Adapter to normalize Hit dataclasses or event dictionaries from timeline.py."""
     def __init__(self, obj):
@@ -104,7 +115,11 @@ def calculate_standard_damage(hit, final_stats, enemy_stats, quill_damage=0.0, c
     attack_type_bonus = 0.0
     if hit.attack_type:
         at_str = hit.attack_type.value if hasattr(hit.attack_type, "value") else str(hit.attack_type).lower()
-        attack_type_bonus = final_stats.get(f"{at_str}_bonus", final_stats.get(at_str, 0.0))
+        bonus_key = _ATTACK_TYPE_BONUS_KEYS.get(at_str)
+        if bonus_key:
+            attack_type_bonus = final_stats.get(bonus_key, 0.0)
+        else:
+            attack_type_bonus = final_stats.get(f"{at_str}_bonus", final_stats.get(at_str, 0.0))
 
     standard_damage_bonus = final_stats.get("standard_damage_bonus", 0.0)
 
@@ -324,8 +339,11 @@ def calculate_stellar_reaction_damage(hit, final_stats, enemy_stats, party_dict=
     em_bonus = (6.0 * em) / (2000.0 + em)
     stellar_bonus = final_stats.get("stellar_bonus", final_stats.get("Stellar Bonus", 0.0))
     jubilee_mult = final_stats.get("jubilee_mult", final_stats.get("Jubilee Mult", 0.0))
+    # Anastasya A4: extra jubilee that applies to STELLAR SWIRL REACTIONS only
+    # (never to plain stellar damage).
+    reaction_jubilee = final_stats.get("reaction_jubilee_mult", 0.0)
     # The team Jubilee (Aether + Odette) multiplies the swirl reaction bonus too.
-    bonus_mult = (1.0 + jubilee_mult) * (1.0 + em_bonus + stellar_bonus)
+    bonus_mult = (1.0 + jubilee_mult + reaction_jubilee) * (1.0 + em_bonus + stellar_bonus)
     quill_damage = quill_damage or final_stats.get("quill_damage", 0.0) or (hit.get("quill_damage", 0.0) if isinstance(hit, dict) else getattr(hit, "quill_damage", 0.0))
 
     elevation_val = final_stats.get("elevation_mult", final_stats.get("Elevation Mult", 0.0))
@@ -371,7 +389,7 @@ def calculate_stellar_reaction_damage(hit, final_stats, enemy_stats, party_dict=
         # stellar_bonus and team Jubilee stay constant across contributors.
         em_c = float(char_info.get("EM", char_info.get("em", em)))
         em_bonus_c = (6.0 * em_c) / (2000.0 + em_c)
-        bonus_mult_c = (1.0 + jubilee_mult) * (1.0 + em_bonus_c + stellar_bonus)
+        bonus_mult_c = (1.0 + jubilee_mult + reaction_jubilee) * (1.0 + em_bonus_c + stellar_bonus)
         contrib_bonus_mult[char_name] = bonus_mult_c
         contrib_elevation_mult[char_name] = elevation_mult
         contrib_res_mult[char_name] = res_mult

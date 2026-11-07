@@ -40,13 +40,46 @@ BUFFS = [
     {"key": "sucrose_a1_state", "label": "Sucrose A1 EM", "group": "Character", "owner": "Sucrose"},
     {"key": "sucrose_a4_state", "label": "Sucrose A4 EM", "group": "Character", "owner": "Sucrose"},
     {"key": "sucrose_c6_state", "label": "Sucrose C6 Cryo DMG", "group": "Character", "owner": "Sucrose", "min_constellation": 6},
+    {"key": "anastasya_burst_state", "label": "Anastasya Burst Stellar", "group": "Character", "owner": "Anastasya"},
+    {"key": "anastasya_a1_state", "label": "Anastasya A1 CD", "group": "Character", "owner": "Anastasya"},
+    {"key": "anastasya_a4_state", "label": "Anastasya A4 Jubilee", "group": "Character", "owner": "Anastasya"},
+    {"key": "anastasya_triumph_ready", "label": "Anastasya Triumph", "group": "Character", "owner": "Anastasya"},
     # --- Weapons -----------------------------------------------------------
     {"key": "exaiphanes_blade_state", "label": "Exaiphanes ATK%", "group": "Weapon", "owner": "Exaiphanes Blade"},
     {"key": "silver_light_stacks", "label": "Silver Light EM Stacks", "group": "Weapon", "owner": "Silver Light"},
+    # Widsith: both variants share one flag, so the column exists for either one.
+    {"key": "widsith_state", "label": "Widsith Buff", "group": "Weapon",
+     "owner": ("The Widsith (Average)", "The Widsith (All EM)")},
+    {"key": "sacrificial_jade_state", "label": "Sacrificial Jade", "group": "Weapon", "owner": "Sacrificial Jade"},
+    {"key": "sunny_swirl_state", "label": "Sunny Swirl EM", "group": "Weapon", "owner": "Sunny Morning Sleep-In"},
+    {"key": "sunny_skill_state", "label": "Sunny Skill EM", "group": "Weapon", "owner": "Sunny Morning Sleep-In"},
+    {"key": "sunny_burst_state", "label": "Sunny Burst EM", "group": "Weapon", "owner": "Sunny Morning Sleep-In"},
+    {"key": "evenstar_stacks", "label": "Evenstar Stacks", "group": "Weapon", "owner": "Wandering Evenstar"},
+    {"key": "ttds_state", "label": "TTDS ATK%", "group": "Weapon", "owner": "Thrilling Tales of Dragon Slayers"},
+    {"key": "starsealed_state", "label": "Starsealed EM", "group": "Weapon", "owner": "Starsealed Edict"},
+    {"key": "starsealed_stacks", "label": "Starsealed Stacks", "group": "Weapon", "owner": "Starsealed Edict"},
+    {"key": "whitlake_stacks", "label": "Whitelake Stacks", "group": "Weapon", "owner": "Whitelake Frostfeather"},
+    {"key": "whitlake_max_state", "label": "Whitelake 3-Stack Crit", "group": "Weapon", "owner": "Whitelake Frostfeather"},
+    {"key": "finale_state", "label": "Finale ATK%", "group": "Weapon", "owner": "Finale Of The Deep"},
+    {"key": "breezeborne_sigils", "label": "Breezeborne Sigils", "group": "Weapon", "owner": "Breezeborne Refrain"},
+    {"key": "breezeborne_state", "label": "Breezeborne Buff", "group": "Weapon", "owner": "Breezeborne Refrain"},
+    {"key": "elegy_sigils", "label": "Elegy Sigils", "group": "Weapon", "owner": "Elegy for the End"},
+    {"key": "elegy_state", "label": "Elegy Buff", "group": "Weapon", "owner": "Elegy for the End"},
+    {"key": "newbough_stacks", "label": "New Bough Stacks", "group": "Weapon", "owner": "New Bough"},
+    {"key": "silverdawn_state", "label": "Silverdawn Buff", "group": "Weapon", "owner": "Silverdawn"},
+    {"key": "silverdawn_extensions", "label": "Silverdawn Ext", "group": "Weapon", "owner": "Silverdawn"},
     # --- Artifact sets -----------------------------------------------------
     {"key": "hotf_state", "label": "HotF Stellar", "group": "Artifact", "owner": "Heart Of The Furnace"},
     {"key": "vv_state", "label": "VV Elemental Shred", "group": "Artifact", "owner": "Viridescent Venerer"},
     {"key": "instructor_state", "label": "Instructor EM", "group": "Artifact", "owner": "Instructor"},
+    {"key": "gilded_state", "label": "Gilded Dreams", "group": "Artifact", "owner": "Gilded Dreams"},
+    {"key": "noblesse_state", "label": "Noblesse ATK%", "group": "Artifact", "owner": "Noblesse Oblige"},
+    {"key": "tenacity_state", "label": "Tenacity ATK%", "group": "Artifact", "owner": "Tenacity Of The Millelith"},
+    {"key": "risingwinds_state", "label": "Rising Winds ATK%", "group": "Artifact", "owner": "A Day Carved From Rising Winds"},
+    {"key": "scarlet_state", "label": "Scarlet Proof", "group": "Artifact", "owner": "Scarlet Proof"},
+    {"key": "tsaritsa_stacks", "label": "Tsaritsa Stacks", "group": "Artifact", "owner": "New Tsaritsa set"},
+    {"key": "tsaritsa_state", "label": "Tsaritsa Cryo CR", "group": "Artifact", "owner": "New Tsaritsa set"},
+    {"key": "tsaritsa_stellar_state", "label": "Tsaritsa Stellar CR", "group": "Artifact", "owner": "New Tsaritsa set"},
     # --- Team auras --------------------------------------------------------
     {"key": "cryo_resonance_state", "label": "Cryo Resonance CR", "group": "Team", "owner": "Cryo Resonance", "team_requirement": ("element", "Cryo", 2)},
 ]
@@ -90,7 +123,8 @@ def _is_available(entry, info):
             return False
         return info["constellations"].get(owner, 0) >= entry.get("min_constellation", 0)
     if group == "Weapon":
-        return entry["owner"] in info["weapons"]
+        owners = entry["owner"] if isinstance(entry["owner"], (list, tuple, set)) else [entry["owner"]]
+        return any(owner in info["weapons"] for owner in owners)
     if group == "Artifact":
         return entry["owner"] in info["artifacts"]
     if group == "Team":

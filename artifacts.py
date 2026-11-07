@@ -29,5 +29,8 @@ ARTIFACTS_BONUSES = {
     "Viridescent Venerer": {
         "anemo_bonus": 0.150,
         "stellar_bonus": 0.200
+    },
+    "New Tsaritsa set":{
+        "atk_percent": 0.180
     }
 }

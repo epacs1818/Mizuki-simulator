@@ -89,3 +89,13 @@ class Trial:
     end_mode: str = "time"
     end_time: float = 30.0
     description: Optional[str] = ""
+    # Characters this trial was authored for. A preset trial is only offered when
+    # the user's party is exactly this team (order-insensitive). None = no gate.
+    required_party: Optional[List[str]] = None
+
+    def matches_party(self, characters) -> bool:
+        """True when *characters* is exactly the team this trial was built for."""
+        if not self.required_party:
+            return True
+        chosen = {c for c in (characters or []) if c}
+        return chosen == set(self.required_party)

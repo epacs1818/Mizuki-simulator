@@ -3,9 +3,11 @@ from abilities import (
     aether_skill, aether_n1, aether_n1ca, aether_burst_enhanced,
     aether_ecq as aether_ecq_ability_seq, # imported or built natively
     odette_cast, odette_recast,
+    odette_qe,
     faruzan_burst, faruzan_collapse_ability,
     mizuki_skill, mizuki_sacfrag_skill,
-    sucrose_skill, sucrose_burst
+    sucrose_skill, sucrose_burst,
+    anastasya_e, anastasya_q, anastasya_eq, faruzan_e,
 )
 
 # Default party used when no saved JSON configuration is available
@@ -34,6 +36,14 @@ STANDARD_FIELD_SEQUENCES = {
     "Odette EE": FieldSequence("OdetteEE", "Odette", swap_out_time=2.371),
     "Mizuki E (Sac Frag Proc)": FieldSequence("SacFragFill", "Mizuki", swap_out_time=1.750),
     "Mizuki E (Pullout)": FieldSequence("BurstlessPullOut", "Mizuki", swap_out_time=10.0),
+    # Anastasya's sequences live in abilities.py (anastasya_e / anastasya_q /
+    # anastasya_eq), built on Aether's EN1 / CQ timings.
+    "Anastasya E": anastasya_e,
+    "Anastasya Q": anastasya_q,
+    "Anastasya EQ": anastasya_eq,
+    "Faruzan E": faruzan_e,
+    # Odette's QE lives in abilities.py (burst + recast, 3.071s field).
+    "Odette QE": odette_qe,
 }
 
 # Populate calls for sequences (covering all abilities)
@@ -73,23 +83,55 @@ STANDARD_ROTATIONS = {
         ],
         repetitions=6,
         description="Core double-swirl team rotation looped twice."
+    ),
+    # Anastasya variant: she replaces Aether in both slots and does her skill and
+    # burst in ONE visit (EQ) — she cannot split them across the loop. Odette uses
+    # her QE (burst + recast, 3.071s field) so the loop is 19.082s: just enough for
+    # Faruzan's 19s burst cooldown, and it keeps Odette's own burst buff up.
+    "anastasya_mizuki_loop": Rotation(
+        name="Anastasya Mizuki-Faruzan Loop",
+        sequences=[
+            STANDARD_FIELD_SEQUENCES["Anastasya EQ"],
+            STANDARD_FIELD_SEQUENCES["Faruzan Q"],
+            STANDARD_FIELD_SEQUENCES["Mizuki E (Sac Frag Proc)"],
+            STANDARD_FIELD_SEQUENCES["Odette QE"],
+            STANDARD_FIELD_SEQUENCES["Mizuki E (Pullout)"]
+        ],
+        repetitions=6,
+        description="Anastasya EQ -> Faruzan Q -> Mizuki (Sac Frag) -> Odette QE -> Mizuki (pull out)."
     )
 }
 
 
 # 3. STANDARD TRIALS (Execution Windows)
+# Both preset trials are the same 6x "Sac Frag pull out" loop; they differ only in
+# who takes Aether's slots, so the UI gates them on the exact team.
+MIZUKI_SACFRAG_TEAM = ["Mizuki", "Aether", "Odette", "Faruzan"]
+ANASTASYA_SACFRAG_TEAM = ["Mizuki", "Anastasya", "Odette", "Faruzan"]
+
 STANDARD_TRIALS = {
-    "Standard 30s Trial": Trial(
-        name="30s Fixed Trial",
-        rotations=[STANDARD_ROTATIONS["standard_mizuki_loop"]],
-        end_mode="time",
-        end_time=30.0,
-        description="Capped strictly at 30.0 seconds."
-    ),
-    "Exact Rotation Trial": Trial(
-        name="Auto-End Trial",
+    "Mizuki Sac Frag Pull out 6x rotations": Trial(
+        name="Mizuki Sac Frag Pull out 6x rotations",
         rotations=[STANDARD_ROTATIONS["standard_mizuki_loop"]],
         end_mode="last_swap",
-        description="Ends automatically when the final character swaps out."
-    )
+        description="Mizuki / Aether / Odette / Faruzan: 6 loops, ends when the last character swaps out.",
+        required_party=MIZUKI_SACFRAG_TEAM,
+    ),
+    "Mizuki Sac Frag Pull out 6x rotations (Anastasya)": Trial(
+        name="Mizuki Sac Frag Pull out 6x rotations",
+        rotations=[STANDARD_ROTATIONS["anastasya_mizuki_loop"]],
+        end_mode="last_swap",
+        description="Mizuki / Anastasya / Odette / Faruzan: the same 6 loops with Anastasya's EQ.",
+        required_party=ANASTASYA_SACFRAG_TEAM,
+    ),
 }
+
+# Calibration / test harness only: the fixed 30s window is NOT offered in the UI
+# (a rotation mid-loop gets cut), but the automated checks rely on it.
+TEST_TRIAL_30S = Trial(
+    name="30s Fixed Trial",
+    rotations=[STANDARD_ROTATIONS["standard_mizuki_loop"]],
+    end_mode="time",
+    end_time=30.0,
+    description="Capped strictly at 30.0 seconds. Test/calibration harness only.",
+)

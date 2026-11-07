@@ -11,6 +11,10 @@ from abilities import (
     odette_ee,
     mizuki_sacfrag_fill,
     mizuki_burstless_pull_out,
+    ABILITY_REGISTRY,
+    FIELD_SEQUENCE_REGISTRY,
+    abilities_for,
+    field_sequences_for,
 )
 
 # Ensure TEAM_BUFFS exists on buffs module for stats_calc
@@ -19,7 +23,7 @@ if not hasattr(buffs, "TEAM_BUFFS"):
 
 from artifacts import ARTIFACTS_BONUSES
 from weapons import WEAPON_STATS
-from stats_calc import build_initial_stats, compute_card_stats
+from stats_calc import build_initial_stats, compute_card_stats, apply_weapon_party_stats
 from substats_standards import (
     CARRIES,
     build_recommended_subs,
@@ -155,7 +159,7 @@ st.title("Yumemizuki Mizuki's Rotation Damage Calculator")
 st.markdown("---")
 
 # Constants & Options defined by your specifications
-CHARACTERS = ["Select Character", "Mizuki", "Aether", "Odette", "Faruzan", "Sucrose", "Diona"]
+CHARACTERS = ["Select Character", "Mizuki", "Aether", "Odette", "Anastasya", "Faruzan", "Sucrose", "Diona"]
 
 LEVEL_OPTIONS = [60, 70, 80, 90, 95, 100]
 
@@ -190,11 +194,19 @@ CHARACTER_WEAPONS = {
         ("Azurelight", [1, 2, 3, 4, 5]),
         ("Aquila Favonia", [1, 2, 3, 4, 5]),
     ],
+    "Anastasya": [
+        ("Favonius Warbow", [1, 2, 3, 4, 5]),
+        ("Sacrificial Bow", [1, 2, 3, 4, 5]),
+        ("Breezeborne Refrain", [1, 2, 3, 4, 5]),
+        ("Elegy for the End", [1, 2, 3, 4, 5]),
+        ("Silverdawn", [1, 2, 3, 4, 5]),
+    ],
     "Faruzan": [
         ("Favonius Warbow", [1, 2, 3, 4, 5]),
         ("Sacrificial Bow", [1, 2, 3, 4, 5]),
         ("Breezeborne Refrain", [1, 2, 3, 4, 5]),
         ("Elegy for the End", [1, 2, 3, 4, 5]),
+        ("Silverdawn", [1, 2, 3, 4, 5]),
     ],
     "Sucrose": [
         ("The Widsith (Average)", [1, 2, 3, 4, 5]),
@@ -213,6 +225,7 @@ CHARACTER_WEAPONS = {
         ("Sacrificial Bow", [1, 2, 3, 4, 5]),
         ("Breezeborne Refrain", [1, 2, 3, 4, 5]),
         ("Elegy for the End", [1, 2, 3, 4, 5]),
+        ("Silverdawn", [1, 2, 3, 4, 5]),
     ],
 }
 
@@ -222,7 +235,8 @@ CHARACTER_CONSTELLATIONS = {
     "Diona": ["C6"],    # Only C6 available
     "Mizuki": ["C0", "C1", "C2", "C3", "C4", "C5", "C6"],
     "Aether": ["C4", "C5", "C6"],
-    "Odette": ["C0", "C1", "C2", "C3"],
+    "Odette": ["C0"],
+    "Anastasya": ["C0"],
     "Sucrose": ["C0", "C1", "C2", "C3", "C4", "C5", "C6"],
 }
 
@@ -243,6 +257,13 @@ CHARACTER_ARTIFACT_SETS = {
         "A Day Carved From Rising Winds",
         "Heart Of The Furnace",
         "Tenacity Of The Millelith",
+        "New Tsaritsa set",
+    ],
+    "Anastasya": [
+        "Select Set",
+        "Heart Of The Furnace",
+        "2p/2p ATK",
+        "New Tsaritsa set",
     ],
     "Aether": [
         "Select Set",
@@ -250,6 +271,7 @@ CHARACTER_ARTIFACT_SETS = {
         "A Day Carved From Rising Winds",
         "Heart Of The Furnace",
         "Tenacity Of The Millelith",
+        "New Tsaritsa set",
     ],
     "Faruzan": [
         "Select Set",
@@ -307,23 +329,42 @@ STAT_KEY_MAP = {
     "Cryo Bonus%": "cryo_bonus",
 }
 
-AVAILABLE_FIELD_SEQUENCES = {
-    "AetherEN1   (Aether – Skill N1)":           "aether_en1",
-    "AetherCQ    (Aether – Charged + Burst)":    "aether_cq",
-    "FaruzanQ    (Faruzan – Burst Swap)":        "faruzan_q",
-    "OdetteEE    (Odette – Skill Double E)":     "odette_ee",
-    "SacFragFill (Mizuki – Skill Fill)":         "mizuki_sacfrag_fill",
-    "BurstlessPO (Mizuki – Burstless Pull-Out)": "mizuki_burstless_pull_out",
-}
+# --- Editor catalogues -------------------------------------------------------
+# Everything the editors offer comes from abilities.py (see FIELD_SEQUENCE_REGISTRY /
+# ABILITY_REGISTRY there), so a new ability or field sequence shows up automatically
+# and never has to be listed twice. Availability is gated by the CURRENT PARTY: only
+# sequences/abilities whose owner is actually in the team are offered.
 
-FIELD_SEQUENCE_OBJ_MAP = {
-    "aether_en1": aether_en1,
-    "aether_cq": aether_cq,
-    "faruzan_q": faruzan_q,
-    "odette_ee": odette_ee,
-    "mizuki_sacfrag_fill": mizuki_sacfrag_fill,
-    "mizuki_burstless_pull_out": mizuki_burstless_pull_out,
-}
+def _party_characters() -> list:
+    """Character names selected in the current party (order preserved)."""
+    party = st.session_state.get("my_party") or {}
+    return [name for name in party.keys()
+            if name and name not in ("Select Character", "None")]
+
+
+def _available_field_sequences() -> dict:
+    """{label: FieldSequence} — abilities.py sequences for this party + custom ones."""
+    options = {}
+    for name, seq in field_sequences_for(_party_characters()).items():
+        options[f"{name} ({seq.character})"] = seq
+    for name, seq in (st.session_state.get("custom_field_sequences") or {}).items():
+        options[f"{name} ({seq.character}) [custom]"] = seq
+    return options
+
+
+def _available_abilities(character: str) -> dict:
+    """{ability name: Ability} owned by *character* (empty when not in the party)."""
+    if character not in _party_characters():
+        return {}
+    return abilities_for(character)
+
+
+def _select_trial_label(key: str, trial) -> str:
+    """Trial dropdown label: preset trials show their team so duplicates stay clear."""
+    if trial.required_party:
+        return f"{trial.name}  [{' / '.join(trial.required_party)}]"
+    return key
+
 
 _BUFF_GROUP_TAG = {"Character": "", "Weapon": "[W] ", "Artifact": "[A] ", "Team": "[T] "}
 
@@ -502,34 +543,36 @@ with tab1:
             st.session_state["party_created"] = True
             st.session_state["enemy_confirmed"] = True
             
-            # Rebuild Custom Field Sequences from raw recipe data
+            # Rebuild Custom Field Sequences from raw recipe data.
+            # Abilities are resolved through abilities.ABILITY_REGISTRY so the export
+            # round-trips every ability (and picks the right owner for shared names
+            # such as "Elemental Burst").
             from models import FieldSequence, Rotation, Trial
-            from abilities import aether_skill, aether_n1, aether_n1ca, aether_burst_enhanced, odette_cast, odette_recast, faruzan_burst, mizuki_skill
-            
-            ability_lookup = {
-                "N1": aether_n1,
-                "Charged Attack": aether_n1ca,
-                "Elemental Skill": aether_skill,
-                "Elemental Burst": aether_burst_enhanced,
-                "Skill Cast": odette_cast,
-                "Skill Recast": odette_recast,
-                "Mizuki Skill": mizuki_skill,
-                "Pressurized Collapse": faruzan_burst # or respective skill
-            }
-            
+            from abilities import ABILITY_REGISTRY, FIELD_SEQUENCE_REGISTRY
+
+            def _resolve_ability(ability_name: str, character: str = None):
+                if character and ability_name in ABILITY_REGISTRY.get(character, {}):
+                    return ABILITY_REGISTRY[character][ability_name]
+                for ability_map in ABILITY_REGISTRY.values():
+                    if ability_name in ability_map:
+                        return ability_map[ability_name]
+                return None
+
             restored_fs = {}
             for fs_name, fs_data in data.get("custom_field_sequences_raw", {}).items():
                 fs = FieldSequence(name=fs_data["name"], character=fs_data["character"], swap_out_time=fs_data["swap_out_time"])
                 for call in fs_data.get("calls", []):
-                    ab_obj = ability_lookup.get(call["ability_name"])
+                    ab_obj = _resolve_ability(call.get("ability_name"),
+                                              call.get("ability_character", fs.character))
                     if ab_obj:
                         fs.add_ability(call["start_time"], ab_obj)
                 restored_fs[fs_name] = fs
             st.session_state["custom_field_sequences"] = restored_fs
-            
-            # Combine for rotation mapping
+
+            # Combine every known sequence for rotation mapping: presets by label,
+            # abilities.py by sequence name (what the exporter writes), custom by name.
             from presets import STANDARD_FIELD_SEQUENCES
-            all_seqs = {**STANDARD_FIELD_SEQUENCES, **restored_fs}
+            all_seqs = {**STANDARD_FIELD_SEQUENCES, **FIELD_SEQUENCE_REGISTRY, **restored_fs}
             
             # Rebuild Custom Rotations
             restored_rots = {}
@@ -863,7 +906,6 @@ with tab1:
                     
                     standard_mode = (st.session_state.get(f"std_{slot_num}", "Manual")
                                      if char_name in CARRIES else "Manual")
-                    rv_mode = standard_mode != "Manual"
 
                     if standard_mode == "100% RV (Crit Value)":
                         # 100% RV: auto mains + substats per the carry standard (5★ defaults).
@@ -896,7 +938,6 @@ with tab1:
                                     subs_total[sub_key] = subs_total.get(sub_key, 0.0) + numeric_val
 
                     initial_stats = build_initial_stats(char_name, data["level"], weapon, artifact_set, main_stats_total, subs_total, refinement=data["refinement"])
-                    card_stats = compute_card_stats(initial_stats, standard_mode=rv_mode)
 
                     my_party[char_name] = {
                         "constellation": const_val,
@@ -909,8 +950,20 @@ with tab1:
                         "element": get_character_element(char_name),
                         "standard_mode": standard_mode,
                         "initial_stats": initial_stats,  
-                        "card_stats": card_stats         
+                        "card_stats": {}                 
                     }
+
+                # Permanent, party-composition-dependent weapon stats (e.g. A Thousand
+                # Floating Dreams) must be applied BEFORE the cards are rendered, and
+                # they depend on the whole party, so this is a second pass.
+                apply_weapon_party_stats(
+                    {name: d["initial_stats"] for name, d in my_party.items()}, my_party
+                )
+                for name, d in my_party.items():
+                    d["card_stats"] = compute_card_stats(
+                        d["initial_stats"],
+                        standard_mode=(d.get("standard_mode", "Manual") != "Manual"),
+                    )
 
                 st.session_state["party_created"] = True
                 st.session_state["last_team_signature"] = current_signature
@@ -1069,9 +1122,8 @@ with tab3:
 
         st.header("Trial Setup")
         
-        from presets import STANDARD_TRIALS, STANDARD_FIELD_SEQUENCES
+        from presets import STANDARD_TRIALS
         from models import FieldSequence, TimedAbilityCall, Rotation, Trial
-        from abilities import aether_skill, aether_n1, aether_n1ca, aether_burst_enhanced, odette_cast, odette_recast, faruzan_burst, mizuki_skill
         import copy
 
         # Initialize session state pools for custom advanced building if missing
@@ -1085,64 +1137,86 @@ with tab3:
             st.session_state["temp_trial_rot_entries"] = []
 
         # Combine standard and custom field sequences for reference
-        all_available_sequences = {**STANDARD_FIELD_SEQUENCES, **st.session_state["custom_field_sequences"]}
+        all_available_sequences = _available_field_sequences()
 
         # --- SECTION A: TRIAL RUNNER ---
-        selected_trial_key = st.selectbox(
-            "Select Trial",
-            list(st.session_state["active_trial_pool"].keys()),
-            key="trial_selector"
-        )
-        
-        trial_obj = st.session_state["active_trial_pool"][selected_trial_key]
+        # A preset trial is only offered when the selected team matches exactly the
+        # team it was authored for; user-made trials have no such requirement.
+        party_characters = _party_characters()
+        trial_pool = st.session_state["active_trial_pool"]
+        trial_options = [k for k, t in trial_pool.items() if t.matches_party(party_characters)]
+        trial_labels = {k: _select_trial_label(k, trial_pool[k]) for k in trial_options}
 
-        with st.expander("Trial Breakdown", expanded=False):
-            st.write(f"**Description:** {trial_obj.description}")
-            st.write(f"**End Mode:** {trial_obj.end_mode.capitalize()} | **Duration:** {trial_obj.end_time}s")
-            
-            for r_idx, rotation in enumerate(trial_obj.rotations):
-                st.markdown(f"**Rotation #{r_idx + 1}: {rotation.name}** (Repeated {rotation.repetitions}x)")
-                for s_idx, seq in enumerate(rotation.sequences):
-                    st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;↳ Step {s_idx + 1}: `{seq.name}` (*{seq.character}* — {seq.swap_out_time}s field time)")
-        
-        st.markdown("<br>", unsafe_allow_html=True)
+        # Drop a stale widget value when the selected trial is no longer offered.
+        if st.session_state.get("trial_selector") not in trial_options:
+            st.session_state.pop("trial_selector", None)
 
-        if st.button("Run Trial Simulation", type="primary", key="run_trial_btn", use_container_width=True):
-            party = st.session_state.get("my_party", {})
-            enemy = st.session_state.get("enemy_stats", {"enemy_lv": 100, "cryo_res": 0.1, "anemo_res": 0.1})
-
-            timeline = RotationTimeline(party=party, enemy_stats=enemy)
-            timeline.add_trial(trial_obj)
-            timeline.evaluate_timeline()
-
-            trial_duration = trial_obj.end_time
-            analytics = timeline.get_analytics_summary(trial_duration)
-
-            char_summary = ", ".join(
-                f"{name} Lv{data.get('level', 90)} C{data['constellation']} {data['talents']} "
-                f"{data['weapon']} R{data.get('refinement', 1)}"
-                for name, data in party.items()
+        selected_trial_key = None
+        trial_obj = None
+        if trial_options:
+            selected_trial_key = st.selectbox(
+                "Select Trial",
+                trial_options,
+                format_func=lambda k: trial_labels.get(k, k),
+                key="trial_selector"
             )
-            enemy_summary = f"Lv{enemy.get('enemy_lv','?')} | Cryo {int(enemy.get('cryo_res',0.1)*100)}% | Anemo {int(enemy.get('anemo_res',0.1)*100)}%"
-            timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+            trial_obj = trial_pool[selected_trial_key]
+        else:
+            st.warning(
+                "⚠️ No trial is available for this team. Preset trials are only offered "
+                "for their exact team — build a custom trial below, or change the party "
+                "in **Team & Gear Setup**."
+            )
 
-            entry = {
-                "timestamp": timestamp,
-                "sim_name": selected_trial_key,  # Initial default name based on the trial
-                "chars": char_summary,
-                "field_sequences": selected_trial_key,
-                "enemy": enemy_summary,
-                "timeline_events": timeline.global_events,
-                "snapshot_party": copy.deepcopy(party),
-                "snapshot_enemy": copy.deepcopy(enemy),
-                "snapshot_custom_fs": copy.deepcopy(st.session_state.get("custom_field_sequences", {})),
-                "snapshot_custom_rots": copy.deepcopy(st.session_state.get("custom_rotations", {}))
-            }
+        if trial_obj is not None:
+            with st.expander("Trial Breakdown", expanded=False):
+                st.write(f"**Description:** {trial_obj.description}")
+                st.write(f"**End Mode:** {trial_obj.end_mode.capitalize()} | **Duration:** {trial_obj.end_time}s")
 
-            if "history" not in st.session_state:
-                st.session_state["history"] = []
-            st.session_state["history"].append(entry)
-            st.success("Trial simulation complete! Check the **Simulation Results** tab.")
+                for r_idx, rotation in enumerate(trial_obj.rotations):
+                    st.markdown(f"**Rotation #{r_idx + 1}: {rotation.name}** (Repeated {rotation.repetitions}x)")
+                    for s_idx, seq in enumerate(rotation.sequences):
+                        st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;↳ Step {s_idx + 1}: `{seq.name}` (*{seq.character}* — {seq.swap_out_time}s field time)")
+
+            st.markdown("<br>", unsafe_allow_html=True)
+
+            if st.button("Run Trial Simulation", type="primary", key="run_trial_btn", use_container_width=True):
+                party = st.session_state.get("my_party", {})
+                enemy = st.session_state.get("enemy_stats", {"enemy_lv": 100, "cryo_res": 0.1, "anemo_res": 0.1})
+
+                timeline = RotationTimeline(party=party, enemy_stats=enemy)
+                timeline.add_trial(trial_obj)
+                timeline.evaluate_timeline()
+
+                trial_duration = trial_obj.end_time
+                analytics = timeline.get_analytics_summary(trial_duration)
+
+                char_summary = ", ".join(
+                    f"{name} Lv{data.get('level', 90)} C{data['constellation']} {data['talents']} "
+                    f"{data['weapon']} R{data.get('refinement', 1)}"
+                    for name, data in party.items()
+                )
+                enemy_summary = f"Lv{enemy.get('enemy_lv','?')} | Cryo {int(enemy.get('cryo_res',0.1)*100)}% | Anemo {int(enemy.get('anemo_res',0.1)*100)}%"
+                timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+
+                entry = {
+                    "timestamp": timestamp,
+                    "sim_name": trial_labels.get(selected_trial_key, selected_trial_key),
+                    "chars": char_summary,
+                    "field_sequences": selected_trial_key,
+                    "enemy": enemy_summary,
+                    "timeline_events": timeline.global_events,
+                    "snapshot_party": copy.deepcopy(party),
+                    "snapshot_enemy": copy.deepcopy(enemy),
+                    "snapshot_custom_fs": copy.deepcopy(st.session_state.get("custom_field_sequences", {})),
+                    "snapshot_custom_rots": copy.deepcopy(st.session_state.get("custom_rotations", {}))
+                }
+
+                if "history" not in st.session_state:
+                    st.session_state["history"] = []
+                st.session_state["history"].append(entry)
+                st.success("Trial simulation complete! Check the **Simulation Results** tab.")
+
 
         st.markdown("<br><hr><br>", unsafe_allow_html=True)             
 
@@ -1248,22 +1322,24 @@ with tab3:
 
             with seq_col_left:
                 seq_name = st.text_input("Field Sequence Name", placeholder="e.g. 'Aether ECQ'", key="adv_seq_name")
-                seq_char = st.selectbox("Character", ["Mizuki", "Aether", "Odette", "Faruzan", "Sucrose", "Diona"], key="adv_seq_char")
+                # Only characters that are in the party can have a field sequence.
+                seq_char_options = _party_characters() or list(CHARACTERS[1:])
+                if st.session_state.get("adv_seq_char") not in seq_char_options:
+                    st.session_state.pop("adv_seq_char", None)
+                seq_char = st.selectbox("Character", seq_char_options, key="adv_seq_char")
                 seq_swap_time = st.number_input("Field Time / Swap-Out Time (s)", min_value=0.1, value=3.0, step=1.0, key="adv_swap_time")
 
             with seq_col_right:
-                char_ability_map = {
-                    "Aether": {"N1": aether_n1, "Charged Attack": aether_n1ca, "Elemental Skill": aether_skill, "Elemental Burst": aether_burst_enhanced},
-                    "Odette": {"Skill Cast": odette_cast, "Skill Recast": odette_recast},
-                    "Faruzan": {"Elemental Burst": faruzan_burst},
-                    "Mizuki": {"Mizuki Skill (Pull Out)": mizuki_skill}
-                }
+                # Every ability defined in abilities.py for that character (no
+                # hardcoded list here: new abilities appear automatically).
+                avail_abilities = _available_abilities(seq_char)
 
                 if "temp_seq_calls" not in st.session_state:
                     st.session_state["temp_seq_calls"] = []
 
-                avail_abilities = char_ability_map.get(seq_char, {})
                 if avail_abilities:
+                    if st.session_state.get("adv_abil_picker") not in avail_abilities:
+                        st.session_state.pop("adv_abil_picker", None)
                     chosen_abil_key = st.selectbox("Select Ability to Add", list(avail_abilities.keys()), key="adv_abil_picker")
                     abil_start_time = st.number_input("Ability Insertion Time(s) (relative to Swap In)", min_value=0.0, value=0.0, step=0.1, key="adv_abil_time")
                     
@@ -1500,7 +1576,10 @@ with tab4:
                                 "name": fs.name,
                                 "character": fs.character,
                                 "swap_out_time": fs.swap_out_time,
-                                "calls": [{"start_time": call.start_time, "ability_name": call.ability.name} for call in fs.calls]
+                                "calls": [{"start_time": call.start_time,
+                                           "ability_name": call.ability.name,
+                                           "ability_character": call.ability.character}
+                                          for call in fs.calls]
                             }
                             for name, fs in entry.get("snapshot_custom_fs", {}).items()
                         },

@@ -10,12 +10,44 @@ from abilities import (
     aether_burst_enhanced,
     aether_burst_standard,
     odette_recast_c1,
+    anastasya_extra_stellar,
+    anastasya_triumph,
+    sucrose_burst,
     update_ability_talent_level,
     configure_field_sequence_talents,
     get_ability_motion_value,
 )
 from damage_calc import calculate_damage, DEFAULT_ENEMY_STATS
-from stats_calc import build_initial_stats, apply_permanent_buffs, build_snapshot_stats, compute_final_stats
+from stats_calc import (
+    build_initial_stats, apply_permanent_buffs, apply_weapon_party_stats,
+    build_snapshot_stats, compute_final_stats,
+)
+from weapons import resolve_weapon_key
+from characters import party_element_counts
+
+
+# ---------------------------------------------------------------------------
+# Buff windows derived from ability hit timelines
+# ---------------------------------------------------------------------------
+# A buff that lasts "while the ability's field is up" should span exactly one
+# cast: from the first hit to the LAST hit of that ability. Deriving the length
+# from the ability definition keeps the window in sync if hit timings change.
+# Sucrose C6 (party cryo_bonus) is the first user of this pattern:
+#   burst hits at +0.000 / +1.889 / +3.869 / +5.729  ->  window = 5.729 s
+SUCROSE_BURST_WINDOW = max(hit.relative_delay for hit in sucrose_burst.hits)
+
+# Float tolerance for "is this event still inside the window" checks, so the
+# hit that lands exactly on the closing edge is never lost to rounding.
+_WINDOW_EPS = 1e-9
+
+
+# Anastasya "Triumph": armed by her burst cast and fired by her NEXT swap-in (once
+# per cast). The delay is the minimum time that must pass between the cast and that
+# swap-in.
+#   PROVISIONAL: 0.0 while the real rule is still unknown (unreleased content).
+#   With the current rotations this makes it proc on every loop from the 2nd one
+#   onwards. Raise it (18.0 was the earlier guess) once the kit rule is confirmed.
+ANASTASYA_TRIUMPH_DELAY = 0.0
 
 
 # ==========================================
@@ -67,6 +99,11 @@ class RotationTimeline:
                 )
             init_s = apply_permanent_buffs(init_s, char_name)
             self.char_initial_stats_map[char_name] = init_s
+
+        # Permanent, party-composition-dependent weapon stats (e.g. A Thousand
+        # Floating Dreams). Idempotent, so it is safe even when the UI already
+        # applied them to its precomputed stats.
+        apply_weapon_party_stats(self.char_initial_stats_map, self.party)
 
     def add_field_sequence(self, field_sequence: FieldSequence, swap_in_time: float) -> float:
         if field_sequence.character not in self.party:
@@ -160,7 +197,11 @@ class RotationTimeline:
                     "ability_name": c_ability.name,
                     "stat_ref": hit.stat_ref,
                     "multiplier": hit.multiplier,
-                    "attack_type": hit.attack_type
+                    "attack_type": hit.attack_type,
+                    # Offset of this hit inside its own ability cast. Lets the
+                    # evaluator back-derive the cast time of any hit (used by
+                    # ability-wide buff windows such as Sucrose's C6).
+                    "hit_offset": hit.relative_delay,
                 }
                 if is_aether_burst:
                     ev["burst_variant"] = "auto"
@@ -219,6 +260,22 @@ class RotationTimeline:
                 return 0.0
         return 0.0
 
+    def _weapon_holder(self, weapon_name: str) -> Optional[str]:
+        """Name of the party member equipping *weapon_name* (None if unequipped).
+
+        Weapon names can contain parentheses ("The Widsith (Average)") while UI
+        labels may add a refinement suffix, so both sides go through
+        resolve_weapon_key() before comparing.
+        """
+        target = resolve_weapon_key(weapon_name)
+        return next((c for c, d in self.party.items()
+                     if resolve_weapon_key(d.get("weapon")) == target), None)
+
+    def _artifact_holder(self, set_name: str) -> Optional[str]:
+        """Name of the party member wearing *set_name* (None if unequipped)."""
+        return next((c for c, d in self.party.items()
+                     if (d.get("artifact_set") or d.get("artifact")) == set_name), None)
+
     def evaluate_timeline(self):
         # Idempotence guard: this pass mutates the event list (inserts swirls,
         # nukes, vortex explosions, burst substitution). Re-running it would
@@ -233,10 +290,15 @@ class RotationTimeline:
         odette_swap_time: Optional[float] = None
         odette_burst_expiration: Optional[float] = None      # self stellar_bonus buff (6s)
         odette_c2_shred_expiration: Optional[float] = None   # party cryo/anemo shred (20s)
+        # Anastasya trackers
+        anastasya_burst_expiration: Optional[float] = None   # party stellar_bonus + extra stellar beats (20s)
+        anastasya_a1_expiration: Optional[float] = None      # others crit_dmg (19s)
+        anastasya_triumph_ready_at: Optional[float] = None   # earliest swap-in that fires Triumph
+        anastasya_triumph_armed: bool = False                # one Triumph per burst cast
         # Sucrose State Trackers
         sucrose_a1_expiration: Optional[float] = None  # +50 EM (non-anemo) after her swirl (8s)
         sucrose_a4_expiration: Optional[float] = None  # 20% flat-EM share to others (8s)
-        sucrose_c6_expiration: Optional[float] = None  # party cryo_bonus after burst (6s)
+        sucrose_c6_expiration: Optional[float] = None  # party cryo_bonus for one burst cast
         hotf_expiration_time: Optional[float] = None
         vv_expiration_time: Optional[float] = None
         instructor_expiration_time: Optional[float] = None
@@ -292,8 +354,74 @@ class RotationTimeline:
         faruzan_debuff_expiration: Optional[float] = None
         faruzan_collapse_cd_expires: float = -1.0
 
+        # Weapon State Trackers (all holder-only; None when not equipped)
+        widsith_holder = (self._weapon_holder("The Widsith (Average)")
+                          or self._weapon_holder("The Widsith (All EM)"))
+        widsith_expiration: Optional[float] = None
+        widsith_proc_cd: float = -1.0
+        jade_holder = self._weapon_holder("Sacrificial Jade")
+        jade_active = True            # the passive starts active on the wielder
+        jade_state_since: float = 0.0
+        jade_was_active = False
+        sunny_holder = self._weapon_holder("Sunny Morning Sleep-In")
+        sunny_swirl_expiration: Optional[float] = None
+        sunny_skill_expiration: Optional[float] = None
+        sunny_burst_expiration: Optional[float] = None
+        evenstar_holder = self._weapon_holder("Wandering Evenstar")
+        ttds_holder = self._weapon_holder("Thrilling Tales of Dragon Slayers")
+        ttds_target: Optional[str] = None
+        ttds_expiration: Optional[float] = None
+        ttds_pending = False
+        ttds_cd_ready: float = -1.0
+        starsealed_holder = self._weapon_holder("Starsealed Edict")
+        starsealed_expiration: Optional[float] = None
+        starsealed_stacks = 0
+        whitlake_holder = self._weapon_holder("Whitelake Frostfeather")
+        whitlake_stack_expiries: List[float] = []
+        whitlake_gain_cd_ready: float = -1.0
+        finale_holder = self._weapon_holder("Finale Of The Deep")
+        finale_expiration: Optional[float] = None
+        finale_cd_ready: float = -1.0
+        breezeborne_holder = self._weapon_holder("Breezeborne Refrain")
+        breezeborne_sigils = 0
+        breezeborne_gain_cd_ready: float = -1.0
+        breezeborne_expiration: Optional[float] = None
+        elegy_holder = self._weapon_holder("Elegy for the End")
+        elegy_sigils = 0
+        elegy_gain_cd_ready: float = -1.0
+        elegy_expiration: Optional[float] = None
+        elegy_lockout_until: float = -1.0
+        newbough_holder = self._weapon_holder("New Bough")
+        newbough_stacks = 0
+        newbough_expiration: Optional[float] = None
+        newbough_last_gain: float = -1.0
+        silverdawn_holder = self._weapon_holder("Silverdawn")
+        silverdawn_expiration: Optional[float] = None
+        silverdawn_extensions = 0
+        silverdawn_ext_cd_ready: float = -1.0
+        # Artifact set trackers (phase 1)
+        gilded_holder = self._artifact_holder("Gilded Dreams")
+        gilded_expiration: Optional[float] = None
+        gilded_cd_ready: float = -1.0
+        noblesse_holder = self._artifact_holder("Noblesse Oblige")
+        noblesse_expiration: Optional[float] = None
+        tenacity_holder = self._artifact_holder("Tenacity Of The Millelith")
+        tenacity_expiration: Optional[float] = None
+        tenacity_cd_ready: float = -1.0
+        risingwinds_holder = self._artifact_holder("A Day Carved From Rising Winds")
+        risingwinds_expiration: Optional[float] = None
+        scarlet_holder = self._artifact_holder("Scarlet Proof")
+        scarlet_expiration: Optional[float] = None
+        tsaritsa_holder = self._artifact_holder("New Tsaritsa set")
+        tsaritsa_stacks = 0
+        tsaritsa_active_accum = 0.0
+        tsaritsa_last_t: Optional[float] = None
+
         aura_tracker = CryoAuraTracker()
         active_vortex: Optional[StellarVortex] = None
+
+        # Cryo Resonance only exists with 2+ Cryo characters in the party.
+        cryo_resonance_enabled = party_element_counts(self.party).get("Cryo", 0) >= 2
 
         self.global_events.sort(key=lambda x: x["global_time"])
 
@@ -578,9 +706,11 @@ class RotationTimeline:
                 if is_stellar_swirl and vv_holder and char == vv_holder and active_character == char:
                     vv_expiration_time = t + 10.0
 
-                # Instructor trigger
-                if is_stellar_swirl and instructor_holder and char == instructor_holder:
-                    instructor_expiration_time = t + 12.0
+                # Instructor trigger: the holder must be ON FIELD and trigger the
+                # swirl themselves; subsequent triggers refresh the 8s timer.
+                if (is_stellar_swirl and instructor_holder and char == instructor_holder
+                        and active_character == char):
+                    instructor_expiration_time = t + 8.0
 
                 # Stellar Vortex & Stellar Swirl mechanics
                 if is_stellar_swirl and swirl_meta:
@@ -652,7 +782,13 @@ class RotationTimeline:
                         self.global_events.insert(i + 2, mini_nuke_event)
 
                     if active_vortex is None or not active_vortex.is_active:
-                        active_vortex = StellarVortex(swirl_meta, t)
+                        # Anastasya A4: vortices spawn already at level 2 and only
+                        # need 3 further stellar swirls to detonate early.
+                        if "Anastasya" in self.party:
+                            active_vortex = StellarVortex(swirl_meta, t, start_level=2,
+                                                          detonation_swirls=4)
+                        else:
+                            active_vortex = StellarVortex(swirl_meta, t)
                         reaction = "SSW (Vortex Spawn)"
                     else:
                         exploded, reaction = active_vortex.inherit_swirl(swirl_meta)
@@ -739,7 +875,8 @@ class RotationTimeline:
             instructor_active = (instructor_expiration_time is not None) and (t <= instructor_expiration_time)
             event["instructor_state"] = "ON" if instructor_active else "OFF"
 
-            cryo_resonance_active = aura_tracker.current_gauge > 0.0
+            # Cryo Resonance needs BOTH a Cryo-affected enemy AND 2+ Cryo characters.
+            cryo_resonance_active = cryo_resonance_enabled and aura_tracker.current_gauge > 0.0
             event["cryo_resonance_state"] = "ON" if cryo_resonance_active else "OFF"
 
             # 6. Aether C2, C6 & Frostglow audit columns.
@@ -786,18 +923,25 @@ class RotationTimeline:
                 if e_type == "HIT" and char == "Sucrose" and ability_name in ("Sucrose Skill", "Sucrose Burst"):
                     sucrose_a4_expiration = t + 8.0
 
+                # C6: the party cryo_bonus field exists for exactly one burst cast.
+                # Arm it ONCE at the cast (hit offset 0) and end it with the LAST
+                # burst hit (SUCROSE_BURST_WINDOW), so re-hitting never extends it
+                # past the field's lifetime. Verified window: [cast, cast + 5.729].
                 if (e_type == "HIT" and char == "Sucrose" and ability_name == "Sucrose Burst"
-                        and self.party.get("Sucrose", {}).get("constellation", 0) >= 6):
-                    sucrose_c6_expiration = t + 6.0
+                        and self.party.get("Sucrose", {}).get("constellation", 0) >= 6
+                        and event.get("hit_offset", 0.0) == 0.0):
+                    sucrose_c6_expiration = t + SUCROSE_BURST_WINDOW
 
                 # A1 only procs when Sucrose HERSELF triggers a swirl (like Mizuki's
                 # nuke preparation), refreshing the 8s non-Anemo EM buff.
                 if char == "Sucrose" and is_stellar_swirl:
                     sucrose_a1_expiration = t + 8.0
 
-                a1_on = sucrose_a1_expiration is not None and t <= sucrose_a1_expiration
-                a4_on = sucrose_a4_expiration is not None and t <= sucrose_a4_expiration
-                c6_on = sucrose_c6_expiration is not None and t <= sucrose_c6_expiration
+                # _WINDOW_EPS keeps the hit that lands exactly on the closing edge
+                # inside the window (float addition is not associative).
+                a1_on = sucrose_a1_expiration is not None and t <= sucrose_a1_expiration + _WINDOW_EPS
+                a4_on = sucrose_a4_expiration is not None and t <= sucrose_a4_expiration + _WINDOW_EPS
+                c6_on = sucrose_c6_expiration is not None and t <= sucrose_c6_expiration + _WINDOW_EPS
                 event["sucrose_a1_state"] = "ON" if a1_on else "OFF"
                 event["sucrose_a4_state"] = "ON" if a4_on else "OFF"
                 event["sucrose_c6_state"] = "ON" if c6_on else "OFF"
@@ -808,21 +952,22 @@ class RotationTimeline:
 
             # 6c. Weapon passives (holder-only): Exaiphanes Blade ATK proc + Silver Light stacks.
             #      Exaiphanes: the holder's HITS grant +40% ATK for 8s, internal 5s CD.
-            exaiphanes_holder = (char if (self.party.get(char, {}).get("weapon") or "").split(" (")[0] == "Exaiphanes Blade" else None)
+            exaiphanes_holder = self._weapon_holder("Exaiphanes Blade")
             # "after every hit": the flag reflects a buff already active BEFORE this
             # hit proc, so the triggering hit itself does NOT get the +40% ATK.
             exaiphanes_on = (exaiphanes_atk_expiration is not None
                              and t < exaiphanes_atk_expiration and exaiphanes_holder is not None)
             event["exaiphanes_blade_state"] = "ON" if exaiphanes_on else "OFF"
-            if e_type == "HIT" and exaiphanes_holder is not None and t >= exaiphanes_atk_proc_cd:
+            if (e_type == "HIT" and exaiphanes_holder == char
+                    and t >= exaiphanes_atk_proc_cd):
                 exaiphanes_atk_expiration = t + 8.0
                 exaiphanes_atk_proc_cd = t + 5.0
 
             #      Silver Light: the holder gains +1 stack per skill cast (and Odette
             #      recast), each stack expiring after 12s.
-            silver_holder = char if "Silver Light" in (self.party.get(char, {}).get("weapon") or "") else None
+            silver_holder = self._weapon_holder("Silver Light")
             # One stack per cast action (the cast / first recast hit), not per damage tick.
-            if (silver_holder is not None and e_type == "HIT"
+            if (silver_holder == char and e_type == "HIT"
                     and ((ability_name == "Skill Cast" and hit_name == "Cast")
                          or (ability_name == "Skill Recast" and hit_name == "Skill_Recast1")
                          or (ability_name == "Elemental Skill" and hit_name == "Skill_Initial"))):
@@ -832,6 +977,240 @@ class RotationTimeline:
                 event["silver_light_stacks"] = len(silver_light_stack_expiries)
             else:
                 event["silver_light_stacks"] = 0
+
+            #      The Widsith: taking the field grants the roll buff for 10s, with a
+            #      30s cooldown measured from the trigger, so re-entering early does
+            #      not refresh it. "Average" applies one third of all three outcomes
+            #      at once; "All EM" applies the full EM roll only.
+            if widsith_holder is not None:
+                if e_type == "SWAP_IN" and char == widsith_holder and t >= widsith_proc_cd:
+                    widsith_expiration = t + 10.0
+                    widsith_proc_cd = t + 30.0
+                widsith_on = (widsith_expiration is not None
+                              and t <= widsith_expiration + _WINDOW_EPS)
+                event["widsith_state"] = "ON" if widsith_on else "OFF"
+            else:
+                event["widsith_state"] = "OFF"
+
+            #      Sacrificial Jade: the passive is up while the wielder is off the
+            #      field. >10s of CONTINUOUS on-field time removes it, and >=5s of
+            #      continuous off-field time brings it back. It starts active.
+            if jade_holder is not None:
+                holder_active = (active_character == jade_holder)
+                if holder_active != jade_was_active:
+                    jade_was_active = holder_active
+                    jade_state_since = t
+                if holder_active and jade_active and (t - jade_state_since) > 10.0 + _WINDOW_EPS:
+                    jade_active = False
+                elif (not holder_active) and (not jade_active) and \
+                        (t - jade_state_since) >= 5.0 - _WINDOW_EPS:
+                    jade_active = True
+                event["sacrificial_jade_state"] = "ON" if jade_active else "OFF"
+            else:
+                event["sacrificial_jade_state"] = "OFF"
+
+            #      Sunny Morning Sleep-In: three independent self windows.
+            #      swirl <- the holder is the anemo contributor of a stellar swirl
+            #      skill <- a STANDARD hit whose attack type is Skill
+            #      burst <- a STANDARD hit whose attack type is Burst
+            if sunny_holder is not None:
+                attack_type = event.get("attack_type")
+                is_standard = (cat == ActionCategory.STANDARD_DMG)
+                if e_type == "HIT" and char == sunny_holder and is_stellar_swirl:
+                    sunny_swirl_expiration = t + 6.0
+                if (e_type == "HIT" and char == sunny_holder and is_standard
+                        and attack_type == AttackType.SKILL):
+                    sunny_skill_expiration = t + 9.0
+                if (e_type == "HIT" and char == sunny_holder and is_standard
+                        and attack_type == AttackType.BURST):
+                    sunny_burst_expiration = t + 30.0
+                event["sunny_swirl_state"] = (
+                    "ON" if (sunny_swirl_expiration is not None
+                             and t <= sunny_swirl_expiration + _WINDOW_EPS) else "OFF")
+                event["sunny_skill_state"] = (
+                    "ON" if (sunny_skill_expiration is not None
+                             and t <= sunny_skill_expiration + _WINDOW_EPS) else "OFF")
+                event["sunny_burst_state"] = (
+                    "ON" if (sunny_burst_expiration is not None
+                             and t <= sunny_burst_expiration + _WINDOW_EPS) else "OFF")
+            else:
+                event["sunny_swirl_state"] = "OFF"
+                event["sunny_skill_state"] = "OFF"
+                event["sunny_burst_state"] = "OFF"
+
+            #      Wandering Evenstar: a 12s buff every 10s from the trial start, so
+            #      the holder always has a 2s overlap with two active instances.
+            #      The stack count is a closed form of t (no trigger events needed).
+            if evenstar_holder is not None:
+                last_start = int(t // 10.0)
+                first_start = max(0, int((t - 12.0) // 10.0) + 1)
+                event["evenstar_stacks"] = max(0, last_start - first_start + 1)
+            else:
+                event["evenstar_stacks"] = 0
+
+            #      Thrilling Tales: the holder's swap-out arms the buff for the NEXT
+            #      character to take the field (10s, 20s cooldown from the trigger).
+            if ttds_holder is not None:
+                if e_type == "SWAP_OUT" and char == ttds_holder and t >= ttds_cd_ready:
+                    ttds_pending = True
+                    ttds_cd_ready = t + 20.0
+                if ttds_pending and e_type == "SWAP_IN" and char != ttds_holder:
+                    ttds_target = char
+                    ttds_expiration = t + 10.0
+                    ttds_pending = False
+                ttds_on = (ttds_target is not None
+                           and char == ttds_target
+                           and active_character == ttds_target
+                           and ttds_expiration is not None
+                           and t <= ttds_expiration + _WINDOW_EPS)
+                event["ttds_state"] = "ON" if ttds_on else "OFF"
+            else:
+                event["ttds_state"] = "OFF"
+
+            #      Starsealed Edict: a 20s EM window opened by the holder's skill CAST
+            #      (first hit of a skill ability). Every stellar swirl by ANYONE while
+            #      it is up adds a stack; refreshing or expiring resets them to 0.
+            if starsealed_holder is not None:
+                if (e_type == "HIT" and char == starsealed_holder
+                        and event.get("attack_type") == AttackType.SKILL
+                        and event.get("hit_offset") == 0.0):
+                    starsealed_expiration = t + 20.0
+                    starsealed_stacks = 0
+                starsealed_on = (starsealed_expiration is not None
+                                 and t <= starsealed_expiration + _WINDOW_EPS)
+                if starsealed_on and is_stellar_swirl:
+                    starsealed_stacks += 1
+                if not starsealed_on:
+                    starsealed_stacks = 0
+                event["starsealed_state"] = "ON" if starsealed_on else "OFF"
+                event["starsealed_stacks"] = starsealed_stacks if starsealed_on else 0
+            else:
+                event["starsealed_state"] = "OFF"
+                event["starsealed_stacks"] = 0
+
+            #      Whitelake Frostfeather: one stack per skill hit (0.1s gain CD), each
+            #      stack lasting 8s on its own; at 3 stacks a new stack refreshes the
+            #      OLDEST one. Per stack: ATK%. At exactly 3 stacks: stellar crit DMG.
+            if whitlake_holder is not None:
+                whitlake_stack_expiries = [x for x in whitlake_stack_expiries if x > t]
+                if (e_type == "HIT" and char == whitlake_holder
+                        and event.get("attack_type") == AttackType.SKILL
+                        and t >= whitlake_gain_cd_ready):
+                    if len(whitlake_stack_expiries) >= 3:
+                        whitlake_stack_expiries.remove(min(whitlake_stack_expiries))
+                    whitlake_stack_expiries.append(t + 8.0)
+                    whitlake_gain_cd_ready = t + 0.1
+                whitlake_stacks = len(whitlake_stack_expiries)
+                event["whitlake_stacks"] = whitlake_stacks
+                event["whitlake_max_state"] = "ON" if whitlake_stacks >= 3 else "OFF"
+            else:
+                event["whitlake_stacks"] = 0
+                event["whitlake_max_state"] = "OFF"
+
+            #      Finale Of The Deep: 15s ATK% on a standard skill hit, 10s CD,
+            #      refreshed by later triggers.
+            if finale_holder is not None:
+                if (e_type == "HIT" and char == finale_holder
+                        and cat == ActionCategory.STANDARD_DMG
+                        and event.get("attack_type") == AttackType.SKILL
+                        and t >= finale_cd_ready):
+                    finale_expiration = t + 15.0
+                    finale_cd_ready = t + 10.0
+                finale_on = (finale_expiration is not None
+                             and t <= finale_expiration + _WINDOW_EPS)
+                event["finale_state"] = "ON" if finale_on else "OFF"
+            else:
+                event["finale_state"] = "OFF"
+
+            #      Breezeborne Refrain: skill/burst damage grants a sigil (0.03s CD,
+            #      sigils never expire). At 3 the sigils reset and the whole party
+            #      gains stellar_bonus for 12s; no sigils are gained meanwhile.
+            if breezeborne_holder is not None:
+                breezeborne_on = (breezeborne_expiration is not None
+                                  and t <= breezeborne_expiration + _WINDOW_EPS)
+                if not breezeborne_on:
+                    breezeborne_expiration = None
+                    if (e_type == "HIT" and char == breezeborne_holder
+                            and event.get("attack_type") in (AttackType.SKILL, AttackType.BURST)
+                            and t >= breezeborne_gain_cd_ready):
+                        breezeborne_sigils += 1
+                        breezeborne_gain_cd_ready = t + 0.03
+                        if breezeborne_sigils >= 3:
+                            breezeborne_sigils = 0
+                            breezeborne_expiration = t + 12.0
+                            breezeborne_on = True
+                event["breezeborne_sigils"] = breezeborne_sigils
+                event["breezeborne_state"] = "ON" if breezeborne_on else "OFF"
+            else:
+                event["breezeborne_sigils"] = 0
+                event["breezeborne_state"] = "OFF"
+
+            #      Elegy for the End: skill/burst damage grants a sigil (0.2s CD).
+            #      At 4 the sigils reset, the party gets ATK% + EM for 12s and no
+            #      further sigils are gained for 20s.
+            if elegy_holder is not None:
+                elegy_on = (elegy_expiration is not None
+                            and t <= elegy_expiration + _WINDOW_EPS)
+                if (e_type == "HIT" and char == elegy_holder
+                        and event.get("attack_type") in (AttackType.SKILL, AttackType.BURST)
+                        and t >= elegy_gain_cd_ready and t >= elegy_lockout_until):
+                    elegy_sigils += 1
+                    elegy_gain_cd_ready = t + 0.2
+                    if elegy_sigils >= 4:
+                        elegy_sigils = 0
+                        elegy_expiration = t + 12.0
+                        elegy_lockout_until = t + 20.0
+                        elegy_on = True
+                event["elegy_sigils"] = elegy_sigils
+                event["elegy_state"] = "ON" if elegy_on else "OFF"
+            else:
+                event["elegy_sigils"] = 0
+                event["elegy_state"] = "OFF"
+
+            #      New Bough: a skill hit opens/refreshes a 12s window; ANY damage hit
+            #      by the holder inside it adds a stack (max 3), at most one per second
+            #      (the opening skill hit counts as the first one).
+            if newbough_holder is not None:
+                newbough_window = (newbough_expiration is not None
+                                   and t <= newbough_expiration + _WINDOW_EPS)
+                if not newbough_window:
+                    newbough_expiration = None
+                    newbough_stacks = 0
+                if e_type == "HIT" and char == newbough_holder:
+                    if event.get("attack_type") == AttackType.SKILL:
+                        newbough_expiration = t + 12.0
+                        newbough_window = True
+                    if (newbough_window and newbough_stacks < 3
+                            and t >= newbough_last_gain + 1.0):
+                        newbough_stacks += 1
+                        newbough_last_gain = t
+                event["newbough_stacks"] = newbough_stacks
+            else:
+                event["newbough_stacks"] = 0
+
+            #      Silverdawn: skill/burst damage opens a 6s self window. Every stellar
+            #      swirl the holder triggers, or stellar hit they deal, extends it by
+            #      3s (0.1s CD, at most 8 extensions => 30s cap).
+            if silverdawn_holder is not None:
+                if (e_type == "HIT" and char == silverdawn_holder
+                        and event.get("attack_type") in (AttackType.SKILL, AttackType.BURST)):
+                    silverdawn_expiration = t + 6.0
+                    silverdawn_extensions = 0
+                silverdawn_on = (silverdawn_expiration is not None
+                                 and t <= silverdawn_expiration + _WINDOW_EPS)
+                if (silverdawn_on and char == silverdawn_holder
+                        and (cat == ActionCategory.STELLAR_DMG or is_stellar_swirl)
+                        and silverdawn_extensions < 8
+                        and t >= silverdawn_ext_cd_ready):
+                    silverdawn_expiration += 3.0
+                    silverdawn_extensions += 1
+                    silverdawn_ext_cd_ready = t + 0.1
+                event["silverdawn_state"] = "ON" if silverdawn_on else "OFF"
+                event["silverdawn_extensions"] = (silverdawn_extensions
+                                                  if silverdawn_on else 0)
+            else:
+                event["silverdawn_state"] = "OFF"
+                event["silverdawn_extensions"] = 0
 
             # 7. Odette Marvelous Stacks + Burst buff + C2 shred logic
             if "Odette" in self.party:
@@ -853,10 +1232,11 @@ class RotationTimeline:
                     if odette_cons7 >= 2:
                         odette_c2_shred_expiration = t + 20.0
 
-                # Burst buff (her ONLY) lasts 6s from the burst cast.
+                # Burst buff ("Snow Swan's Dream", HERS only): 20s from the cast hit,
+                # refreshed by every new burst cast. Value is talent-scaled.
                 if (e_type == "HIT" and char == "Odette" and ability_name == "Odette Burst"
                         and hit_name == "Burst_tick1"):
-                    odette_burst_expiration = t + 6.0
+                    odette_burst_expiration = t + 20.0
 
                 if marvelous_active and (t - marvelous_activation_time >= 20.0):
                     marvelous_active = False
@@ -894,6 +1274,78 @@ class RotationTimeline:
                 event["odette_burst_state"] = "OFF"
                 event["odette_c2_state"] = "OFF"
 
+            # 7b. Anastasya: burst buff, A1 window, conditional extra stellar beat
+            #     and the Triumph stellar swirl.
+            if "Anastasya" in self.party:
+                is_ana_skill_cast = (e_type == "HIT" and char == "Anastasya"
+                                     and ability_name == "Skill Tap" and hit_name == "Cast")
+                is_ana_burst_cast = (e_type == "HIT" and char == "Anastasya"
+                                     and ability_name == "To the New World"
+                                     and hit_name == "Burst_Cast")
+
+                # A1: the OTHER party members gain 16% crit DMG for 19s (refreshed
+                # by every new skill cast).
+                if is_ana_skill_cast:
+                    anastasya_a1_expiration = t + 19.0
+
+                # Burst cast: party stellar_bonus for 20s (value is talent-scaled)
+                # plus the extra stellar beat window, and Triumph is armed.
+                if is_ana_burst_cast:
+                    anastasya_burst_expiration = t + 20.0
+                    anastasya_triumph_armed = True
+                    anastasya_triumph_ready_at = t + ANASTASYA_TRIUMPH_DELAY
+
+                ana_burst_open = (anastasya_burst_expiration is not None
+                                  and t <= anastasya_burst_expiration + _WINDOW_EPS)
+
+                # Conditional hit: while her burst buff is up, every stellar beat of
+                # her skill additionally fires an extra Stellar Swirl DMG hit.
+                if (e_type == "HIT" and char == "Anastasya"
+                        and hit_name.startswith("Palestar Crown Stellar")
+                        and ana_burst_open):
+                    extra = anastasya_extra_stellar.hits[0]
+                    extra_event = dict(event)
+                    extra_event.update({
+                        "action": extra.name,
+                        "hit_name": extra.name,
+                        "category": extra.category,
+                        "element": extra.element,
+                        "elem_app": extra.elemental_app if extra.elemental_app else "-",
+                        "ability_name": anastasya_extra_stellar.name,
+                        "stat_ref": extra.stat_ref,
+                        "multiplier": extra.multiplier,
+                        "hit_offset": event.get("hit_offset", 0.0),
+                        "attack_type": extra.attack_type,
+                        "burst_call_id": None,
+                    })
+                    self.global_events.insert(i + 1, extra_event)
+
+                # Triumph: fired by her next swap-in once 18s have elapsed since the
+                # burst cast; one trigger per burst cast.
+                if (e_type == "SWAP_IN" and char == "Anastasya"
+                        and anastasya_triumph_armed
+                        and anastasya_triumph_ready_at is not None
+                        and t >= anastasya_triumph_ready_at - _WINDOW_EPS):
+                    th = anastasya_triumph.hits[0]
+                    triumph_event = {
+                        "global_time": t,
+                        "active_character": active_character,
+                        "character": "Anastasya",
+                        "action": th.name,
+                        "category": th.category,
+                        "elem_app": th.elemental_app if th.elemental_app else "-",
+                        "element": th.element,
+                        "event_type": "HIT",
+                        "hit_name": th.name,
+                        "ability_name": anastasya_triumph.name,
+                        "stat_ref": th.stat_ref,
+                        "multiplier": th.multiplier,
+                        "attack_type": th.attack_type,
+                        "hit_offset": 0.0,
+                    }
+                    self.global_events.insert(i + 1, triumph_event)
+                    anastasya_triumph_armed = False
+
             # 8. Heart of the Furnace (HotF) Gear Effect Logic
             # Triggers when whoever holds the piece deals Stellar DMG OR triggers a
             # swirl (Stellar Reaction). Refreshes the 12s window on each new cast.
@@ -906,6 +1358,125 @@ class RotationTimeline:
                 hotf_expiration_time = t + 12.0
 
             event["hotf_state"] = "ON" if hotf_active else "OFF"
+
+            # 9. Artifact set buffs (phase 1)
+            #    Gilded Dreams: a swirl by the holder (anywhere) grants a party-
+            #    composition buff to THEM for 8s, 8s CD measured from the trigger.
+            if gilded_holder is not None:
+                if is_stellar_swirl and char == gilded_holder and t >= gilded_cd_ready:
+                    gilded_expiration = t + 8.0
+                    gilded_cd_ready = t + 8.0
+                gilded_on = (gilded_expiration is not None
+                             and t <= gilded_expiration + _WINDOW_EPS)
+                event["gilded_state"] = "ON" if gilded_on else "OFF"
+            else:
+                event["gilded_state"] = "OFF"
+
+            #    Noblesse Oblige: the CAST of a burst gives the party ATK% for 12s.
+            if noblesse_holder is not None:
+                if (e_type == "HIT" and char == noblesse_holder
+                        and event.get("attack_type") == AttackType.BURST
+                        and event.get("hit_offset") == 0.0):
+                    noblesse_expiration = t + 12.0
+                noblesse_on = (noblesse_expiration is not None
+                               and t <= noblesse_expiration + _WINDOW_EPS)
+                event["noblesse_state"] = "ON" if noblesse_on else "OFF"
+            else:
+                event["noblesse_state"] = "OFF"
+
+            #    Tenacity: a standard SKILL hit gives the party ATK% for 3s
+            #    (refreshable, 0.5s trigger CD).
+            if tenacity_holder is not None:
+                if (e_type == "HIT" and char == tenacity_holder
+                        and cat == ActionCategory.STANDARD_DMG
+                        and event.get("attack_type") == AttackType.SKILL
+                        and t >= tenacity_cd_ready):
+                    tenacity_expiration = t + 3.0
+                    tenacity_cd_ready = t + 0.5
+                tenacity_on = (tenacity_expiration is not None
+                               and t <= tenacity_expiration + _WINDOW_EPS)
+                event["tenacity_state"] = "ON" if tenacity_on else "OFF"
+            else:
+                event["tenacity_state"] = "OFF"
+
+            #    A Day Carved From Rising Winds: ANY standard hit by the holder
+            #    gives THEM ATK% for 6s (refreshable).
+            if risingwinds_holder is not None:
+                if (e_type == "HIT" and char == risingwinds_holder
+                        and cat == ActionCategory.STANDARD_DMG):
+                    risingwinds_expiration = t + 6.0
+                risingwinds_on = (risingwinds_expiration is not None
+                                  and t <= risingwinds_expiration + _WINDOW_EPS)
+                event["risingwinds_state"] = "ON" if risingwinds_on else "OFF"
+            else:
+                event["risingwinds_state"] = "OFF"
+
+            #    Scarlet Proof: an ON-FIELD swirl by the holder gives THEM crit rate
+            #    + stellar bonus for 10s (refreshable).
+            if scarlet_holder is not None:
+                if (is_stellar_swirl and char == scarlet_holder
+                        and active_character == scarlet_holder):
+                    scarlet_expiration = t + 10.0
+                scarlet_on = (scarlet_expiration is not None
+                              and t <= scarlet_expiration + _WINDOW_EPS)
+                event["scarlet_state"] = "ON" if scarlet_on else "OFF"
+            else:
+                event["scarlet_state"] = "OFF"
+
+            #    New Tsaritsa set: +1 stack (max 2) on a normal standard hit, a skill
+            #    cast or a burst cast; every trigger refreshes the decay timer. The
+            #    holder loses one stack per 3s of ON-FIELD time. While stacked they
+            #    get crit rate on CRYO hits and stellar crit rate on everything.
+            if tsaritsa_holder is not None:
+                holder_active = (active_character == tsaritsa_holder)
+                if holder_active:
+                    if tsaritsa_last_t is not None:
+                        tsaritsa_active_accum += max(0.0, t - tsaritsa_last_t)
+                    tsaritsa_last_t = t
+                    while tsaritsa_active_accum >= 3.0 - _WINDOW_EPS and tsaritsa_stacks > 0:
+                        tsaritsa_active_accum -= 3.0
+                        tsaritsa_stacks -= 1
+                else:
+                    tsaritsa_last_t = None
+
+                attack_type = event.get("attack_type")
+                is_cast = (attack_type in (AttackType.SKILL, AttackType.BURST)
+                           and event.get("hit_offset") == 0.0)
+                is_normal_standard = (cat == ActionCategory.STANDARD_DMG
+                                      and attack_type == AttackType.NORMAL)
+                if e_type == "HIT" and char == tsaritsa_holder and (is_cast or is_normal_standard):
+                    tsaritsa_stacks = min(2, tsaritsa_stacks + 1)
+                    tsaritsa_active_accum = 0.0
+
+                event["tsaritsa_stacks"] = tsaritsa_stacks
+                cryo_hit = (element == "Cryo" and char == tsaritsa_holder)
+                event["tsaritsa_state"] = (
+                    "ON" if (tsaritsa_stacks > 0 and cryo_hit) else "OFF")
+                event["tsaritsa_stellar_state"] = "ON" if tsaritsa_stacks > 0 else "OFF"
+            else:
+                event["tsaritsa_stacks"] = 0
+                event["tsaritsa_state"] = "OFF"
+                event["tsaritsa_stellar_state"] = "OFF"
+
+            # 11. Anastasya audit flags (these drive her FLAG_TO_BUFFS entries).
+            if "Anastasya" in self.party:
+                burst_on = (anastasya_burst_expiration is not None
+                            and t <= anastasya_burst_expiration + _WINDOW_EPS)
+                a1_on = (anastasya_a1_expiration is not None
+                         and t <= anastasya_a1_expiration + _WINDOW_EPS)
+                triumph_ready = (anastasya_triumph_armed
+                                 and anastasya_triumph_ready_at is not None
+                                 and t >= anastasya_triumph_ready_at - _WINDOW_EPS)
+                event["anastasya_burst_state"] = "ON" if burst_on else "OFF"
+                event["anastasya_a1_state"] = "ON" if a1_on else "OFF"
+                event["anastasya_triumph_ready"] = "ON" if triumph_ready else "OFF"
+                # A4 is a permanent passive while she is in the party.
+                event["anastasya_a4_state"] = "ON"
+            else:
+                event["anastasya_burst_state"] = "OFF"
+                event["anastasya_a1_state"] = "OFF"
+                event["anastasya_triumph_ready"] = "OFF"
+                event["anastasya_a4_state"] = "OFF"
 
             i += 1
 

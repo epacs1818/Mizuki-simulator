@@ -8,13 +8,19 @@ from models import Hit, ActionCategory, StatRef
 # ==========================================
 
 class StellarVortex:
-    """Tracks active Stellar Vortex lifecycle, leveling, and contributor inheritance."""
-    def __init__(self, creation_swirl_meta: dict, creation_time: float):
+    """Tracks active Stellar Vortex lifecycle, leveling, and contributor inheritance.
+
+    start_level / detonation_swirls let a character modify the lifecycle (Anastasya
+    A4 spawns vortices already at level 2, needing 3 more swirls to detonate early).
+    """
+    def __init__(self, creation_swirl_meta: dict, creation_time: float,
+                 start_level: int = 1, detonation_swirls: int = 6):
         self.creator = creation_swirl_meta["anemo_contributor"]
         self.creation_time = creation_time
         self.scheduled_explosion_time = creation_time + 3.0
         self.swirl_count = 1  # 1st swirl creates it
-        self.level = 1
+        self.level = start_level
+        self.detonation_swirls = detonation_swirls
         self.last_trigger = self.creator
 
         # Inherit contributors from the initial Stellar Swirl
@@ -35,7 +41,7 @@ class StellarVortex:
         if self.swirl_count >= 3 and self.level < 2:
             self.level = 2
 
-        if self.swirl_count >= 6:
+        if self.swirl_count >= self.detonation_swirls:
             self.is_active = False
             return True, "SSW (Vortex Early Detonation)"
 

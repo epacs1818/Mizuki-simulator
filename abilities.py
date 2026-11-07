@@ -270,7 +270,7 @@ odette_ee = FieldSequence("OdetteEE", "Odette", swap_out_time=2.371)
 odette_ee.add_ability(0.660, odette_cast)
 odette_ee.add_ability(1.170, odette_recast)
 
-odette_qe = FieldSequence("OdetteQE", "Odette", swap_out_time=2.371)
+odette_qe = FieldSequence("OdetteQE", "Odette", swap_out_time=3.071)
 odette_qe.add_ability(2.16, odette_burst)
 odette_qe.add_ability(2.851, odette_recast)
 
@@ -308,6 +308,12 @@ faruzan_collapse_ability = Ability(
 
 faruzan_q = FieldSequence("FaruzanQSwap", "Faruzan", swap_out_time=1.410)
 faruzan_q.add_ability(1.200, faruzan_burst)
+
+# Faruzan E: only the actively called Pressurized Collapse. Same insertion time and
+# swap-out time as the burst cast of her Q swap, so both visits last exactly as
+# long. Kept for rotations that cannot afford a burst every loop.
+faruzan_e = FieldSequence("FaruzanESwap", "Faruzan", swap_out_time=1.410)
+faruzan_e.add_ability(1.200, faruzan_collapse_ability)
 
 # --- Mizuki ---
 mizuki_skill = Ability(
@@ -419,3 +425,156 @@ def configure_field_sequence_talents(field_sequence: FieldSequence, talents: Uni
         update_ability_talent_level(ability, target_level)
 
     return new_field_sequence
+
+#--- Anastasya -------------------------------------------------------------
+# Her skill mirrors Odette's "dance" timing pattern: one cast hit, then ten beats
+# (2.220 / 4.080 / 6.180 / 8.010 / 10.110 / 11.940 / 14.040 / 15.901 / 17.940 /
+# 19.800). Each beat pairs a Palestar Crown cryo hit with its stellar swirl hit;
+# the enhanced variant adds the burst's "extra stellar swirl" hit on every beat.
+_ANASTASYA_BEATS = ((1, 2.220), (2, 4.080), (3, 6.180), (4, 8.010), (5, 10.110),
+                    (6, 11.940), (7, 14.040), (8, 15.901), (9, 17.940), (10, 19.800))
+
+_SKILL_TAP = ("Anastasya", "Skill", "Instantaneous Tap DMG")
+_PALESTAR = ("Anastasya", "Skill", "Palestar Crown Cryo DMG")
+_PALESTAR_STELLAR = ("Anastasya", "Skill", "Palestar Crown Stellar Swirl DMG")
+_PALESTAR_EXTRA = ("Anastasya", "Burst", "Palestar Crown Extra Stellar Swirl DMG")
+_NEW_WORLD = ("Anastasya", "Burst", "To the New World Instantaneous DMG")
+
+
+def _anastasya_cast_hit() -> Hit:
+    return Hit("Cast", 0.000, element="Cryo", elemental_app="1U",
+               category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK,
+               motion_value=get_ability_motion_value(*_SKILL_TAP, 10),
+               attack_type=AttackType.SKILL, scaling_key=_SKILL_TAP)
+
+
+def _anastasya_palestar_hits():
+    """Palestar Crown beats on Odette's skill timings (cryo + stellar per beat).
+
+    The "extra" stellar hit is NOT part of the ability: the timeline injects it on
+    every stellar beat while her burst buff is up (see anastasya_extra_stellar).
+    """
+    hits = []
+    for index, offset in _ANASTASYA_BEATS:
+        hits.append(Hit(f"Palestar Crown {index}", offset, element="Cryo",
+                        elemental_app="1U", category=ActionCategory.STANDARD_DMG,
+                        stat_ref=StatRef.ATK,
+                        motion_value=get_ability_motion_value(*_PALESTAR, 10),
+                        attack_type=AttackType.SKILL, scaling_key=_PALESTAR))
+        hits.append(Hit(f"Palestar Crown Stellar {index}", offset, element="Cryo",
+                        category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.ATK,
+                        motion_value=get_ability_motion_value(*_PALESTAR_STELLAR, 10),
+                        scaling_key=_PALESTAR_STELLAR))
+    return hits
+
+
+anastasya_tap = Ability(
+    name="Skill Tap",
+    character="Anastasya",
+    cooldown=15.0,
+    talent_level=10,
+    talent_type="skill_talent",
+    hits=[_anastasya_cast_hit(), *_anastasya_palestar_hits()],
+)
+
+anastasya_burst = Ability(
+    name="To the New World",
+    character="Anastasya",
+    cooldown=15.0,
+    talent_level=13,
+    talent_type="burst_talent",
+    hits=[
+        Hit("Burst_Cast", 0.000, element="Cryo", elemental_app="1U",
+            category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK,
+            motion_value=get_ability_motion_value(*_NEW_WORLD, 13),
+            attack_type=AttackType.BURST, scaling_key=_NEW_WORLD),
+    ],
+)
+
+_TRUMPH = ("Anastasya", "Burst", "Triumph Stellar Swirl DMG")
+anastasya_triumph = Ability(
+    name="Triumph",
+    character="Anastasya",
+    cooldown=15.0,
+    talent_level=13,
+    talent_type="burst_talent",
+    hits=[
+        Hit("Triumph", 0.000, element="Cryo",
+            category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.ATK,
+            motion_value=get_ability_motion_value(*_TRUMPH, 13),
+            attack_type=AttackType.BURST, scaling_key=_TRUMPH),
+    ],
+)
+
+# Conditional hit: injected by the timeline on every stellar beat of her skill
+# while her burst buff is active. Kept as a one-hit ability so the motion value
+# stays data-driven.
+anastasya_extra_stellar = Ability(
+    name="Palestar Crown Extra Stellar",
+    character="Anastasya",
+    talent_level=10,
+    talent_type="burst_talent",
+    hits=[
+        Hit("Palestar Crown Extra Stellar", 0.000, element="Cryo",
+            category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.ATK,
+            motion_value=get_ability_motion_value(*_PALESTAR_EXTRA, 10),
+            scaling_key=_PALESTAR_EXTRA),
+    ],
+)
+
+# Field sequences. E / Q mirror Aether's EN1 / CQ timings (the rotation swaps
+# Aether out for Anastasya in both slots); EQ is the combined variant.
+anastasya_e = FieldSequence("AnastasyaE", "Anastasya", swap_out_time=1.23)
+anastasya_e.add_ability(0.601, anastasya_tap)
+
+anastasya_q = FieldSequence("AnastasyaQ", "Anastasya", swap_out_time=2.941)
+anastasya_q.add_ability(2.371, anastasya_burst)
+
+anastasya_eq = FieldSequence("AnastasyaEQ", "Anastasya", swap_out_time=2.851)
+anastasya_eq.add_ability(0.601, anastasya_tap)
+anastasya_eq.add_ability(2.371, anastasya_burst)
+
+
+# ---------------------------------------------------------------------------
+# Editor registries
+# ---------------------------------------------------------------------------
+# The UI offers exactly what exists in this module: every FieldSequence and every
+# Ability is collected programmatically, so a new definition never has to be
+# registered anywhere else. Consumers filter by owner (a sequence/ability is only
+# playable when its character is in the party).
+def _collect_editor_registries():
+    sequences = {}
+    abilities = {}
+    for value in list(globals().values()):
+        if isinstance(value, FieldSequence):
+            sequences.setdefault(value.name, value)
+        elif isinstance(value, Ability):
+            abilities.setdefault(value.character, {})
+            abilities[value.character].setdefault(value.name, value)
+    return sequences, abilities
+
+
+FIELD_SEQUENCE_REGISTRY, ABILITY_REGISTRY = _collect_editor_registries()
+
+# Abilities the timeline injects on its own (conditional procs). They stay in
+# ABILITY_REGISTRY for completeness, but must never be insertable by hand or they
+# would double count.
+ENGINE_INTERNAL_ABILITIES = {
+    "Palestar Crown Extra Stellar",   # injected while Anastasya's burst buff is up
+    "Triumph",                        # injected on her next swap-in after the burst
+}
+
+
+def field_sequences_for(characters) -> dict:
+    """{sequence name: FieldSequence} for the characters that are actually in play."""
+    party = {c for c in (characters or []) if c}
+    return {name: seq for name, seq in FIELD_SEQUENCE_REGISTRY.items()
+            if seq.character in party}
+
+
+def abilities_for(character: str) -> dict:
+    """{ability name: Ability} that *character* can be told to cast in a sequence."""
+    return {name: ab for name, ab in ABILITY_REGISTRY.get(character, {}).items()
+            if name not in ENGINE_INTERNAL_ABILITIES}
+
+
