@@ -1196,7 +1196,7 @@ with tab3:
                     f"{data['weapon']} R{data.get('refinement', 1)}"
                     for name, data in party.items()
                 )
-                enemy_summary = f"Lv{enemy.get('enemy_lv','?')} | Cryo {int(enemy.get('cryo_res',0.1)*100)}% | Anemo {int(enemy.get('anemo_res',0.1)*100)}%"
+                enemy_summary = f"Lv{enemy.get('enemy_lv','?')} | Cryo Res {int(enemy.get('cryo_res',0.1)*100)}% | Anemo Res {int(enemy.get('anemo_res',0.1)*100)}%"
                 timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
 
                 entry = {
@@ -1459,7 +1459,7 @@ with tab4:
                 st.markdown(f"**Trial Executed:** `{entry['field_sequences']}`")
                 
                 st.markdown("---")
-                st.subheader("Performance Analytics & Visualizations")
+                st.subheader("Performance Calculations & Analytics")
 
                 # --- FALLBACK: Compute analytics on-the-fly for old history entries ---
                 analytics = entry.get("analytics", {})
@@ -1517,7 +1517,7 @@ with tab4:
                             fig_owner = px.pie(
                                 names=list(owner_data.keys()), 
                                 values=list(owner_data.values()), 
-                                title="Damage Share by Owner (Excl. Reactions)",
+                                title="Damage Share by Character (Excl. Reactions)",
                                 hole=0.3
                             )
                             st.plotly_chart(fig_owner, use_container_width=True)
