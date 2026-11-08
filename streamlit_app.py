@@ -1,8 +1,11 @@
 import streamlit as st
 import pandas as pd
 import buffs
+import copy
 import datetime
+import hashlib
 import plotly.express as px
+from pathlib import Path
 from timeline import RotationTimeline
 from abilities import (
     aether_en1,
@@ -23,16 +26,21 @@ if not hasattr(buffs, "TEAM_BUFFS"):
 
 from artifacts import ARTIFACTS_BONUSES
 from weapons import WEAPON_STATS
-from stats_calc import build_initial_stats, compute_card_stats, apply_weapon_party_stats
-from substats_standards import (
-    CARRIES,
-    build_recommended_subs,
-    build_kqm_subs,
-    build_kqm_build,
-    standard_piece_mains,
-)
+# Gear -> stat math now lives in build_io (shared by the UI and file loading).
+from substats_standards import CARRIES, standard_piece_mains
 import buff_registry
-from characters import get_character_element
+from build_io import (
+    apply_build_document,
+    assemble_party,
+    build_party_from_document,
+    collect_build_document,
+    document_lacks_gear,
+    document_to_json,
+    legacy_build_document,
+    load_trial_into_editor,
+    parse_document,
+    suggested_file_name,
+)
 
 # Callback functions for seamless programmatic tab switching
 def go_to_enemy_tab():
@@ -40,6 +48,9 @@ def go_to_enemy_tab():
 
 def go_to_rotation_tab():
     st.session_state["main_tabs"] = "Rotation Setup"
+
+def go_to_results_tab():
+    st.session_state["main_tabs"] = "Simulation Results"
 
 # Safe aliases for weapons and artifact sets to prevent KeyError
 WEAPON_STATS.setdefault("Select Weapon", {"base_atk": 0.0})
@@ -306,27 +317,18 @@ CIRCLET_MAINS = ["ATK%", "HP%", "DEF%", "EM", "Crit Rate%", "Crit Damage%", "Hea
 # Substat Options (including DEF% and Flat DEF)
 SUBSTAT_OPTIONS = ["None", "Flat ATK", "Flat HP", "Flat DEF", "ATK%", "HP%", "DEF%", "Crit Rate%", "Crit Damage%", "ER%", "EM"]
 
-# Mapping from UI display names to standardized backend keys
-STAT_KEY_MAP = {
-    "Flat HP": "hp_flat",
-    "Flat ATK": "atk_flat",
-    "Flat DEF": "def_flat",
-    "HP%": "hp_percent",
-    "ATK%": "atk_percent",
-    "DEF%": "def_percent",
-    "EM": "em",
-    "ER%": "er",
-    "Crit Rate%": "crit_rate",
-    "Crit Damage%": "crit_dmg",
-    "Healing Bonus%": "healing_bonus",
-    "Physical Bonus%": "physical_bonus",
-    "Pyro Bonus%": "pyro_bonus",
-    "Hydro Bonus%": "hydro_bonus",
-    "Geo Bonus%": "geo_bonus",
-    "Anemo Bonus%": "anemo_bonus",
-    "Electro Bonus%": "electro_bonus",
-    "Dendro Bonus%": "dendro_bonus",
-    "Cryo Bonus%": "cryo_bonus",
+# Everything the import/export layer validates widget values against. Kept here so
+# build_io never has to know about the UI's own tables.
+BUILD_CATALOGUE = {
+    "characters": CHARACTERS,
+    "levels": LEVEL_OPTIONS,
+    "weapons": CHARACTER_WEAPONS,
+    "constellations": CHARACTER_CONSTELLATIONS,
+    "artifact_sets": CHARACTER_ARTIFACT_SETS,
+    "substat_options": SUBSTAT_OPTIONS,
+    "mains": {"Sands": SANDS_MAINS, "Goblet": GOBLET_MAINS, "Circlet": CIRCLET_MAINS},
+    "rarities": ["5★", "4★"],
+    "standards": ["Manual", "100% RV (Crit Value)", "KQM Standards (40 rolls)"],
 }
 
 # --- Editor catalogues -------------------------------------------------------
@@ -504,7 +506,118 @@ def validate_talents(talent_str):
 
     return True, None, levels
 
+
+def render_character_cards(my_party: dict) -> None:
+    """Compact off-field stat cards for the current party.
+
+    Shown directly under the team section header so the party stays visible while the
+    slots/artifacts below are edited. Deliberately small: a thumbnail portrait next to
+    the identity block, then the gear stats as a two-column grid.
+    """
+    st.markdown("##### Character Cards (Off-Field Stats)")
+    card_cols = st.columns(max(len(my_party), 1))
+    for col, (char_name, data) in zip(card_cols, my_party.items()):
+        with col:
+            with st.container(border=True):
+                img_col, id_col = st.columns([1, 1.7], vertical_alignment="center")
+                with img_col:
+                    img_path = Path(f"assets/characters/{char_name.lower()}.webp")
+                    if img_path.exists():
+                        st.image(str(img_path), width=74)
+                with id_col:
+                    st.markdown(f"**{char_name}** `C{data['constellation']}`")
+                    st.caption(f"Lv {data.get('level', 90)} · {data.get('element') or '?'}")
+                    st.caption(f"{data['weapon']} R{data['refinement']}")
+                    st.caption(f"{data['artifact_set']}")
+
+                rows = "".join(
+                    f"<div style='opacity:0.85'>{label}</div>"
+                    f"<div style='text-align:right;font-weight:600'>{value}</div>"
+                    for label, value in (data.get("card_stats") or {}).items()
+                )
+                st.markdown(
+                    "<div style='display:grid;grid-template-columns:auto auto;"
+                    "column-gap:12px;font-size:0.82rem;line-height:1.45;margin-top:4px'>"
+                    f"{rows}</div>",
+                    unsafe_allow_html=True,
+                )
+    st.markdown("")
+
+
+def render_build_io_panel() -> None:
+    """Save / Load: download the current build, or restore one from a file.
+
+    The importer is idempotent: the uploaded bytes are hashed and a file is applied
+    only once. (It used to re-apply on every rerun, which silently reverted every
+    edit made after loading.)
+    """
+    st.subheader("Save / Load Build")
+    upload_col, download_col = st.columns([1, 1], gap="large")
+
+    with upload_col:
+        uploaded_file = st.file_uploader(
+            "Upload a previously saved build JSON file",
+            type=["json"],
+            key="config_importer",
+            help="Restores the party, gear (mains + substats), enemy and custom trials.",
+        )
+
+    with download_col:
+        st.markdown("<br>", unsafe_allow_html=True)
+        current_doc = collect_build_document(st.session_state)
+        st.download_button(
+            "⬇ Export current build (.json)",
+            data=document_to_json(current_doc),
+            file_name=suggested_file_name(current_doc),
+            mime="application/json",
+            key="export_current_build",
+            use_container_width=True,
+        )
+
+    if uploaded_file is None:
+        # Removing the file re-arms the importer, so the same file can be re-applied.
+        st.session_state.pop("_imported_digest", None)
+        return
+
+    payload = uploaded_file.getvalue()
+    digest = hashlib.sha1(payload).hexdigest()
+    if st.session_state.get("_imported_digest") == digest:
+        st.info(
+            f"Build **{st.session_state.get('imported_sim_name') or uploaded_file.name}** is "
+            "loaded. Every input below is editable — re-upload the file to reset to it."
+        )
+        return
+
+    try:
+        document = parse_document(payload)
+    except Exception as exc:
+        st.session_state["_imported_digest"] = digest
+        st.error(f"Could not read '{uploaded_file.name}': {exc}")
+        return
+
+    warnings = apply_build_document(document, st.session_state, BUILD_CATALOGUE)
+    st.session_state["my_party"] = build_party_from_document(document)
+    st.session_state["party_created"] = bool(st.session_state["my_party"])
+    # A stale signature would immediately mark the imported party as "changed".
+    st.session_state.pop("last_team_signature", None)
+    st.session_state["_imported_digest"] = digest
+
+    st.success(
+        f"Loaded **{document.get('simulation_name') or uploaded_file.name}** — "
+        f"{len(st.session_state['my_party'])} characters, gear and trials restored. "
+        "Tweak anything below, then press **Confirm party configuration**."
+    )
+    if document_lacks_gear(document):
+        st.warning(
+            "This file was saved by an older version and carries no artifact substats: "
+            "the party is restored, but the piece inputs start empty."
+        )
+    for warning in warnings:
+        st.warning(warning)
+
+
 team_data = {}
+
 
 # ---------------------------------------------------------
 # TAB NAVIGATION STRUCTURE
@@ -520,99 +633,15 @@ tab1, tab2, tab3, tab4 = st.tabs([
 # TAB 1: TEAM & GEAR SETUP
 # =========================================================
 
-from pathlib import Path
-
 with tab1:
-    st.subheader("Import Saved Configuration")
-    uploaded_file = st.file_uploader("Upload a previously saved build JSON file", type=["json"], key="config_importer")
-    
-    if uploaded_file is not None:
-        try:
-            import json
-            import io
-            
-            content = uploaded_file.read().decode("utf-8")
-            data = json.loads(content)
-            
-            # Schema version check for future-proofing
-            schema_version = data.get("schema_version", "1.0")
-            
-            # Restore Party and Enemy Stats into session state
-            st.session_state["my_party"] = data.get("party", {})
-            st.session_state["enemy_stats"] = data.get("enemy_stats", {"enemy_lv": 100, "cryo_res": 0.1, "anemo_res": 0.1})
-            st.session_state["party_created"] = True
-            st.session_state["enemy_confirmed"] = True
-            
-            # Rebuild Custom Field Sequences from raw recipe data.
-            # Abilities are resolved through abilities.ABILITY_REGISTRY so the export
-            # round-trips every ability (and picks the right owner for shared names
-            # such as "Elemental Burst").
-            from models import FieldSequence, Rotation, Trial
-            from abilities import ABILITY_REGISTRY, FIELD_SEQUENCE_REGISTRY
-
-            def _resolve_ability(ability_name: str, character: str = None):
-                if character and ability_name in ABILITY_REGISTRY.get(character, {}):
-                    return ABILITY_REGISTRY[character][ability_name]
-                for ability_map in ABILITY_REGISTRY.values():
-                    if ability_name in ability_map:
-                        return ability_map[ability_name]
-                return None
-
-            restored_fs = {}
-            for fs_name, fs_data in data.get("custom_field_sequences_raw", {}).items():
-                fs = FieldSequence(name=fs_data["name"], character=fs_data["character"], swap_out_time=fs_data["swap_out_time"])
-                for call in fs_data.get("calls", []):
-                    ab_obj = _resolve_ability(call.get("ability_name"),
-                                              call.get("ability_character", fs.character))
-                    if ab_obj:
-                        fs.add_ability(call["start_time"], ab_obj)
-                restored_fs[fs_name] = fs
-            st.session_state["custom_field_sequences"] = restored_fs
-
-            # Combine every known sequence for rotation mapping: presets by label,
-            # abilities.py by sequence name (what the exporter writes), custom by name.
-            from presets import STANDARD_FIELD_SEQUENCES
-            all_seqs = {**STANDARD_FIELD_SEQUENCES, **FIELD_SEQUENCE_REGISTRY, **restored_fs}
-            
-            # Rebuild Custom Rotations
-            restored_rots = {}
-            for rot_name, rot_data in data.get("custom_rotations_raw", {}).items():
-                seq_list = [all_seqs[s_key] for s_key in rot_data.get("sequence_keys", []) if s_key in all_seqs]
-                rot = Rotation(name=rot_data["name"], sequences=seq_list, repetitions=rot_data.get("repetitions", 1), description=rot_data.get("description", ""))
-                restored_rots[rot_name] = rot
-            st.session_state["custom_rotations"] = restored_rots
-            
-            # Rebuild Custom Trials & Add to Pool
-            from presets import STANDARD_TRIALS
-            active_pool = STANDARD_TRIALS.copy()
-            for trial_name, trial_data in data.get("custom_trials_raw", {}).items():
-                rot_list = []
-                for entry in trial_data.get("rotation_entries", []):
-                    base_rot = restored_rots.get(entry["rotation_name"])
-                    if base_rot:
-                        rot_copy = copy.deepcopy(base_rot)
-                        rot_copy.repetitions = entry["repetitions"]
-                        rot_list.append(rot_copy)
-                
-                t = Trial(
-                    name=trial_data["name"],
-                    rotations=rot_list,
-                    end_mode=trial_data.get("end_mode", "time"),
-                    end_time=trial_data.get("end_time", 30.0),
-                    description=trial_data.get("description", "")
-                )
-                active_pool[trial_name] = t
-            st.session_state["active_trial_pool"] = active_pool
-            
-            # Capture file name as simulation name
-            filename_base = uploaded_file.name.rsplit(".", 1)[0]
-            st.session_state["imported_sim_name"] = filename_base
-            
-            st.success(f"Successfully imported configuration from '{uploaded_file.name}'! Party and custom components loaded.")
-        except Exception as e:
-            st.error(f"Failed to parse configuration file: {e}")
+    render_build_io_panel()
 
     st.subheader("1. Team, Characters and Weapon Configuration")
+
+    # Placeholder for the party cards: they are drawn HERE, right under the section
+    # header, but they are FILLED at the bottom of the tab — after "Confirm party
+    # configuration" has rebuilt the party — so they always show the current party.
+    cards_slot = st.container()
 
     cols = st.columns(4)
 
@@ -809,33 +838,6 @@ with tab1:
             }
 
     
-    STANDARD_MAIN_STATS = {
-        "hp_flat": 4780, "atk_flat": 311, "hp_percent": 0.466, "atk_percent": 0.466,
-        "def_percent": 0.583, "em": 186.5, "er": 0.518, "crit_rate": 0.311,
-        "crit_dmg": 0.622, "healing_bonus": 0.359, "physical_bonus": 0.583,
-        "pyro_bonus": 0.466, "hydro_bonus": 0.466, "geo_bonus": 0.466,
-        "anemo_bonus": 0.466, "electro_bonus": 0.466, "dendro_bonus": 0.466, "cryo_bonus": 0.466
-    }
-
-    STANDARD_4STAR_MAIN_STATS = {
-        "hp_flat": 3571, "atk_flat": 232, "hp_percent": 0.348, "atk_percent": 0.348,
-        "def_percent": 0.435, "em": 139.3, "er": 0.387, "crit_rate": 0.232,
-        "crit_dmg": 0.464, "healing_bonus": 0.268, "physical_bonus": 0.435,
-        "pyro_bonus": 0.348, "hydro_bonus": 0.348, "geo_bonus": 0.348,
-        "anemo_bonus": 0.348, "electro_bonus": 0.348, "dendro_bonus": 0.348, "cryo_bonus": 0.348
-    }
-
-    def parse_val(val_str):
-        if not val_str:
-            return 0.0
-        val_str = str(val_str).strip()
-        try:
-            if "%" in val_str:
-                return float(val_str.replace("%", ""))
-            return float(val_str)
-        except ValueError:
-            return 0.0
-
     # Build a signature of current team inputs to detect changes
     current_signature = []
     for s_num in range(1, 5):
@@ -892,116 +894,45 @@ with tab1:
                 for err in talent_errors:
                     st.error(f"Format error: {err}")
             else:
-                my_party = {}
-                for idx, (slot, data) in enumerate(team_data.items()):
-                    char_name = data["character"]
-                    if char_name == "Select Character":
-                        continue # Skip empty slots if any slip through
-                        
-                    slot_num = idx + 1
-                    const_val = int(data["constellation"].replace("C", "")) if data["constellation"] else 0
-                    weapon = data["weapon"]
-                    artifact_set = data.get("artifacts", {}).get("Set", "Select Set")
-                    pieces = data.get("artifacts", {}).get("Pieces", {})
-                    
-                    standard_mode = (st.session_state.get(f"std_{slot_num}", "Manual")
-                                     if char_name in CARRIES else "Manual")
-
-                    if standard_mode == "100% RV (Crit Value)":
-                        # 100% RV: auto mains + substats per the carry standard (5★ defaults).
-                        main_stats_total, subs_total = build_recommended_subs(char_name)
-                    elif standard_mode == "KQM Standards (40 rolls)":
-                        # KQM: same locked mains, 40-roll substat standard.
-                        main_stats_total, subs_total = build_kqm_build(char_name)
-                    else:
-                        main_stats_total = {}
-                        subs_total = {}
-                        for piece_name, piece_info in pieces.items():
-                            main_stat = piece_info.get("main_stat", "")
-                            substats = piece_info.get("substats", [])
-                            piece_rarity = piece_info.get("rarity", "5★")
-
-                            active_stats_dict = STANDARD_4STAR_MAIN_STATS if piece_rarity == "4★" else STANDARD_MAIN_STATS
-                            
-                            if main_stat:
-                                stat_key = STAT_KEY_MAP.get(main_stat)
-                                if stat_key and stat_key in active_stats_dict:
-                                    main_stats_total[stat_key] = main_stats_total.get(stat_key, 0.0) + active_stats_dict[stat_key]
-                            
-                            for sub in substats:
-                                sub_type = sub.get("stat")
-                                numeric_val = parse_val(sub.get("value"))
-                                if sub_type and sub_type != "None":
-                                    sub_key = STAT_KEY_MAP.get(sub_type, sub_type.lower().replace(" ", "_"))
-                                    if "%" in sub_type or sub_key in ["hp_percent", "atk_percent", "def_percent", "crit_rate", "crit_dmg", "er"]:
-                                        numeric_val = numeric_val / 100.0
-                                    subs_total[sub_key] = subs_total.get(sub_key, 0.0) + numeric_val
-
-                    initial_stats = build_initial_stats(char_name, data["level"], weapon, artifact_set, main_stats_total, subs_total, refinement=data["refinement"])
-
-                    my_party[char_name] = {
-                        "constellation": const_val,
+                slot_specs = []
+                for slot_num in range(1, 5):
+                    data = team_data[f"Slot {slot_num}"]
+                    if data["character"] == "Select Character":
+                        continue  # Skip empty slots if any slip through
+                    slot_specs.append({
+                        "character": data["character"],
                         "level": data.get("level", 90),
-                        "weapon": weapon,
+                        "constellation": data.get("constellation", "C0"),
+                        "weapon": data["weapon"],
                         "refinement": data["refinement"],
-                        "talents": data["talents"] if data["talents"] else "10/13/13",
+                        "talents": data["talents"],
                         "talent_levels": parsed_talents[slot_num],
-                        "artifact_set": artifact_set if artifact_set != "Select Set" else "None",
-                        "element": get_character_element(char_name),
-                        "standard_mode": standard_mode,
-                        "initial_stats": initial_stats,  
-                        "card_stats": {}                 
-                    }
+                        "artifact_set": data.get("artifacts", {}).get("Set", "Select Set"),
+                        "standard_mode": (st.session_state.get(f"std_{slot_num}", "Manual")
+                                          if data["character"] in CARRIES else "Manual"),
+                        "pieces": data.get("artifacts", {}).get("Pieces", {}),
+                    })
 
-                # Permanent, party-composition-dependent weapon stats (e.g. A Thousand
-                # Floating Dreams) must be applied BEFORE the cards are rendered, and
-                # they depend on the whole party, so this is a second pass.
-                apply_weapon_party_stats(
-                    {name: d["initial_stats"] for name, d in my_party.items()}, my_party
-                )
-                for name, d in my_party.items():
-                    d["card_stats"] = compute_card_stats(
-                        d["initial_stats"],
-                        standard_mode=(d.get("standard_mode", "Manual") != "Manual"),
-                    )
-
+                # Gear -> stat pools lives in build_io, so a party restored from a file
+                # is built by exactly the same code as one typed in here.
+                st.session_state["my_party"] = assemble_party(slot_specs)
                 st.session_state["party_created"] = True
                 st.session_state["last_team_signature"] = current_signature
-                st.session_state["my_party"] = my_party
                 st.success("Party successfully created!")
 
-    # Show stats cards inside tab1 if party is created
-    if st.session_state.get("party_created") and "my_party" in st.session_state:
-        my_party = st.session_state["my_party"]
+    # Party cards are written into the placeholder created under the section header,
+    # so they appear at the top of the tab while still reflecting this run's party.
+    if st.session_state.get("party_created") and st.session_state.get("my_party"):
+        with cards_slot:
+            render_character_cards(st.session_state["my_party"])
+
         st.markdown("---")
-        st.header("Character Cards (Off-Field Stats)")
-        card_cols = st.columns(4)
-        
-        for idx, (char_name, data) in enumerate(my_party.items()):
-            with card_cols[idx]:
-                with st.container(height=1000, border=True):
-
-                    char_img_path = Path(f"assets/characters/{char_name.lower()}.webp")
-                    if char_img_path.exists():
-                        st.image(str(char_img_path), use_container_width=True)                    
-
-                    st.subheader(f"{char_name} (C{data['constellation']})")
-                    st.caption(f"**Level:** {data.get('level', 90)}")
-                    st.caption(f"**Weapon:** {data['weapon']} R{data['refinement']} (Lv 90)")
-                    st.caption(f"**Element:** {data.get('element', '?')}")
-                    st.caption(f"**Artifacts:** {data['artifact_set']}")
-                    st.markdown("---")
-                    
-                    for stat_name, stat_val in data["card_stats"].items():
-                        st.text(f"{stat_name:<13}: {stat_val}")
-
-        st.markdown("<br>", unsafe_allow_html=True)
         col_proceed1, col_proceed2, col_proceed3 = st.columns([1, 2, 1])
         with col_proceed2:
             st.button(
-                "Proceed to Enemy Configuration", 
-                type="primary", 
-                use_container_width=True, 
+                "Proceed to Enemy Configuration",
+                type="primary",
+                use_container_width=True,
                 on_click=go_to_enemy_tab
             )
 
@@ -1078,24 +1009,38 @@ with tab2:
                 st.success("Enemy configuration confirmed!")
                 st.rerun()
 
-        # Right column holds either the live target overview card or a placeholder prompt
+        # Enemy summary card: deliberately compact — a small thumbnail next to the level,
+        # then a two-column resistance grid. (A full-width image used to dominate here.)
         with col_card:
             st.markdown("### Target Overview")
             if is_confirmed:
                 with st.container(border=True):
+                    head_img, head_text = st.columns([1, 2], vertical_alignment="center")
+                    with head_img:
+                        enemy_img_path = Path("assets/enemy/target.webp")
+                        if enemy_img_path.exists():
+                            st.image(str(enemy_img_path), width=88)
+                    with head_text:
+                        st.markdown(f"**Level {enemy_lv} Target**")
+                        st.caption("Damage target · off-field buffs apply")
 
-                    enemy_img_path = Path("assets/enemy/target.webp")
-                    if enemy_img_path.exists():
-                        st.image(str(enemy_img_path), use_container_width=True)
-
-                    st.subheader(f"Level {enemy_lv} Target")
                     st.markdown("---")
-                    st.caption("**Current Resistances:**")
-                    
-                    for elem in elements:
-                        res_pct = enemy_res_inputs.get(f"{elem}_res", 0.1) * 100
-                        st.text(f"{elem.capitalize():<10}: {res_pct:.1f}%")
-                    
+                    rows = [
+                        (elem.capitalize(), f"{enemy_res_inputs.get(f'{elem}_res', 0.1) * 100:.1f}")
+                        for elem in elements
+                    ]
+                    grid = "".join(
+                        f"<div style='opacity:0.85'>{name}</div>"
+                        f"<div style='text-align:right;font-weight:600'>{value}%</div>"
+                        for name, value in rows
+                    )
+                    st.markdown(
+                        "<div style='display:grid;grid-template-columns:auto auto;"
+                        "column-gap:14px;font-size:0.86rem;line-height:1.5'>"
+                        f"{grid}</div>",
+                        unsafe_allow_html=True,
+                    )
+
                     st.markdown("<br>", unsafe_allow_html=True)
                     st.button(
                         "Proceed to Rotation Setup", 
@@ -1119,6 +1064,14 @@ with tab3:
         if st.session_state.get("toast_msg"):
             st.success(st.session_state["toast_msg"])
             st.session_state["toast_msg"] = None
+
+        # Values queued by "Load selected trial into editor". Widget keys can only be
+        # written before the widget itself is created, so they are queued and applied
+        # here, at the top of the tab.
+        editor_prefill = st.session_state.pop("editor_prefill", None)
+        if editor_prefill:
+            st.session_state["adv_trial_name"] = editor_prefill.get("name", "")
+            st.session_state["adv_trial_desc"] = editor_prefill.get("description", "")
 
         st.header("Trial Setup")
         
@@ -1209,13 +1162,32 @@ with tab3:
                     "snapshot_party": copy.deepcopy(party),
                     "snapshot_enemy": copy.deepcopy(enemy),
                     "snapshot_custom_fs": copy.deepcopy(st.session_state.get("custom_field_sequences", {})),
-                    "snapshot_custom_rots": copy.deepcopy(st.session_state.get("custom_rotations", {}))
+                    "snapshot_custom_rots": copy.deepcopy(st.session_state.get("custom_rotations", {})),
+                    # Full, gear-complete build document for THIS run: the per-run
+                    # export writes it, so the run can be re-imported and tweaked.
+                    "snapshot_build": collect_build_document(
+                        st.session_state,
+                        trial_labels.get(selected_trial_key, selected_trial_key),
+                    ),
                 }
 
                 if "history" not in st.session_state:
                     st.session_state["history"] = []
                 st.session_state["history"].append(entry)
-                st.success("Trial simulation complete! Check the **Simulation Results** tab.")
+                st.session_state["trial_finished"] = True
+
+        # Result of the last run. Rendered outside the button branch so the message and
+        # the shortcut to the results stay available after the run.
+        if st.session_state.get("trial_finished"):
+            st.success("Trial simulation complete!")
+            st.button(
+                "📊 View Simulation Results",
+                type="primary",
+                use_container_width=True,
+                key="view_results_btn",
+                on_click=go_to_results_tab,
+                help="Jump straight to the Simulation Results tab.",
+            )
 
 
         st.markdown("<br><hr><br>", unsafe_allow_html=True)             
@@ -1247,6 +1219,18 @@ with tab3:
                 disabled=end_at_last_swap,
                 key="adv_trial_duration"
             )
+
+            # Makes any trial editable — including the shipped presets and trials
+            # restored from a file: its rotations are copied into the editor pools.
+            if trial_obj is not None:
+                if st.button("⤵ Load selected trial into editor",
+                             key="load_trial_into_editor_btn",
+                             use_container_width=True,
+                             help="Copies this trial's rotations into the editor so they "
+                                  "can be tweaked and re-used in a new trial."):
+                    load_trial_into_editor(trial_obj, st.session_state)
+                    st.session_state["toast_msg"] = f"Trial '{trial_obj.name}' loaded into the editor."
+                    st.rerun()
 
         with trial_col_right:
             if st.session_state["custom_rotations"]:
@@ -1562,43 +1546,21 @@ with tab4:
                     st.markdown("<br><hr>", unsafe_allow_html=True)
                                         
                     # 2. EXPORT CONFIGURATION FOR THIS SPECIFIC RUN
-                    st.subheader("Export Run Configuration")
-                    st.write("Export the exact build, enemy stats, and custom setups used for this specific simulation run.")
-                    
-                    import json
-                    export_payload = {
-                        "schema_version": "1.0",
-                        "simulation_name": entry["sim_name"],
-                        "party": entry.get("snapshot_party", {}),
-                        "enemy_stats": entry.get("snapshot_enemy", {}),
-                        "custom_field_sequences_raw": {
-                            name: {
-                                "name": fs.name,
-                                "character": fs.character,
-                                "swap_out_time": fs.swap_out_time,
-                                "calls": [{"start_time": call.start_time,
-                                           "ability_name": call.ability.name,
-                                           "ability_character": call.ability.character}
-                                          for call in fs.calls]
-                            }
-                            for name, fs in entry.get("snapshot_custom_fs", {}).items()
-                        },
-                        "custom_rotations_raw": {
-                            name: {
-                                "name": rot.name,
-                                "sequence_keys": [seq.name for seq in rot.sequences],
-                                "repetitions": rot.repetitions,
-                                "description": rot.description
-                            }
-                            for name, rot in entry.get("snapshot_custom_rots", {}).items()
-                        }
-                    }
-                    
-                    json_str = json.dumps(export_payload, indent=4)
+                    st.subheader("Export Run")
+                    st.markdown(
+                        "Save the exact gear, team, trial and custom setups used for this run. "
+                        "The file loads again in **Team & Gear Setup → Save / Load Build** and "
+                        "stays fully editable."
+                    )
+
+                    # Runs recorded before schema 2.0 have no full document saved, so the
+                    # best possible one is rebuilt from their snapshots.
+                    run_doc = entry.get("snapshot_build") or legacy_build_document(entry)
+                    run_doc["simulation_name"] = entry["sim_name"]
                     st.download_button(
                         label=f"Export JSON Config for '{entry['sim_name']}'",
-                        data=json_str,
-                        file_name=f"{entry['sim_name'].replace(' ', '_')}.json",
+                        data=document_to_json(run_doc),
+                        file_name=suggested_file_name(run_doc),
                         mime="application/json",
                         key=f"export_hist_{real_idx}",
                         use_container_width=True

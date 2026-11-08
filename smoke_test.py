@@ -35,6 +35,7 @@ from stats_calc import (
 )
 import copy
 import presets
+import build_io
 
 
 def _buffed_stats(timeline, event, char):
@@ -1400,6 +1401,163 @@ def _run_editor_catalogue_check() -> dict:
     return out
 
 
+def _run_save_load_check() -> dict:
+    """Build documents (save / load): a saved build must round-trip completely.
+
+    Uses a representative catalogue (the UI passes its own via BUILD_CATALOGUE) to
+    prove that: raw gear is written to the file, restoring writes the WIDGET STATE
+    back (so the build stays editable), the rebuilt party has identical
+    initial_stats, and a trial can be opened in the editor.
+    """
+    import json
+
+    catalogue = {
+        "characters": ["Select Character", "Mizuki", "Aether", "Odette", "Faruzan"],
+        "levels": [60, 70, 80, 90, 95, 100],
+        "constellations": {"Select Character": ["C0"], "Faruzan": ["C6"],
+                           "Mizuki": ["C0", "C1", "C2", "C6"], "Aether": ["C4", "C5", "C6"],
+                           "Odette": ["C0"]},
+        "weapons": {"Mizuki": [("Sacrificial Fragments", [4, 5])],
+                    "Faruzan": [("Favonius Warbow", [1, 2, 3, 4, 5])],
+                    "Aether": [("New Bough", [1, 2, 3, 4, 5])],
+                    "Odette": [("New Bough", [1, 2, 3, 4, 5])]},
+        "artifact_sets": {"Mizuki": ["Select Set", "Gilded Dreams"],
+                          "Faruzan": ["Select Set", "Instructor"],
+                          "Aether": ["Select Set", "2p/2p ATK"],
+                          "Odette": ["Select Set", "2p/2p ATK"]},
+        "substat_options": ["None", "Flat ATK", "Flat HP", "Flat DEF", "ATK%", "HP%",
+                            "DEF%", "Crit Rate%", "Crit Damage%", "ER%", "EM"],
+        "mains": {"Sands": ["ATK%", "EM", "ER%"], "Goblet": ["Anemo Bonus%", "EM"],
+                  "Circlet": ["Crit Rate%", "Crit Damage%", "EM"]},
+        "rarities": ["5★", "4★"],
+        "standards": list(build_io.SUBSTAT_STANDARDS),
+    }
+
+    state = {
+        "char_1": "Mizuki", "level_1": 90, "const_1": "C2",
+        "weapon_1": "Sacrificial Fragments", "ref_1": "R5", "talents_1": "6/10/10",
+        "std_1": "Manual", "art_set_1": "Gilded Dreams",
+        "char_2": "Faruzan", "level_2": 90, "const_2": "C6",
+        "weapon_2": "Favonius Warbow", "ref_2": "R3", "talents_2": "1/13/13",
+        "art_set_2": "Instructor",
+        "char_3": "Select Character", "char_4": "Select Character",
+        "input_enemy_lv": 95,
+        "trial_selector": "Round trip trial",
+    }
+    for element in build_io.ELEMENTS:
+        state[f"input_{element}_res"] = 12.5
+    mains_in = {"Flower": "Flat HP", "Feather": "Flat ATK", "Sands": "EM",
+                "Goblet": "Anemo Bonus%", "Circlet": "Crit Rate%"}
+    subs_in = [("EM", "40"), ("Crit Rate%", "3.5"), ("Crit Damage%", "7.0"), ("ER%", "5.2")]
+    for slot in (1, 2):
+        for piece in build_io.PIECES:
+            state[f"rarity_{piece}_{slot}"] = "5★"
+            state[f"main_{piece}_{slot}"] = mains_in[piece]
+            for index, (sub_name, sub_value) in enumerate(subs_in, start=1):
+                state[f"sub_type_{piece}_{slot}_{index}"] = sub_name
+                state[f"sub_val_{piece}_{slot}_{index}"] = sub_value
+
+    rotation = Rotation(name="Round trip rotation",
+                        sequences=[presets.STANDARD_FIELD_SEQUENCES["Mizuki E (Pullout)"]],
+                        repetitions=2)
+    trial = Trial(name="Round trip trial", rotations=[rotation], end_mode="time",
+                  end_time=45.0, description="round trip")
+    state["custom_field_sequences"] = {}
+    state["custom_rotations"] = {rotation.name: rotation}
+    state["active_trial_pool"] = dict(presets.STANDARD_TRIALS)
+    state["active_trial_pool"][trial.name] = trial
+
+    out = {}
+    document = build_io.collect_build_document(state, "Round trip")
+    text = build_io.document_to_json(document)
+    parsed = build_io.parse_document(text)
+    out["schema"] = parsed["schema_version"]
+    out["size"] = len(text)
+    out["substats_saved"] = (parsed["party"][0]["pieces"]["Sands"]["substats"][0]
+                             == {"stat": "EM", "value": "40"})
+    out["trial_saved"] = [t["name"] for t in parsed["custom_trials"]] == [trial.name]
+
+    restored = {}
+    out["restore_warnings"] = build_io.apply_build_document(parsed, restored, catalogue)
+    skip = ("active_trial_pool", "custom_rotations", "custom_field_sequences",
+            "imported_sim_name")
+    out["widget_mismatches"] = sorted(
+        key for key in state
+        if key not in skip and not key.startswith(("main_Flower", "main_Feather"))
+        and restored.get(key) != state[key]
+    )
+    out["trial_restored"] = (restored.get("trial_selector") == trial.name
+                             and trial.name in restored.get("active_trial_pool", {}))
+    out["enemy_restored"] = (restored.get("enemy_confirmed") is True
+                             and restored.get("input_enemy_lv") == 95)
+
+    party = build_io.build_party_from_document(parsed)
+    out["party_keys"] = sorted(party)
+    mains_saved, subs_saved = build_io.slot_stats_from_pieces(
+        "Mizuki", parsed["party"][0]["pieces"], "Manual")
+    expected = build_initial_stats("Mizuki", 90, "Sacrificial Fragments", "Gilded Dreams",
+                                   mains_saved, subs_saved, refinement=5)
+    out["stats_match"] = "Mizuki" in party and all(
+        abs(expected[key] - party["Mizuki"]["initial_stats"][key]) <= 1e-9
+        for key in ("em", "crit_rate", "crit_dmg", "er"))
+
+    editor_state = {"custom_rotations": {}, "custom_field_sequences": {}}
+    preset_trial = presets.STANDARD_TRIALS["Mizuki Sac Frag Pull out 6x rotations"]
+    build_io.load_trial_into_editor(preset_trial, editor_state)
+    out["editor_materialised"] = all(
+        rot.name in editor_state["custom_rotations"] for rot in preset_trial.rotations)
+    out["editor_queue"] = (len(editor_state["temp_trial_rot_entries"])
+                           == len(preset_trial.rotations))
+
+    # A schema 1.0 file still loads: characters + enemy, but no artifact gear.
+    legacy = {"schema_version": "1.0", "simulation_name": "legacy",
+              "party": {"Mizuki": {"level": 90, "constellation": 2,
+                                   "weapon": "Sacrificial Fragments", "refinement": 5,
+                                   "talents": "6/10/10", "artifact_set": "Gilded Dreams"}},
+              "enemy_stats": {"enemy_lv": 95, "cryo_res": 0.2}}
+    legacy_doc = build_io.parse_document(json.dumps(legacy))
+    legacy_state = {}
+    build_io.apply_build_document(legacy_doc, legacy_state, catalogue)
+    out["legacy_ok"] = (build_io.document_lacks_gear(legacy_doc)
+                        and legacy_state.get("char_1") == "Mizuki"
+                        and "Mizuki" in build_io.build_party_from_document(legacy_doc))
+
+    # A slot the file does not fill must be emptied, not left holding an old character.
+    small_state = {"char_3": "Odette", "char_4": "Aether"}
+    build_io.apply_build_document(
+        build_io.parse_document(json.dumps({
+            "schema_version": "2.0",
+            "party": [{"slot": 1, "character": "Mizuki", "level": 90,
+                       "constellation": 2, "weapon": "Sacrificial Fragments",
+                       "refinement": 5, "talents": "6/10/10", "pieces": {}}],
+            "enemy": {"enemy_lv": 100},
+        })),
+        small_state, catalogue)
+    out["slot_cleanup"] = (small_state.get("char_3") == "Select Character"
+                           and small_state.get("char_4") == "Select Character")
+
+    # The UI writes one widget key per input; the importer must speak the same names,
+    # so a rename in streamlit_app.py has to be mirrored in build_io (and vice versa).
+    out["key_mismatches"] = ["(streamlit_app.py not found)"]
+    try:
+        with open("streamlit_app.py", encoding="utf-8") as handle:
+            app_source = handle.read()
+    except OSError:
+        pass
+    else:
+        templates = ["char_{slot_num}", "level_{slot_num}", "const_{slot_num}",
+                     "weapon_{slot_num}", "ref_{slot_num}", "talents_{slot_num}",
+                     "art_set_{slot_num}", "std_{slot_num}",
+                     "main_{piece_name}_{slot_num}", "rarity_{piece_name}_{slot_num}",
+                     "rarity_locked_{piece_name}_{slot_num}",
+                     "sub_type_{piece_name}_{slot_num}_{sub_idx}",
+                     "sub_val_{piece_name}_{slot_num}_{sub_idx}",
+                     "input_{elem}_res"]
+        out["key_mismatches"] = [name for name in templates
+                                 if 'f"%s"' % name not in app_source]
+    return out
+
+
 def run(verbose: bool = True) -> None:
     party = presets.DEFAULT_PARTY
     trial = presets.TEST_TRIAL_30S
@@ -2013,6 +2171,37 @@ def run(verbose: bool = True) -> None:
     if not cat2_failures and verbose:
         print(f"[OK] editor catalogues: {cat2['sequence_count']} field sequences / "
               f"{cat2['ability_count']} abilities, party-gated; preset trials team-gated")
+
+    # 2q. Save / Load build documents (export + import).
+    save = _run_save_load_check()
+    save_checks = [
+        (save["schema"].startswith("2"), f"build document schema is {save['schema']}"),
+        (save["substats_saved"], "artifact substats are not written to the build file"),
+        (save["trial_saved"], "the custom trial is not written to the build file"),
+        (not save["restore_warnings"],
+         "loading a build reported warnings: " + "; ".join(save["restore_warnings"])),
+        (not save["widget_mismatches"],
+         "restored widget state differs from the saved one: "
+         + ", ".join(save["widget_mismatches"])),
+        (save["trial_restored"], "the saved trial does not come back with the build"),
+        (save["enemy_restored"], "the enemy configuration is not restored"),
+        (save["party_keys"] == ["Faruzan", "Mizuki"],
+         f"rebuilt party is {save['party_keys']}, expected Faruzan + Mizuki"),
+        (save["stats_match"],
+         "rebuilt initial_stats differ from build_initial_stats (substats lost?)"),
+        (save["editor_materialised"] and save["editor_queue"],
+         "a loaded/preset trial could not be opened in the editor"),
+        (save["legacy_ok"], "a schema 1.0 build file no longer loads"),
+        (save["slot_cleanup"], "slots the file does not use keep stale characters"),
+        (save["key_mismatches"] == [],
+         "the importer writes keys the UI does not use: "
+         + ", ".join(save["key_mismatches"])),
+    ]
+    save_failures = [msg for ok, msg in save_checks if not ok]
+    failures.extend(save_failures)
+    if not save_failures and verbose:
+        print(f"[OK] save/load round-trip: gear + enemy + trial restored "
+              f"({save['size']} byte document), loaded builds stay editable")
 
     if failures:
         print("\nSMOKE TEST FAILED:")

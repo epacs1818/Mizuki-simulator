@@ -314,3 +314,86 @@ instead of her initial EM. The jump from the weapon-phase-3 numbers is the
 Instructor fix (on-field only, 8s).
 
 
+## Save / load round (`build_io.py`, cards, results shortcut)
+
+The UI used to export only *cooked* party data (`initial_stats` + `card_stats`), so a
+saved file could not reproduce a build: the artifact inputs came back empty, the
+artifact substats were not in the file at all, and because the uploader kept the
+file alive the importer re-applied it on **every rerun**, silently reverting every
+edit made after loading.
+
+New `build_io.py` owns the file format (`SCHEMA_VERSION = "2.0"`). It imports no
+Streamlit and takes any mutable mapping, so it is unit-testable:
+
+| function | role |
+| --- | --- |
+| `collect_build_document(state)` | UI state -> JSON-ready document |
+| `apply_build_document(doc, state, catalogue)` | document -> widget state (+ warnings) |
+| `build_party_from_document(doc)` | document -> `my_party` (initial + card stats) |
+| `assemble_party(slots)` | slot specs -> `my_party` (shared with the Confirm button) |
+| `slot_stats_from_pieces(...)` | pieces -> stat pools (the old inline confirm-button math) |
+| `load_trial_into_editor(trial, state)` | make any trial (preset or imported) editable |
+| `parse_document` / `document_to_json` | JSON I/O, upgrades schema 1.0 files |
+
+Document shape: `party` is a **list of slots** carrying the raw gear
+(`pieces[Flower].main_stat`, `.rarity`, `.substats[{stat, value}]`), plus `enemy`,
+`selected_trial`, `custom_field_sequences`, `custom_rotations` and `custom_trials`.
+Each rotation embeds its full field-sequence definitions, so a file stands alone
+while abilities are still re-resolved by name (numbers follow `abilities.py`).
+
+Rules the importer keeps:
+
+* It writes the **widget keys** (`char_*`, `level_*`, `const_*`, `weapon_*`, `ref_*`,
+  `talents_*`, `art_set_*`, `std_*`, `main_*`, `rarity_*`/`rarity_locked_*`,
+  `sub_type_*`, `sub_val_*`, `input_enemy_lv`, `input_<elem>_res`), not just the
+  finished party, so every input shows the imported build and stays editable.
+* Every value is validated against the UI's own tables (`BUILD_CATALOGUE`) and
+  replaced with a warning when it no longer exists.
+* Slots the file does not fill are reset, so loading a 2-character build over a
+  4-character team cannot leave stale characters behind.
+* `last_team_signature` / `last_enemy_signature` are re-seeded, so the "settings
+  changed" guards do not immediately un-confirm the imported build.
+* The uploaded bytes are hashed: a file is applied **once** and the panel then shows
+  "loaded, edit freely — re-upload to reset". Removing the file re-arms the importer.
+
+UI changes in the same round:
+
+* Character cards moved from the bottom of the tab to directly under
+  *"1. Team, Characters and Weapon Configuration"*. They are written into an empty
+  `st.container()` placeholder created there and filled at the end of the tab, so
+  they always reflect the party the Confirm button just built (no rerun needed).
+  Card height dropped from a fixed `height=1000` box with a full-width image to a
+  74px portrait + identity block + two-column stat grid.
+* Enemy *Target Overview* card shrunk the same way (88px thumbnail + 2-column
+  resistance grid).
+* Completing a run now shows **"Trial simulation complete!"** with a
+  `📊 View Simulation Results` button (persistent, via `trial_finished`) instead of a
+  message pointing at a tab.
+* Trial editor gained `⤵ Load selected trial into editor`: it copies the trial's
+  rotations (and any non-preset sequences) into the custom pools, pre-fills the
+  rotation queue and queues the trial name/description (`editor_prefill`, applied at
+  the top of the tab because widget keys cannot be written after instantiation).
+* Every history entry now stores `snapshot_build`, so the per-run export writes the
+  same 2.0 document (older entries fall back to `legacy_build_document`).
+
+Bugs found while verifying (both fixed):
+
+1. The `validate_talents` splice had dropped its `return True, None, levels`, which
+   made *Confirm party configuration* raise `TypeError: cannot unpack non-iterable
+   NoneType`. Caught by running the app headless with `streamlit.testing.v1.AppTest`.
+2. Importing a smaller party left the trailing slots holding the old characters
+   (which also tripped the "character already picked in another slot" guard).
+
+`smoke_test.py` now asserts the round trip: substats in the file, widget state
+identical after re-apply, rebuilt `initial_stats` equal to `build_initial_stats`,
+enemy + trial restored, unused slots cleared, schema 1.0 files still loading, and a
+source-level check that the widget-key names in `streamlit_app.py` still match the
+ones the importer writes. A headless AppTest run confirms the real load path
+(`char_1=C1 / Sacrificial Fragments R4 / talents 6/10/10`, Sands `EM` + substats
+`EM 40` / `Crit Rate% 3.9`, enemy `105 / 20% / 15%`, trailing slots
+`Select Character`) with **no exceptions**.
+
+Engine untouched: `DEFAULT_PARTY` baseline stays
+1064651.5 / 1211525.5 / 1273564.4 / 1476591.7 and the Anastasya trial stays at
+4,904,232.3.
+
