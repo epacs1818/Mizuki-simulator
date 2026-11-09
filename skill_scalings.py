@@ -162,7 +162,7 @@ CHARACTER_SKILLS = {
                 "scaling": get_scaled_list(64.0, "Elemental 1"),
             },
             "Palestar Crown Stellar Swirl DMG": {
-                "scaling": get_scaled_list(60.0, "Elemental 1"),
+                "scaling": get_scaled_list(50.4, "Elemental 1"),
             },
         },
         "Burst": {
@@ -170,7 +170,7 @@ CHARACTER_SKILLS = {
                 "scaling": get_scaled_list(200.4, "Elemental 1"),
             },
             "To the New World Stellar Glimmer Reaction DMG Increase": {
-                "scaling": [0.275, 0.300, 0.325, 0.35, 0.375, 0.40, 0.425, 0.45, 0.475, 0.50, 0.525, 0.55, 0.575],
+                "scaling": [0.165, 0.180, 0.195, 0.210, 0.225, 0.240, 0.255, 0.270, 0.285, 0.300, 0.318, 0.336, 0.354],
             },
             "Palestar Crown Extra Stellar Swirl DMG": {
                 "scaling": get_scaled_list(16.8, "Elemental 1"),
