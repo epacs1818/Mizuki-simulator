@@ -1,0 +1,175 @@
+{
+  "schema_version": "2.0",
+  "app": "Yumemizuki Mizuki's Rotation Damage Calculator",
+  "exported_at": "2026-11-09T03:17:53",
+  "simulation_name": "Mizuki Sac Frag Pull out 6x rotations  [Mizuki / Aether / Odette / Faruzan]",
+  "party": [
+    {
+      "slot": 1,
+      "character": "Mizuki",
+      "level": 90,
+      "constellation": 2,
+      "weapon": "Sacrificial Fragments",
+      "refinement": 5,
+      "talents": "10/10/10",
+      "substat_standard": "100% RV (Crit Value)",
+      "artifact_set": "2p/2p EM",
+      "pieces": {
+        "Flower": {
+          "main_stat": "Flat HP",
+          "rarity": "5\u2605",
+          "substats": []
+        },
+        "Feather": {
+          "main_stat": "Flat ATK",
+          "rarity": "5\u2605",
+          "substats": []
+        },
+        "Sands": {
+          "main_stat": null,
+          "rarity": "5\u2605",
+          "substats": []
+        },
+        "Goblet": {
+          "main_stat": null,
+          "rarity": "5\u2605",
+          "substats": []
+        },
+        "Circlet": {
+          "main_stat": null,
+          "rarity": "5\u2605",
+          "substats": []
+        }
+      }
+    },
+    {
+      "slot": 2,
+      "character": "Aether",
+      "level": 90,
+      "constellation": 6,
+      "weapon": "Exaiphanes Blade",
+      "refinement": 5,
+      "talents": "10/13/13",
+      "substat_standard": "100% RV (Crit Value)",
+      "artifact_set": "2p/2p ATK",
+      "pieces": {
+        "Flower": {
+          "main_stat": "Flat HP",
+          "rarity": "5\u2605",
+          "substats": []
+        },
+        "Feather": {
+          "main_stat": "Flat ATK",
+          "rarity": "5\u2605",
+          "substats": []
+        },
+        "Sands": {
+          "main_stat": null,
+          "rarity": "5\u2605",
+          "substats": []
+        },
+        "Goblet": {
+          "main_stat": null,
+          "rarity": "5\u2605",
+          "substats": []
+        },
+        "Circlet": {
+          "main_stat": null,
+          "rarity": "5\u2605",
+          "substats": []
+        }
+      }
+    },
+    {
+      "slot": 3,
+      "character": "Odette",
+      "level": 90,
+      "constellation": 0,
+      "weapon": "Silver Light",
+      "refinement": 5,
+      "talents": "10/10/10",
+      "substat_standard": "100% RV (Crit Value)",
+      "artifact_set": "Heart Of The Furnace",
+      "pieces": {
+        "Flower": {
+          "main_stat": "Flat HP",
+          "rarity": "5\u2605",
+          "substats": []
+        },
+        "Feather": {
+          "main_stat": "Flat ATK",
+          "rarity": "5\u2605",
+          "substats": []
+        },
+        "Sands": {
+          "main_stat": null,
+          "rarity": "5\u2605",
+          "substats": []
+        },
+        "Goblet": {
+          "main_stat": null,
+          "rarity": "5\u2605",
+          "substats": []
+        },
+        "Circlet": {
+          "main_stat": null,
+          "rarity": "5\u2605",
+          "substats": []
+        }
+      }
+    },
+    {
+      "slot": 4,
+      "character": "Faruzan",
+      "level": 90,
+      "constellation": 6,
+      "weapon": "Favonius Warbow",
+      "refinement": 5,
+      "talents": "10/13/13",
+      "substat_standard": "Manual",
+      "artifact_set": "Viridescent Venerer",
+      "pieces": {
+        "Flower": {
+          "main_stat": "Flat HP",
+          "rarity": "5\u2605",
+          "substats": []
+        },
+        "Feather": {
+          "main_stat": "Flat ATK",
+          "rarity": "5\u2605",
+          "substats": []
+        },
+        "Sands": {
+          "main_stat": "ER%",
+          "rarity": "5\u2605",
+          "substats": []
+        },
+        "Goblet": {
+          "main_stat": "ATK%",
+          "rarity": "5\u2605",
+          "substats": []
+        },
+        "Circlet": {
+          "main_stat": "Crit Rate%",
+          "rarity": "5\u2605",
+          "substats": []
+        }
+      }
+    }
+  ],
+  "enemy": {
+    "enemy_lv": 100,
+    "pyro_res": 0.1,
+    "cryo_res": 0.1,
+    "hydro_res": 0.1,
+    "electro_res": 0.1,
+    "anemo_res": 0.1,
+    "geo_res": 0.1,
+    "dendro_res": 0.1,
+    "physical_res": 0.1
+  },
+  "selected_trial": "Mizuki Sac Frag Pull out 6x rotations",
+  "custom_field_sequences": [],
+  "custom_rotations": [],
+  "custom_trials": []
+}

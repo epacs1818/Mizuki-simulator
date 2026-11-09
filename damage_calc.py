@@ -438,6 +438,23 @@ def calculate_stellar_reaction_damage(hit, final_stats, enemy_stats, party_dict=
     crit_damages_arr = np.array(crit_damages_list, dtype=float)
     crit_rates_arr = np.array(crit_rates_list, dtype=float)
 
+    # 100% RV / KQM contributors are DETERMINISTIC: their crit is one Crit Value, so
+    # their scenario collapses to a single outcome that carries the CV multiplier
+    # (probability 1) instead of the 1 + CR*CD branches built above. This keeps the
+    # expected-value loop, the crit/non-crit aggregates and the audit dicts aligned
+    # with the standard/stellar paths (which already use crit_mult_from_crit_value).
+    for idx, contributor in enumerate(contributors):
+        if not party_dict.get(contributor, {}).get("rv_mode"):
+            continue
+        rv_mult = contrib_crit_mult_average[contributor]
+        rv_value = non_crit_damages_list[idx] * rv_mult
+        non_crit_arr[idx] = rv_value
+        crit_damages_arr[idx] = rv_value
+        crit_rates_arr[idx] = 1.0
+        contrib_non_crit[contributor] = rv_value
+        contrib_crit_damage[contributor] = rv_value
+        contrib_average_damage[contributor] = rv_value
+
     # 4. Determine share weights dynamically based on contributor count
     if n >= 4:
         weights = np.array([0.6, 0.3, 0.05, 0.05])

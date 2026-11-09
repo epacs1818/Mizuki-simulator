@@ -31,8 +31,9 @@ from abilities import (
 from models import FieldSequence, Rotation, Trial, ActionCategory
 from stats_calc import (
     build_initial_stats, build_snapshot_stats, compute_final_stats, compute_flat_em,
-    compute_card_stats,
+    compute_card_stats, is_rv_mode,
 )
+from damage_calc import crit_mult_from_crit_value
 import copy
 import presets
 import build_io
@@ -881,16 +882,25 @@ def _run_artifact_phase1_check() -> dict:
                                    for e in hits if e["global_time"] > 4.0)
 
     # --- 5. A Day Carved From Rising Winds: holder-only ATK% 6s ---------------
+    #     The FIRST skill hit arms the window and must NOT benefit from it; a later
+    #     holder hit inside the window gets the ATK%, other members never do.
     party = {"Sucrose": dict(sucrose, artifact_set="A Day Carved From Rising Winds"),
              "Aether": dict(aether)}
-    skill_field = FieldSequence("Skill Field", "Sucrose", swap_out_time=1.0)
-    skill_field.add_ability(0.5, sucrose_skill)
+    skill_field = FieldSequence("Skill Field", "Sucrose", swap_out_time=3.0)
+    skill_field.add_ability(0.5, sucrose_skill)          # 0.5s: arms the 6s window
+    skill_field.add_ability(2.0, sucrose_burst)          # 2.5s: her next hit, inside it
+    watcher = FieldSequence("Watcher", "Aether", swap_out_time=2.0)
+    watcher.add_ability(0.5, aether_n1)                  # 3.5s: a non-holder hit
     t = RotationTimeline(party=party)
     t.add_trial(Trial(name="risingwinds", end_mode="time", end_time=12.0,
-                      rotations=[Rotation(name="r", sequences=[skill_field],
+                      rotations=[Rotation(name="r",
+                                          sequences=[skill_field, watcher],
                                           repetitions=1)]))
     t.evaluate_timeline()
     hits = [e for e in t.global_events if e.get("event_type") == "HIT"]
+    rw_trig = next((e for e in hits if abs(e["global_time"] - 0.5) < 0.06), None)
+    out["risingwinds_trigger_off"] = (rw_trig is not None
+                                      and rw_trig.get("risingwinds_state") != "ON")
     rw_on = next((e for e in hits if e.get("risingwinds_state") == "ON"), None)
     out["risingwinds_on"] = rw_on is not None
     out["risingwinds_atk"] = (round(_flag_delta(t, rw_on, "Sucrose", "risingwinds_state",
@@ -1014,7 +1024,11 @@ def _run_mizuki_c2_check() -> dict:
 
 
 def _run_cryo_resonance_check() -> dict:
-    """Cryo Resonance: +15% CR only with a Cryo-affected enemy AND 2+ Cryo chars."""
+    """Cryo Resonance: +15% CR only with a Cryo-affected enemy AND 2+ Cryo chars.
+
+    The aura must ALREADY be on the enemy when the hit lands, so the hit that
+    applies Cryo from a clean enemy is flagged OFF and the next hit is ON.
+    """
     out = {}
     two_cryo = {
         "Aether": {"constellation": 0, "level": 90, "refinement": 1,
@@ -1028,17 +1042,107 @@ def _run_cryo_resonance_check() -> dict:
                     "weapon": "Sacrificial Fragments", "artifact_set": "2p/2p EM",
                     "talents": "1/10/10"},
     }
-    for label, party in (("two", two_cryo), ("one", one_cryo)):
+    for key, party in (("two", two_cryo), ("one", one_cryo)):
         t = RotationTimeline(party=party)
-        t.add_trial(Trial(name=f"res_{label}", end_mode="time", end_time=10.0,
+        t.add_trial(Trial(name=f"res_{key}", end_mode="time", end_time=10.0,
                           rotations=[Rotation(name="r", sequences=[aether_en1],
                                               repetitions=1)]))
         t.evaluate_timeline()
         hits = [e for e in t.global_events if e.get("event_type") == "HIT"]
         ev = next((e for e in hits if e.get("cryo_resonance_state") == "ON"), None)
-        out[f"{label}_on"] = ev is not None
-        out[f"{label}_cr"] = (round(_flag_delta(t, ev, "Aether", "cryo_resonance_state", "CR"), 4)
-                              if ev is not None else None)
+        out[f"{key}_on"] = ev is not None
+        out[f"{key}_cr"] = (round(_flag_delta(t, ev, "Aether", "cryo_resonance_state", "CR"), 4)
+                            if ev is not None else None)
+
+        # The first Cryo hit of the run CREATES the aura: it must be OFF, and the hit
+        # right after it (aura already there) must be ON.
+        first_cryo = next((e for e in hits
+                           if e.get("element") == "Cryo" and e.get("character") == "Aether"), None)
+        out[f"{key}_first_cryo_state"] = (first_cryo.get("cryo_resonance_state")
+                                          if first_cryo is not None else None)
+        # The Aura column reports the state the hit RESOLVED AGAINST, so the applying
+        # hit shows the old (empty) aura and only the next row shows the new one.
+        out[f"{key}_first_aura"] = (first_cryo.get("cryo_aura") if first_cryo is not None else None)
+        out[f"{key}_first_aura_after"] = (first_cryo.get("cryo_aura_after")
+                                          if first_cryo is not None else None)
+        later = [e for e in hits if first_cryo is not None
+                 and e["global_time"] > first_cryo["global_time"]]
+        out[f"{key}_later_on"] = any(e.get("cryo_resonance_state") == "ON" for e in later)
+        out[f"{key}_later_aura"] = (later[0].get("cryo_aura") if later else None)
+    return out
+
+
+def _run_rv_mode_check() -> dict:
+    """100% RV / KQM standard: crit is ONE Crit Value, not 1 + CR*CD.
+
+    Uses the preset "Test Aether" trial (the one the UI offers) so the check runs
+    through the same path as a real simulation:
+      * the party entry carries `rv_mode`,
+      * crit_mult == cv - 1 (CV > 4) instead of 1 + CR*CD,
+      * the aura-applying hit has no Cryo Resonance (see the resonance check),
+      * a swirl reaction with all-RV contributors has no crit variance left.
+    """
+    out = {}
+    slots = [dict(data, character=name,
+                  standard_mode=("100% RV (Crit Value)" if name == "Aether" else "Manual"))
+             for name, data in presets.DEFAULT_PARTY.items()]
+    party = build_io.assemble_party(slots)
+    out["entry_flag"] = bool(party["Aether"].get("rv_mode"))
+    out["manual_entry_flag"] = bool(party["Mizuki"].get("rv_mode"))
+    # Hand-written / legacy entries only carry the UI label.
+    out["kqm_label"] = bool(is_rv_mode({"standard_mode": "KQM Standards (40 rolls)"}))
+    out["manual_label"] = bool(is_rv_mode({"standard_mode": "Manual"}))
+    out["empty_entry"] = bool(is_rv_mode({}))
+
+    # The UI rebuilds the party from the WIDGET state right before a run, so
+    # collect_slot() -> assemble_party() must preserve the standard (that path stores
+    # the label under `substat_standard`, not `standard_mode`).
+    widget_state = {
+        "char_1": "Aether", "level_1": 90, "const_1": 6, "weapon_1": "New Bough",
+        "ref_1": 1, "talents_1": "1/13/13", "std_1": "100% RV (Crit Value)",
+        "art_set_1": "2p/2p ATK",
+    }
+    widget_slot = build_io.collect_slot(widget_state, 1)
+    out["collect_standard"] = widget_slot.get("substat_standard")
+    out["collect_rv"] = bool((build_io.assemble_party([widget_slot]).get("Aether") or {}).get("rv_mode"))
+    out["summary"] = build_io.party_rv_summary(party)
+
+    t = RotationTimeline(party=party)
+    t.add_trial(presets.STANDARD_TRIALS["Test Aether"])
+    t.evaluate_timeline()
+    hits = [e for e in t.global_events
+            if e.get("event_type") == "HIT" and e.get("character") == "Aether"]
+    out["hits"] = len(hits)
+    for idx, ev in enumerate(hits[:2]):
+        cv = 2.0 * (ev.get("stat_cr") or 0.0) + (ev.get("stat_cd") or 0.0)
+        out[f"cv_{idx}"] = round(cv, 4)
+        out[f"mult_{idx}"] = round(ev.get("crit_mult_avg") or 0.0, 4)
+        out[f"expected_{idx}"] = round(crit_mult_from_crit_value(
+            ev.get("stat_cr") or 0.0, ev.get("stat_cd") or 0.0), 4)
+        out[f"manual_{idx}"] = round(1.0 + (ev.get("stat_cr") or 0.0) * (ev.get("stat_cd") or 0.0), 4)
+        out[f"flag_{idx}"] = bool(ev.get("rv_mode"))
+        out[f"reso_{idx}"] = ev.get("cryo_resonance_state")
+
+    # Reaction path: with every contributor in RV mode nothing is random any more.
+    def swirl_events(rv):
+        p = {name: dict(data, standard_mode=("100% RV (Crit Value)" if rv else "Manual"),
+                        rv_mode=rv)
+             for name, data in presets.DEFAULT_PARTY.items()}
+        tl = RotationTimeline(party=p)
+        tl.add_trial(presets.TEST_TRIAL_30S)
+        tl.evaluate_timeline()
+        return [e for e in tl.global_events if e.get("hit_name") == "Stellar_Swirl_Hit"]
+
+    rv_swirls = swirl_events(True)
+    man_swirls = swirl_events(False)
+    out["swirls"] = len(rv_swirls)
+    out["rv_deterministic"] = bool(rv_swirls) and all(
+        abs((e.get("average_damage") or 0.0) - (e.get("non_crit") or 0.0)) < 1e-6
+        and abs((e.get("crit_damage") or 0.0) - (e.get("non_crit") or 0.0)) < 1e-6
+        for e in rv_swirls)
+    out["manual_has_variance"] = any(
+        abs((e.get("average_damage") or 0.0) - (e.get("non_crit") or 0.0)) > 1e-6
+        for e in man_swirls)
     return out
 
 
@@ -1966,6 +2070,8 @@ def run(verbose: bool = True) -> None:
         (af["tenacity_alive_mid"], "Tenacity window closed before its 3s"),
         (af["tenacity_off_late"], "Tenacity window outlived its 3s"),
         (af["risingwinds_on"], "A Day Carved From Rising Winds never activated"),
+        (af["risingwinds_trigger_off"],
+         "Rising Winds buffed the hit that armed it (the proc must apply afterwards)"),
         (abs((af["risingwinds_atk"] or 0.0) - 0.25) <= 1e-6,
          f"Rising Winds ATK% is {af['risingwinds_atk']}, expected 0.25"),
         (abs(af["risingwinds_not_party"] or 0.0) <= 1e-12,
@@ -2022,11 +2128,60 @@ def run(verbose: bool = True) -> None:
          f"Cryo Resonance CR is {cr['two_cr']}, expected 0.15"),
         (not cr["one_on"],
          "Cryo Resonance activated with a single Cryo character"),
+        (cr["two_first_cryo_state"] == "OFF",
+         "Cryo Resonance buffed the hit that APPLIED the aura (it needs a pre-existing aura)"),
+        (cr["two_later_on"],
+         "Cryo Resonance stayed off after the aura was applied"),
+        (cr["two_first_aura"] == "0.00U",
+         f"the Aura column shows {cr['two_first_aura']} on the hit that applied the aura "
+         f"(it must show the PRE-hit state 0.00U)"),
+        (cr["two_first_aura_after"] not in (None, "0.00U"),
+         "the post-hit aura was not recorded"),
+        (cr["two_later_aura"] not in (None, "0.00U"),
+         f"the Aura column did not carry the applied aura to the next hit "
+         f"({cr['two_later_aura']})"),
     ]
     cr_failures = [msg for ok, msg in cr_checks if not ok]
     failures.extend(cr_failures)
     if not cr_failures and verbose:
-        print("[OK] Cryo Resonance: +15% CR only with 2+ Cryo characters")
+        print("[OK] Cryo Resonance: +15% CR only with 2+ Cryo characters and an "
+              "existing aura (not on the applying hit)")
+
+    # 3o. 100% RV / KQM standards: crit is one Crit Value (cv - 1), not 1 + CR*CD.
+    rv = _run_rv_mode_check()
+    rv_checks = [
+        (rv["entry_flag"], "assemble_party did not flag a 100% RV slot"),
+        (not rv["manual_entry_flag"], "a Manual slot was flagged as RV"),
+        (rv["kqm_label"], "is_rv_mode() ignored the KQM standard label"),
+        (not rv["manual_label"], "is_rv_mode() treated 'Manual' as a standard"),
+        (not rv["empty_entry"], "is_rv_mode() flagged an empty entry"),
+        (rv["collect_rv"],
+         "assemble_party() dropped the standard coming from the widget state "
+         f"(collect_slot -> {rv['collect_standard']})"),
+        ("Aether 100% RV" in (rv["summary"] or ""),
+         f"party_rv_summary() is {rv['summary']!r}, expected it to mention Aether"),
+        (rv["hits"] >= 2, f"the Test Aether trial produced {rv['hits']} Aether hits"),
+        (all(rv[f"flag_{i}"] for i in range(2)),
+         "RV hits were not marked rv_mode in the event table"),
+        (all(abs(rv[f"mult_{i}"] - rv[f"expected_{i}"]) <= 1e-6 for i in range(2)),
+         f"RV crit_mult is {rv['mult_0']}/{rv['mult_1']}, expected the Crit Value "
+         f"values {rv['expected_0']}/{rv['expected_1']}"),
+        (all(abs(rv[f"mult_{i}"] - rv[f"manual_{i}"]) > 1e-3 for i in range(2)),
+         "RV crit_mult still matches 1 + CR*CD"),
+        # The aura-applying hit loses Cryo Resonance, the next one keeps it.
+        (round((cr.get("two_cr") or 0.0), 4) == 0.15 and rv["reso_0"] == "OFF",
+         "RV snapshot still applies Cryo Resonance to the aura-applying hit"),
+        (rv["swirls"] > 0, "the RV run produced no stellar swirls"),
+        (rv["rv_deterministic"],
+         "RV reaction contributors still have crit variance (average != non-crit)"),
+        (rv["manual_has_variance"],
+         "Manual reaction contributors lost their crit variance"),
+    ]
+    rv_failures = [msg for ok, msg in rv_checks if not ok]
+    failures.extend(rv_failures)
+    if not rv_failures and verbose:
+        print(f"[OK] 100% RV / KQM: crit_mult {rv['mult_1']} = CV - 1 (cv {rv['cv_1']}) "
+              f"instead of 1+CR*CD {rv['manual_1']}; reactions are deterministic")
 
     # 3g. Buff catalogue integrity: buffs.py <-> stats_calc.FLAG_TO_BUFFS.
     cat = _run_buff_catalogue_check()

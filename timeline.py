@@ -20,7 +20,7 @@ from abilities import (
 from damage_calc import calculate_damage, DEFAULT_ENEMY_STATS
 from stats_calc import (
     build_initial_stats, apply_permanent_buffs, apply_weapon_party_stats,
-    build_snapshot_stats, compute_final_stats,
+    build_snapshot_stats, compute_final_stats, is_rv_mode,
 )
 from weapons import resolve_weapon_key
 from characters import party_element_counts
@@ -580,6 +580,12 @@ class RotationTimeline:
                         mizuki_dreamdrifter_active = False
                         mizuki_a4_expiration = -1.0
 
+                # A4 / C1 windows are read BEFORE this event arms them, so the hit that
+                # refreshes A4 or applies the C1 shred does not gain their stats.
+                mizuki_a4_active = mizuki_dreamdrifter_active and (t <= mizuki_a4_expiration)
+                c1_debuff_active = mizuki_c1_unlocked and (t <= mizuki_c1_debuff_expiration)
+
+                if char == "Mizuki":
                     # C1 Debuff Application on every skill hit during DDS
                     if mizuki_c1_unlocked and e_type == "HIT" and is_mizuki_skill and mizuki_dreamdrifter_active:
                         if t >= mizuki_c1_app_cooldown_expires:
@@ -589,9 +595,6 @@ class RotationTimeline:
                 # A4 Refresh Logic: Triggers on Cryo elemental hit during DDS (no gauge check required)
                 if mizuki_dreamdrifter_active and element == "Cryo" and e_type == "HIT":
                     mizuki_a4_expiration = t + 4.0
-
-                mizuki_a4_active = mizuki_dreamdrifter_active and (t <= mizuki_a4_expiration)
-                c1_debuff_active = mizuki_c1_unlocked and (t <= mizuki_c1_debuff_expiration)
 
                 # VBTD Quill Assignment & Nuke Firing on Subsequent Skill Ticks
                 vbtd_quill_active = False
@@ -630,6 +633,9 @@ class RotationTimeline:
                 # Resolve the DEBUFF state from the PRIOR expiration (before this event's
                 # own refresh), so the applying hit never benefits from the shred it spawned.
                 faruzan_debuff_active = (faruzan_debuff_expiration is not None) and (t <= faruzan_debuff_expiration)
+                # Same for her buff window: her own burst cast arms it, so it is read
+                # from the pre-event expiration (the cast's damage comes first).
+                faruzan_buff_active = (faruzan_buff_expiration is not None) and (t <= faruzan_buff_expiration)
 
                 # Helper function to build the dynamic collapse event dictionary
                 def create_collapse_event(c_time):
@@ -666,8 +672,6 @@ class RotationTimeline:
                     old_debuff = faruzan_debuff_expiration if faruzan_debuff_expiration is not None else 0.0
                     faruzan_debuff_expiration = max(old_debuff, t + 4.0)
 
-                faruzan_buff_active = (faruzan_buff_expiration is not None) and (t <= faruzan_buff_expiration)
-                
                 # 2. Insertion upon Passive Trigger during Buff Window
                 if faruzan_buff_active and e_type == "HIT" and hit_name != "Pressurized_Collapse":
                     if t >= faruzan_collapse_cd_expires:
@@ -697,8 +701,25 @@ class RotationTimeline:
             reaction = None
             is_stellar_swirl = False
 
+            # Windows granted BY this event are read from their PRE-event state, so the
+            # triggering hit never benefits from the effect it just procced (the game
+            # resolves damage before anything the hit applies). Same rule as HotF.
+            vv_active = (vv_expiration_time is not None) and (t <= vv_expiration_time)
+            instructor_active = (instructor_expiration_time is not None) and (t <= instructor_expiration_time)
+            # Aura the event is RESOLVED AGAINST: the gauge as it stands before this
+            # event applies anything (non-damage rows simply keep the current gauge).
+            aura_before_u = aura_tracker.current_gauge
+            cryo_aura_present = aura_before_u > 0.0
+
             if e_type == "HIT":
                 gauge_u = self._parse_gauge(elem_app)
+                # Cryo Resonance requires the enemy to ALREADY be Cryo-affected, so read
+                # the gauge after decay is advanced to this timestamp but BEFORE this
+                # hit's own elemental application (a hit cannot benefit from the aura
+                # it creates).
+                aura_tracker.advance_time(t)
+                aura_before_u = aura_tracker.current_gauge
+                cryo_aura_present = aura_before_u > 0.0
                 reaction, is_stellar_swirl, swirl_meta = aura_tracker.apply_element(element, gauge_u, char, t)
 
                 # VV Shred trigger
@@ -866,17 +887,22 @@ class RotationTimeline:
                         nuke_offset += 1
                 self.global_events.insert(i + nuke_offset, nuke_event)
 
-            event["cryo_aura"] = f"{aura_tracker.current_gauge:.2f}U"
+            # The Aura column reports the state this event was resolved against (before
+            # its own elemental application), so it only changes on the NEXT row after
+            # the hit that applied the element - and it always agrees with
+            # cryo_resonance_state. The post-hit gauge is kept for debugging.
+            event["cryo_aura"] = f"{aura_before_u:.2f}U"
+            event["cryo_aura_after"] = f"{aura_tracker.current_gauge:.2f}U"
             event["reaction"] = reaction if reaction else "-"
 
-            vv_active = (vv_expiration_time is not None) and (t <= vv_expiration_time)
             event["vv_state"] = "ON" if vv_active else "OFF"
 
-            instructor_active = (instructor_expiration_time is not None) and (t <= instructor_expiration_time)
             event["instructor_state"] = "ON" if instructor_active else "OFF"
 
             # Cryo Resonance needs BOTH a Cryo-affected enemy AND 2+ Cryo characters.
-            cryo_resonance_active = cryo_resonance_enabled and aura_tracker.current_gauge > 0.0
+            # The aura is the PRE-application one (see 4.): the hit that applies Cryo
+            # from a clean enemy does not get the 15% CR.
+            cryo_resonance_active = cryo_resonance_enabled and cryo_aura_present
             event["cryo_resonance_state"] = "ON" if cryo_resonance_active else "OFF"
 
             # 6. Aether C2, C6 & Frostglow audit columns.
@@ -920,6 +946,14 @@ class RotationTimeline:
 
             # 6b. Sucrose buff windows: A4 (skill/burst hit), C6 (burst), A1 (swirl).
             if "Sucrose" in self.party:
+                # Read the windows BEFORE arming them: the hit/cast that triggers one
+                # of her passives does not gain that passive (damage resolves first).
+                # _WINDOW_EPS keeps the hit that lands exactly on the closing edge
+                # inside the window (float addition is not associative).
+                a1_on = sucrose_a1_expiration is not None and t <= sucrose_a1_expiration + _WINDOW_EPS
+                a4_on = sucrose_a4_expiration is not None and t <= sucrose_a4_expiration + _WINDOW_EPS
+                c6_on = sucrose_c6_expiration is not None and t <= sucrose_c6_expiration + _WINDOW_EPS
+
                 if e_type == "HIT" and char == "Sucrose" and ability_name in ("Sucrose Skill", "Sucrose Burst"):
                     sucrose_a4_expiration = t + 8.0
 
@@ -937,11 +971,6 @@ class RotationTimeline:
                 if char == "Sucrose" and is_stellar_swirl:
                     sucrose_a1_expiration = t + 8.0
 
-                # _WINDOW_EPS keeps the hit that lands exactly on the closing edge
-                # inside the window (float addition is not associative).
-                a1_on = sucrose_a1_expiration is not None and t <= sucrose_a1_expiration + _WINDOW_EPS
-                a4_on = sucrose_a4_expiration is not None and t <= sucrose_a4_expiration + _WINDOW_EPS
-                c6_on = sucrose_c6_expiration is not None and t <= sucrose_c6_expiration + _WINDOW_EPS
                 event["sucrose_a1_state"] = "ON" if a1_on else "OFF"
                 event["sucrose_a4_state"] = "ON" if a4_on else "OFF"
                 event["sucrose_c6_state"] = "ON" if c6_on else "OFF"
@@ -983,11 +1012,13 @@ class RotationTimeline:
             #      not refresh it. "Average" applies one third of all three outcomes
             #      at once; "All EM" applies the full EM roll only.
             if widsith_holder is not None:
+                # Taking the field arms it, so the SWAP_IN row itself shows the
+                # pre-arm state (the buff applies to what comes after).
+                widsith_on = (widsith_expiration is not None
+                              and t <= widsith_expiration + _WINDOW_EPS)
                 if e_type == "SWAP_IN" and char == widsith_holder and t >= widsith_proc_cd:
                     widsith_expiration = t + 10.0
                     widsith_proc_cd = t + 30.0
-                widsith_on = (widsith_expiration is not None
-                              and t <= widsith_expiration + _WINDOW_EPS)
                 event["widsith_state"] = "ON" if widsith_on else "OFF"
             else:
                 event["widsith_state"] = "OFF"
@@ -1016,6 +1047,13 @@ class RotationTimeline:
             if sunny_holder is not None:
                 attack_type = event.get("attack_type")
                 is_standard = (cat == ActionCategory.STANDARD_DMG)
+                # Read the three windows BEFORE arming them (same rule as everything else).
+                sunny_swirl_on = (sunny_swirl_expiration is not None
+                                  and t <= sunny_swirl_expiration + _WINDOW_EPS)
+                sunny_skill_on = (sunny_skill_expiration is not None
+                                  and t <= sunny_skill_expiration + _WINDOW_EPS)
+                sunny_burst_on = (sunny_burst_expiration is not None
+                                  and t <= sunny_burst_expiration + _WINDOW_EPS)
                 if e_type == "HIT" and char == sunny_holder and is_stellar_swirl:
                     sunny_swirl_expiration = t + 6.0
                 if (e_type == "HIT" and char == sunny_holder and is_standard
@@ -1024,15 +1062,9 @@ class RotationTimeline:
                 if (e_type == "HIT" and char == sunny_holder and is_standard
                         and attack_type == AttackType.BURST):
                     sunny_burst_expiration = t + 30.0
-                event["sunny_swirl_state"] = (
-                    "ON" if (sunny_swirl_expiration is not None
-                             and t <= sunny_swirl_expiration + _WINDOW_EPS) else "OFF")
-                event["sunny_skill_state"] = (
-                    "ON" if (sunny_skill_expiration is not None
-                             and t <= sunny_skill_expiration + _WINDOW_EPS) else "OFF")
-                event["sunny_burst_state"] = (
-                    "ON" if (sunny_burst_expiration is not None
-                             and t <= sunny_burst_expiration + _WINDOW_EPS) else "OFF")
+                event["sunny_swirl_state"] = "ON" if sunny_swirl_on else "OFF"
+                event["sunny_skill_state"] = "ON" if sunny_skill_on else "OFF"
+                event["sunny_burst_state"] = "ON" if sunny_burst_on else "OFF"
             else:
                 event["sunny_swirl_state"] = "OFF"
                 event["sunny_skill_state"] = "OFF"
@@ -1192,12 +1224,14 @@ class RotationTimeline:
             #      swirl the holder triggers, or stellar hit they deal, extends it by
             #      3s (0.1s CD, at most 8 extensions => 30s cap).
             if silverdawn_holder is not None:
+                # Window is read from the pre-event state: the skill/burst hit that
+                # opens it does not benefit from it.
+                silverdawn_on = (silverdawn_expiration is not None
+                                 and t <= silverdawn_expiration + _WINDOW_EPS)
                 if (e_type == "HIT" and char == silverdawn_holder
                         and event.get("attack_type") in (AttackType.SKILL, AttackType.BURST)):
                     silverdawn_expiration = t + 6.0
                     silverdawn_extensions = 0
-                silverdawn_on = (silverdawn_expiration is not None
-                                 and t <= silverdawn_expiration + _WINDOW_EPS)
                 if (silverdawn_on and char == silverdawn_holder
                         and (cat == ActionCategory.STELLAR_DMG or is_stellar_swirl)
                         and silverdawn_extensions < 8
@@ -1222,6 +1256,13 @@ class RotationTimeline:
                 is_cast = (e_type == "HIT" and char == "Odette"
                            and ((ability_name == "Skill Cast" and hit_name == "Cast")
                                 or (ability_name == "Odette Burst" and hit_name == "Burst_tick1")))
+
+                # Burst / C2 windows are read BEFORE this event arms them, so the cast
+                # itself does not gain the buffs it starts.
+                ob_on = odette_burst_expiration is not None and t <= odette_burst_expiration
+                oc2_on = (odette_cons7 >= 2
+                          and odette_c2_shred_expiration is not None
+                          and t <= odette_c2_shred_expiration)
 
                 if is_cast:
                     # Skill cast OR burst cast (NOT recast) opens/refreshes the window.
@@ -1263,10 +1304,7 @@ class RotationTimeline:
                     event["marvelous_stacks"] = party_stacks
 
                 # Audit columns for Odette's burst buff and C2 shred windows.
-                ob_on = odette_burst_expiration is not None and t <= odette_burst_expiration
                 event["odette_burst_state"] = "ON" if ob_on else "OFF"
-                oc2_on = (odette_cons7 >= 2
-                          and odette_c2_shred_expiration is not None and t <= odette_c2_shred_expiration)
                 event["odette_c2_state"] = "ON" if oc2_on else "OFF"
 
             else:
@@ -1283,6 +1321,13 @@ class RotationTimeline:
                                      and ability_name == "To the New World"
                                      and hit_name == "Burst_Cast")
 
+                # Windows are read BEFORE this event arms them: her own cast does not
+                # gain the buff it starts (the game resolves damage first).
+                ana_burst_open = (anastasya_burst_expiration is not None
+                                  and t <= anastasya_burst_expiration + _WINDOW_EPS)
+                ana_a1_open = (anastasya_a1_expiration is not None
+                               and t <= anastasya_a1_expiration + _WINDOW_EPS)
+
                 # A1: the OTHER party members gain 16% crit DMG for 19s (refreshed
                 # by every new skill cast).
                 if is_ana_skill_cast:
@@ -1294,9 +1339,6 @@ class RotationTimeline:
                     anastasya_burst_expiration = t + 20.0
                     anastasya_triumph_armed = True
                     anastasya_triumph_ready_at = t + ANASTASYA_TRIUMPH_DELAY
-
-                ana_burst_open = (anastasya_burst_expiration is not None
-                                  and t <= anastasya_burst_expiration + _WINDOW_EPS)
 
                 # Conditional hit: while her burst buff is up, every stellar beat of
                 # her skill additionally fires an extra Stellar Swirl DMG hit.
@@ -1360,26 +1402,29 @@ class RotationTimeline:
             event["hotf_state"] = "ON" if hotf_active else "OFF"
 
             # 9. Artifact set buffs (phase 1)
+            #    Same rule as HotF and Cryo Resonance: every window is READ from the
+            #    pre-event state and then armed, so the hit that triggers the set never
+            #    benefits from the effect it just procced.
             #    Gilded Dreams: a swirl by the holder (anywhere) grants a party-
             #    composition buff to THEM for 8s, 8s CD measured from the trigger.
             if gilded_holder is not None:
+                gilded_on = (gilded_expiration is not None
+                             and t <= gilded_expiration + _WINDOW_EPS)
                 if is_stellar_swirl and char == gilded_holder and t >= gilded_cd_ready:
                     gilded_expiration = t + 8.0
                     gilded_cd_ready = t + 8.0
-                gilded_on = (gilded_expiration is not None
-                             and t <= gilded_expiration + _WINDOW_EPS)
                 event["gilded_state"] = "ON" if gilded_on else "OFF"
             else:
                 event["gilded_state"] = "OFF"
 
             #    Noblesse Oblige: the CAST of a burst gives the party ATK% for 12s.
             if noblesse_holder is not None:
+                noblesse_on = (noblesse_expiration is not None
+                               and t <= noblesse_expiration + _WINDOW_EPS)
                 if (e_type == "HIT" and char == noblesse_holder
                         and event.get("attack_type") == AttackType.BURST
                         and event.get("hit_offset") == 0.0):
                     noblesse_expiration = t + 12.0
-                noblesse_on = (noblesse_expiration is not None
-                               and t <= noblesse_expiration + _WINDOW_EPS)
                 event["noblesse_state"] = "ON" if noblesse_on else "OFF"
             else:
                 event["noblesse_state"] = "OFF"
@@ -1387,14 +1432,14 @@ class RotationTimeline:
             #    Tenacity: a standard SKILL hit gives the party ATK% for 3s
             #    (refreshable, 0.5s trigger CD).
             if tenacity_holder is not None:
+                tenacity_on = (tenacity_expiration is not None
+                               and t <= tenacity_expiration + _WINDOW_EPS)
                 if (e_type == "HIT" and char == tenacity_holder
                         and cat == ActionCategory.STANDARD_DMG
                         and event.get("attack_type") == AttackType.SKILL
                         and t >= tenacity_cd_ready):
                     tenacity_expiration = t + 3.0
                     tenacity_cd_ready = t + 0.5
-                tenacity_on = (tenacity_expiration is not None
-                               and t <= tenacity_expiration + _WINDOW_EPS)
                 event["tenacity_state"] = "ON" if tenacity_on else "OFF"
             else:
                 event["tenacity_state"] = "OFF"
@@ -1402,11 +1447,11 @@ class RotationTimeline:
             #    A Day Carved From Rising Winds: ANY standard hit by the holder
             #    gives THEM ATK% for 6s (refreshable).
             if risingwinds_holder is not None:
+                risingwinds_on = (risingwinds_expiration is not None
+                                  and t <= risingwinds_expiration + _WINDOW_EPS)
                 if (e_type == "HIT" and char == risingwinds_holder
                         and cat == ActionCategory.STANDARD_DMG):
                     risingwinds_expiration = t + 6.0
-                risingwinds_on = (risingwinds_expiration is not None
-                                  and t <= risingwinds_expiration + _WINDOW_EPS)
                 event["risingwinds_state"] = "ON" if risingwinds_on else "OFF"
             else:
                 event["risingwinds_state"] = "OFF"
@@ -1414,11 +1459,11 @@ class RotationTimeline:
             #    Scarlet Proof: an ON-FIELD swirl by the holder gives THEM crit rate
             #    + stellar bonus for 10s (refreshable).
             if scarlet_holder is not None:
+                scarlet_on = (scarlet_expiration is not None
+                              and t <= scarlet_expiration + _WINDOW_EPS)
                 if (is_stellar_swirl and char == scarlet_holder
                         and active_character == scarlet_holder):
                     scarlet_expiration = t + 10.0
-                scarlet_on = (scarlet_expiration is not None
-                              and t <= scarlet_expiration + _WINDOW_EPS)
                 event["scarlet_state"] = "ON" if scarlet_on else "OFF"
             else:
                 event["scarlet_state"] = "OFF"
@@ -1444,6 +1489,9 @@ class RotationTimeline:
                            and event.get("hit_offset") == 0.0)
                 is_normal_standard = (cat == ActionCategory.STANDARD_DMG
                                       and attack_type == AttackType.NORMAL)
+                # The crit / stellar-crit flags are read from the PRE-gain stack count,
+                # so the hit that grants a stack does not benefit from it.
+                stacks_before = tsaritsa_stacks
                 if e_type == "HIT" and char == tsaritsa_holder and (is_cast or is_normal_standard):
                     tsaritsa_stacks = min(2, tsaritsa_stacks + 1)
                     tsaritsa_active_accum = 0.0
@@ -1451,24 +1499,21 @@ class RotationTimeline:
                 event["tsaritsa_stacks"] = tsaritsa_stacks
                 cryo_hit = (element == "Cryo" and char == tsaritsa_holder)
                 event["tsaritsa_state"] = (
-                    "ON" if (tsaritsa_stacks > 0 and cryo_hit) else "OFF")
-                event["tsaritsa_stellar_state"] = "ON" if tsaritsa_stacks > 0 else "OFF"
+                    "ON" if (stacks_before > 0 and cryo_hit) else "OFF")
+                event["tsaritsa_stellar_state"] = "ON" if stacks_before > 0 else "OFF"
             else:
                 event["tsaritsa_stacks"] = 0
                 event["tsaritsa_state"] = "OFF"
                 event["tsaritsa_stellar_state"] = "OFF"
 
             # 11. Anastasya audit flags (these drive her FLAG_TO_BUFFS entries).
+            #     burst / A1 reuse the PRE-arm windows computed in 7b.
             if "Anastasya" in self.party:
-                burst_on = (anastasya_burst_expiration is not None
-                            and t <= anastasya_burst_expiration + _WINDOW_EPS)
-                a1_on = (anastasya_a1_expiration is not None
-                         and t <= anastasya_a1_expiration + _WINDOW_EPS)
                 triumph_ready = (anastasya_triumph_armed
                                  and anastasya_triumph_ready_at is not None
                                  and t >= anastasya_triumph_ready_at - _WINDOW_EPS)
-                event["anastasya_burst_state"] = "ON" if burst_on else "OFF"
-                event["anastasya_a1_state"] = "ON" if a1_on else "OFF"
+                event["anastasya_burst_state"] = "ON" if ana_burst_open else "OFF"
+                event["anastasya_a1_state"] = "ON" if ana_a1_open else "OFF"
                 event["anastasya_triumph_ready"] = "ON" if triumph_ready else "OFF"
                 # A4 is a permanent passive while she is in the party.
                 event["anastasya_a4_state"] = "ON"
@@ -1511,8 +1556,9 @@ class RotationTimeline:
                     char_initial_stats_map=self.char_initial_stats_map,
                 )
                 final_stats = compute_final_stats(snapshot)
-                # 100% RV mode flag for this hit's owner (carries only).
-                final_stats["rv_mode"] = bool(char_data.get("rv_mode", False))
+                # 100% RV / KQM flag for this hit's owner (carries only). The party
+                # entry stores the UI label, so resolve it through the shared helper.
+                final_stats["rv_mode"] = is_rv_mode(char_data)
 
                 # Prepare party_stats_dict for reaction contributors
                 party_stats_dict = {}
@@ -1525,7 +1571,7 @@ class RotationTimeline:
                         "crit_rate": p_init.get("crit_rate", 0.05),
                         "crit_dmg": p_init.get("crit_dmg", 0.50),
                         "EM": p_init.get("em", p_init.get("EM", 0.0)),
-                        "rv_mode": bool(p_d.get("rv_mode", False)),
+                        "rv_mode": is_rv_mode(p_d),
                     }
                     if event.get("cryo_resonance_state") == "ON":
                         party_stats_dict[p_name]["CR"] += 0.15
@@ -1537,7 +1583,7 @@ class RotationTimeline:
                     party_stats_dict[char]["crit_rate"] = final_stats.get("CR", party_stats_dict[char]["crit_rate"])
                     party_stats_dict[char]["crit_dmg"] = final_stats.get("CD", party_stats_dict[char]["crit_dmg"])
                     party_stats_dict[char]["EM"] = final_stats.get("EM", final_stats.get("em", party_stats_dict[char]["EM"]))
-                    party_stats_dict[char]["rv_mode"] = bool(char_data.get("rv_mode", False))
+                    party_stats_dict[char]["rv_mode"] = is_rv_mode(char_data)
 
                 # Reaction contributors resolve their buffed stats AT THIS EVENT (swirls
                 # and vortex explosions), so each contributor's crit / EM is taken from
@@ -1610,6 +1656,9 @@ class RotationTimeline:
                 event["stat_em"] = final_stats.get("EM", 0.0)
                 event["stat_cr"] = final_stats.get("CR", 0.05)
                 event["stat_cd"] = final_stats.get("CD", 0.50)
+                # 100% RV / KQM: crit is a single Crit Value, so the table shows CV
+                # instead of CR% / CD% (which are only storage in this model).
+                event["rv_mode"] = bool(final_stats.get("rv_mode"))
             else:
                 event["non_crit"] = None
                 event["crit_damage"] = None
@@ -1628,6 +1677,7 @@ class RotationTimeline:
                 event["stat_em"] = None
                 event["stat_cr"] = None
                 event["stat_cd"] = None
+                event["rv_mode"] = False
 
     def get_analytics_summary(self, trial_end_time: float) -> dict:
         """

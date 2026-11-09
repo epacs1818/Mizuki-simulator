@@ -99,6 +99,16 @@ STANDARD_ROTATIONS = {
         ],
         repetitions=6,
         description="Anastasya EQ -> Faruzan Q -> Mizuki (Sac Frag) -> Odette QE -> Mizuki (pull out)."
+    ),
+
+    #Aether test rotation: just a simple skill press to test Aether's crit multiplier
+    "test_aether_loop": Rotation(
+        name="Test Aether Loop",
+        sequences=[
+            STANDARD_FIELD_SEQUENCES["Aether EN1"],
+        ],
+        repetitions=1,
+        description="A simple skill press to test Aether's crit multiplier."
     )
 }
 
@@ -124,6 +134,15 @@ STANDARD_TRIALS = {
         description="Mizuki / Anastasya / Odette / Faruzan: the same 6 loops with Anastasya's EQ.",
         required_party=ANASTASYA_SACFRAG_TEAM,
     ),
+    "Test Aether": Trial(
+        name="Test Aether",
+        rotations=[STANDARD_ROTATIONS["test_aether_loop"]],
+        end_mode="last_swap",
+        description="A simple skill press to test Aether's crit multiplier",
+        # Only Aether appears in the rotation, so the trial is gated on him alone
+        # (any team that fields him can run it).
+        required_party=["Aether"],
+    )
 }
 
 # Calibration / test harness only: the fixed 30s window is NOT offered in the UI

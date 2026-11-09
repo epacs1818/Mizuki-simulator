@@ -250,6 +250,28 @@ def apply_weapon_party_stats(stats_map, party):
 # compute_card_stats  (unchanged – simple resolution for UI display)
 # ---------------------------------------------------------------------------
 
+def is_rv_mode(char_data) -> bool:
+    """True when a party entry uses a crit-value standard instead of 1 + CR*CD.
+
+    The UI writes `standard_mode` (the radio label: "Manual" / "100% RV (Crit
+    Value)" / "KQM Standards (40 rolls)") into the party entry, while the damage
+    engine only needs the boolean. This is the single place that maps one to the
+    other, so a build made in the UI, imported from a file or written by hand in
+    presets.py all reach the same code path:
+
+      * an explicit `rv_mode` key wins (new builds / exported documents),
+      * otherwise any standard other than "Manual" means CV-based crit.
+
+    Both standards share the model: crit substats are carried as one Crit Value
+    (CV = 2*CR + CD), so CR/CD on their own are only storage.
+    """
+    if not char_data:
+        return False
+    if "rv_mode" in char_data:
+        return bool(char_data["rv_mode"])
+    return str(char_data.get("standard_mode") or "Manual").strip() != "Manual"
+
+
 def compute_card_stats(initial_stats, standard_mode=False):
     """
     Resolves initial_stats into formatted final values for the user-facing card.

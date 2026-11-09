@@ -229,7 +229,12 @@ def assemble_party(slots) -> dict:
         if not char_name or char_name == "Select Character":
             continue
 
-        standard_mode = slot.get("standard_mode") or "Manual"
+        # `collect_slot()` (widget state) calls it `substat_standard`; the UI's own slot
+        # specs and the document format use `standard_mode`. Accept both, so a party can
+        # always be rebuilt straight from the current widgets.
+        standard_mode = (slot.get("standard_mode")
+                         or slot.get("substat_standard")
+                         or "Manual")
         if char_name not in CARRIES:
             standard_mode = "Manual"
 
@@ -260,6 +265,10 @@ def assemble_party(slots) -> dict:
             "artifact_set": artifact_set if artifact_set != "Select Set" else "None",
             "element": get_character_element(char_name),
             "standard_mode": standard_mode,
+            # Boolean mirror of the standard, so the entry is self-describing for the
+            # engine, exported documents and hand-written presets. `is_rv_mode()`
+            # still falls back to `standard_mode` for older/foreign entries.
+            "rv_mode": standard_mode != "Manual",
             "initial_stats": initial_stats,
             "card_stats": {},
         }
@@ -275,6 +284,33 @@ def assemble_party(slots) -> dict:
             standard_mode=(data.get("standard_mode", "Manual") != "Manual"),
         )
     return my_party
+
+
+def crit_model_label(char_data) -> str:
+    """Short label of the crit model a party entry uses (Manual / 100% RV / KQM 40)."""
+    char_data = char_data or {}
+    standard = str(char_data.get("standard_mode") or "Manual")
+    if standard.startswith("100% RV"):
+        return "100% RV"
+    if standard.startswith("KQM"):
+        return "KQM 40"
+    if char_data.get("rv_mode"):
+        return "CV standard"
+    return "Manual"
+
+
+def party_rv_summary(party) -> str:
+    """One-line summary of the crit-value builds in a party, e.g. "Aether 100% RV".
+
+    Empty when nobody uses a standard. The UI prints it in the run header so a manual
+    run can never be mistaken for an RV/KQM one.
+    """
+    return " · ".join(
+        f"{name} {crit_model_label(data)}"
+        for name, data in (party or {}).items()
+        if crit_model_label(data) != "Manual"
+    )
+
 
 
 

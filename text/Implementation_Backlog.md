@@ -114,7 +114,7 @@ present in the party.
 | Rising Winds ATK% | Artifact | A Day Carved From Rising Winds | equipped | ✔ |
 | Scarlet Proof | Artifact | Scarlet Proof | equipped | ✔ |
 | Tsaritsa Stacks / Cryo CR / Stellar CR | Artifact | New Tsaritsa set | equipped | ✔ |
-| Cryo Resonance CR | Team | Cryo Resonance | 2+ Cryo + Cryo aura | ✔ |
+| Cryo Resonance CR | Team | Cryo Resonance | 2+ Cryo + pre-existing Cryo aura | ✔ |
 
 ## Verified buff semantics (asserted by smoke_test.py)
 
@@ -396,4 +396,156 @@ ones the importer writes. A headless AppTest run confirms the real load path
 Engine untouched: `DEFAULT_PARTY` baseline stays
 1064651.5 / 1211525.5 / 1273564.4 / 1476591.7 and the Anastasya trial stays at
 4,904,232.3.
+
+## RV / KQM crit model + trigger-ordering round
+
+Three bugs, all found with the new `Test Aether` preset (Aether on the **100% RV**
+standard: CR 30.0%, CD 392.5%, CV 4.525, expected crit_mult 3.525).
+
+### 1. The RV flag never reached the engine
+
+`build_io.assemble_party` stored the UI label in `standard_mode`, but
+`timeline._calculate_all_hits_damage` (and therefore every `damage_calc` branch)
+looked for a key called `rv_mode`, which **nothing ever wrote**. Every hit fell
+back to `1 + CR*CD`, so an RV build showed the manual number: 2.1776 instead of
+3.5252 (CV 4.5252 → `cv - 1`), while the card correctly showed CV 452.5
+(`compute_card_stats` reads `standard_mode`).
+
+Fix: `stats_calc.is_rv_mode(char_data)` is now the single place that maps the two,
+`assemble_party` writes `rv_mode` next to `standard_mode`, and the helpers let old
+or hand-written entries (only the label present) resolve the same way.
+
+### 2. Reactions ignored the RV model
+
+`calculate_stellar_reaction_damage` built its 2^n crit scenarios with `1 + CR*CD`
+and only used the CV multiplier for the quill, so a swirl contributed by an RV
+character would still be stochastic. Each RV contributor now collapses to a single
+deterministic outcome (`prob = 1`, value = `non_crit * cv_mult`), and the
+`non_crit` / `crit_damage` / `average_damage` aggregates agree with the standard
+and stellar paths. `smoke_test._run_rv_mode_check()` asserts that an all-RV run
+has `average == non_crit == crit_damage` on every swirl, and that a Manual run
+still has variance.
+
+### 3. Every timed buff buffed the hit that procced it
+
+Cryo Resonance (reported): the aura gauge was read **after** `apply_element`, so
+the hit that applied Cryo from a clean enemy got the 15% CR. The same
+"arm-then-read" mistake existed in every other window that is armed by the event
+that reads it (`HotF` was the only one already following the correct rule):
+Cryo Resonance, VV, Instructor, Gilded Dreams, Noblesse, Tenacity, A Day Carved
+From Rising Winds, Scarlet Proof, New Tsaritsa stacks, Faruzan's buff,
+Mizuki's A4 + C1 debuff, Sucrose A1/A4/C6, The Widsith, Sunny Morning Sleep-In,
+Silverdawn, Odette's burst + C2 and Anastasya's burst + A1.
+
+All of them now read their state from the PRE-event value and arm afterwards
+(damage resolves first, effects land second). Cryo Resonance additionally reads
+the aura after decay is advanced to the hit's timestamp but before the elemental
+application; the `Aura (Cryo)` column still shows the gauge the enemy is left
+with.
+
+Numeric impact (DEFAULT_PARTY): the 30s trial **1,273,564.4 → 1,266,300.5**
+(-0.570%), the 6-loop preset **5,411,371.4 → 5,386,893.6** (-0.452%), the
+Anastasya preset **4,904,232.3 → 4,948,837.2** (+0.910% — her per-burst collapse
+insertions shift by one hit). Per-hit differences are exactly the triggering hits
+(Aether's aura-applying skill -218, Faruzan's burst cast -1,657, Odette's cast
+-651, ...). Mizuki's C1 mini-nuke moves with the swirl that empowers it, because
+`c1_debuff_state` is also read pre-application now.
+
+### UI
+
+The timeline table gained a **CV** column; RV rows print `-` for `CR%` / `CD%`
+(they are storage, not stats, in that model) and the CV the damage formula
+actually uses. `timeline` stores `rv_mode` on every damage event for this.
+
+### `Test Aether` preset
+
+`required_party` was `MIZUKI_SACFRAG_TEAM` although the rotation only plays
+Aether, which tripped the preset-gating check; it is now `["Aether"]`.
+
+### Decisions recorded
+
+* RV mode is flagged **and** derived: `rv_mode` (bool) is written by
+  `assemble_party` so a party dict is self-describing, while `is_rv_mode()` falls
+  back to `standard_mode != "Manual"` for entries that only carry the label.
+  The rejected alternatives were (a) deriving only, which leaves the engine
+  re-parsing a UI string everywhere, and (b) writing `rv_mode` only, which
+  silently turns the standard off for every older file/preset.
+* The trigger-ordering change is applied to **all** windows on the assumption
+  that they behave the same way in game (the user's call). Per-effect in-game
+  verification is still pending — see below.
+
+### Why it STILL looked broken after the engine fix (widget state ≠ confirmed party)
+
+The engine fix was correct but unreachable from the UI. The trial runner used
+`st.session_state["my_party"]` verbatim:
+
+```python
+party = st.session_state.get("my_party", {})          # whatever was CONFIRMED
+timeline = RotationTimeline(party=party, ...)
+```
+
+while the "settings changed" guard only hashed `character / level / constellation /
+weapon / refinement / talents / artifact SET`. The **substat standard and every gear
+input (mains, rarity, substats) were missing from that signature**, so:
+
+1. confirm the party (Aether = Manual),
+2. switch the radio to *100% RV* → nothing invalidates, the cards keep showing CR/CD,
+3. run → still the old manual party → `1 + CR*CD` = 2.178,
+4. export → `collect_build_document()` snapshots the **widgets**, so the file honestly
+   says `"substat_standard": "100% RV (Crit Value)"` even though the run never used it.
+
+That is why the exported test looked right while the numbers were not.
+
+Fixes (all in `streamlit_app.py` unless noted):
+
+* **Run-time rebuild**: `Run Trial Simulation` now rebuilds the party from the current
+  widgets before simulating —
+  `assemble_party([collect_slot(st.session_state, n) for n in 1..4])` — and stores it
+  back. A stale party is no longer possible, even in a long-lived session.
+* `build_io.assemble_party` accepts `substat_standard` (the key `collect_slot` emits)
+  as an alias of `standard_mode`; before this the widget path silently meant "Manual".
+* **Complete change signature**: the standard and a normalized gear tuple
+  (`main_stat`, `rarity`, `substats` per piece) are part of it, so changing them now
+  invalidates the confirmation, shows *"Gear, substats or the substat standard
+  changed…"* and hides the run button until the party is rebuilt.
+* **Visible model**: character cards print `Crit model: 100% RV` (or `Manual (CR / CD)`),
+  and each run stores `entry["standards"]` (`party_rv_summary()`), rendered as
+  **Crit Model:** in the results header, so an old manual run can never be mistaken for
+  an RV/KQM one.
+
+Verified headlessly (`streamlit.testing.v1.AppTest`) on the real app: confirming with
+`std_2 = 100% RV` gives `my_party["Aether"]["rv_mode"] is True`; flipping the radio to
+Manual without confirming sets `party_created = False`, shows the warning and removes
+the run button; re-confirming gives `standard_mode = "Manual"`, `rv_mode = False`.
+
+### Aura column = pre-hit state
+
+The Aura column used to show the gauge *after* the hit applied its element, which made
+it contradict `cryo_resonance_state` on exactly the rows where the aura was created.
+It now reports the state the hit was resolved against (`timeline` stores it as
+`cryo_aura`, the post-hit gauge is kept as `cryo_aura_after`), and the column order is
+`… Action | Aura | Elemental App | Reaction …` (console table and UI), so a row reads
+"what the enemy had → what this hit added". The applying hit therefore shows the old
+value and the *next* row shows the new one:
+
+```
+0.601 Aether Skill_Initial  Aura 0.00U  App 1U  CV 422.5  crit_mult 3.225  reso OFF
+1.200 Aether N1_Hit         Aura 0.75U  App  -  CV 452.5  crit_mult 3.525  reso ON
+```
+
+`smoke_test.py` asserts the pair (`first_aura == "0.00U"`, `first_aura_after != 0`,
+`later_aura != 0`, resonance OFF then ON).
+
+### Open items
+
+1. Verify in game each of the windows that now read pre-event (VV, Instructor,
+   Gilded, Noblesse, Tenacity, Rising Winds, Scarlet, Tsaritsa stack timing,
+   Sucrose A1/A4/C6, Widsith, Sunny, Silverdawn, Odette burst/C2, Anastasya
+   burst/A1, Faruzan buff, Mizuki A4/C1). The rule is uniform, the per-effect
+   confirmation is not.
+2. Stack counters (Silver Light, New Bough, Elegy / Breezeborne / Starsealed
+   sigils) intentionally still count the triggering hit — confirm that matches
+   the in-game "gain on hit" wording.
+3. Mizuki's C1 mini-nuke now fires only on swirls that happen while the debuff is
+   already up (it used to fire on the swirl that applied it). Needs a game check.
 

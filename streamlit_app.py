@@ -34,11 +34,14 @@ from build_io import (
     assemble_party,
     build_party_from_document,
     collect_build_document,
+    collect_slot,
+    crit_model_label,
     document_lacks_gear,
     document_to_json,
     legacy_build_document,
     load_trial_into_editor,
     parse_document,
+    party_rv_summary,
     suggested_file_name,
 )
 
@@ -409,15 +412,32 @@ def build_timeline_dataframe(timeline_events, party=None):
         row["Active"] = event.get("active_character", "None")
         row["Owner"] = event.get("character", "")
         row["Action"] = event.get("action", "")
-        row["Elemental App"] = event.get("elem_app", "-")
+        # Aura comes BEFORE the elemental application it reacts with: it is the state
+        # the hit was resolved against, so it only changes on the following row.
         row["Aura"] = event.get("cryo_aura", "-")
+        row["Elemental App"] = event.get("elem_app", "-")
         row["Reaction"] = event.get("reaction", "-")
         row["HP"] = f"{event['stat_hp']:.0f}" if event.get("stat_hp") is not None else "-"
         row["ATK"] = f"{event['stat_atk']:.0f}" if event.get("stat_atk") is not None else "-"
         row["DEF"] = f"{event['stat_def']:.0f}" if event.get("stat_def") is not None else "-"
         row["EM"] = f"{event['stat_em']:.0f}" if event.get("stat_em") is not None else "-"
-        row["CR%"] = f"{event['stat_cr']*100:.1f}" if event.get("stat_cr") is not None else "-"
-        row["CD%"] = f"{event['stat_cd']*100:.1f}" if event.get("stat_cd") is not None else "-"
+        # Crit display depends on the build standard: a 100% RV / KQM build carries
+        # crit as ONE Crit Value (CV = 2*CR + CD) and lets the engine re-split it, so
+        # CR% / CD% are internal storage there. Those rows show the CV instead, which
+        # is the number the damage formula actually uses.
+        stat_cr = event.get("stat_cr")
+        stat_cr_val = stat_cr if stat_cr is not None else 0.0
+        stat_cd = event.get("stat_cd")
+        stat_cd_val = stat_cd if stat_cd is not None else 0.0
+        is_rv_hit = bool(event.get("rv_mode"))
+        if stat_cr is None or stat_cd is None:
+            row["CR%"] = "-"
+            row["CD%"] = "-"
+            row["CV"] = "-"
+        else:
+            row["CR%"] = "-" if is_rv_hit else f"{stat_cr_val * 100:.1f}"
+            row["CD%"] = "-" if is_rv_hit else f"{stat_cd_val * 100:.1f}"
+            row["CV"] = f"{(2.0 * stat_cr_val + stat_cd_val) * 100:.1f}"
         row["Base DMG"] = f"{event['base_damage']:.1f}" if event.get("base_damage") is not None else "-"
         row["Quills"] = f"{event['quills_total']:.1f}" if event.get("quills_total") is not None else "-"
         row["Bonus Mult"] = f"{event['bonus_mult']:.3f}" if event.get("bonus_mult") is not None else "-"
@@ -441,7 +461,7 @@ _AUDIT_BLOCKS = {
     "time": {"Time (s)"},
     "desc": {"Active", "Owner", "Action"},
     "reaction": {"Elemental App", "Aura", "Reaction"},
-    "stats": {"HP", "ATK", "DEF", "EM", "CR%", "CD%"},
+    "stats": {"HP", "ATK", "DEF", "EM", "CR%", "CD%", "CV"},
     "mult": {"Base DMG", "Quills", "Bonus Mult", "Elev Mult", "Crit Mult", "DEF Mult", "Res Mult"},
     "output": {"Average DMG", "Non-Crit DMG", "Crit DMG", "Effective Avg DMG"},
 }
@@ -529,6 +549,11 @@ def render_character_cards(my_party: dict) -> None:
                     st.caption(f"Lv {data.get('level', 90)} · {data.get('element') or '?'}")
                     st.caption(f"{data['weapon']} R{data['refinement']}")
                     st.caption(f"{data['artifact_set']}")
+                    # Which crit model the party actually uses: an RV/KQM carry shows a
+                    # single CV line below, a manual one shows CR / CD.
+                    model_label = crit_model_label(data)
+                    st.caption(f"Crit model: **{model_label}**" if model_label != "Manual"
+                               else "Crit model: Manual (CR / CD)")
 
                 rows = "".join(
                     f"<div style='opacity:0.85'>{label}</div>"
@@ -838,19 +863,42 @@ with tab1:
             }
 
     
-    # Build a signature of current team inputs to detect changes
+    # Build a signature of current team inputs to detect changes. It must cover EVERY
+    # input that feeds the party stats - gear (mains / rarity / substats) and the
+    # substat standard included - otherwise editing them leaves the previously
+    # confirmed party in place and the app silently keeps simulating the old build.
     current_signature = []
     for s_num in range(1, 5):
         sd = team_data[f"Slot {s_num}"]
+        pieces = (sd.get("artifacts") or {}).get("Pieces") or {}
+        gear_signature = tuple(
+            (
+                piece,
+                (pieces.get(piece) or {}).get("main_stat"),
+                (pieces.get(piece) or {}).get("rarity"),
+                tuple(
+                    ((sub or {}).get("stat"), str((sub or {}).get("value") or ""))
+                    for sub in ((pieces.get(piece) or {}).get("substats") or [])
+                ),
+            )
+            for piece in ("Flower", "Feather", "Sands", "Goblet", "Circlet")
+        )
         current_signature.append((
             sd["character"], sd["level"], sd["constellation"],
             sd["weapon"], sd["refinement"], sd["talents"],
-            sd.get("artifacts", {}).get("Set")
+            sd.get("artifacts", {}).get("Set"),
+            st.session_state.get(f"std_{s_num}", "Manual"),
+            gear_signature,
         ))
     
     # If settings changed since last party creation, reset confirmation
     if "last_team_signature" in st.session_state and st.session_state["last_team_signature"] != current_signature:
         st.session_state["party_created"] = False
+        st.warning(
+            "Gear, substats or the substat standard changed since the party was "
+            "confirmed — press **Confirm party configuration** to rebuild it. "
+            "(Running a trial always uses the current inputs.)"
+        )
 
 
     # Button renamed and validation relaxed to ONLY require characters
@@ -1134,7 +1182,17 @@ with tab3:
             st.markdown("<br>", unsafe_allow_html=True)
 
             if st.button("Run Trial Simulation", type="primary", key="run_trial_btn", use_container_width=True):
-                party = st.session_state.get("my_party", {})
+                # ALWAYS simulate the current inputs. The confirmed party can be older
+                # than the widgets (changing the substat standard or the gear does not
+                # re-confirm itself), which used to make an RV/KQM build silently run on
+                # the old manual stats. Rebuilding here is cheap - only the simulation is
+                # expensive - and it makes a stale party impossible.
+                rebuilt_party = assemble_party(
+                    [collect_slot(st.session_state, slot_num) for slot_num in range(1, 5)]
+                )
+                party = rebuilt_party or st.session_state.get("my_party", {})
+                st.session_state["my_party"] = party
+                st.session_state["party_created"] = bool(party)
                 enemy = st.session_state.get("enemy_stats", {"enemy_lv": 100, "cryo_res": 0.1, "anemo_res": 0.1})
 
                 timeline = RotationTimeline(party=party, enemy_stats=enemy)
@@ -1150,12 +1208,16 @@ with tab3:
                     for name, data in party.items()
                 )
                 enemy_summary = f"Lv{enemy.get('enemy_lv','?')} | Cryo Res {int(enemy.get('cryo_res',0.1)*100)}% | Anemo Res {int(enemy.get('anemo_res',0.1)*100)}%"
+                # Crit model used by THIS run (empty when every member is Manual), so an
+                # old manual entry can never be confused with an RV/KQM one.
+                standards = party_rv_summary(party)
                 timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
 
                 entry = {
                     "timestamp": timestamp,
                     "sim_name": trial_labels.get(selected_trial_key, selected_trial_key),
                     "chars": char_summary,
+                    "standards": standards,
                     "field_sequences": selected_trial_key,
                     "enemy": enemy_summary,
                     "timeline_events": timeline.global_events,
@@ -1181,12 +1243,12 @@ with tab3:
         if st.session_state.get("trial_finished"):
             st.success("Trial simulation complete!")
             st.button(
-                "📊 View Simulation Results",
+                "View Simulation Results",
                 type="primary",
                 use_container_width=True,
                 key="view_results_btn",
                 on_click=go_to_results_tab,
-                help="Jump straight to the Simulation Results tab.",
+                help="Go to the Simulation Results tab.",
             )
 
 
@@ -1441,6 +1503,9 @@ with tab4:
                 st.markdown(f"**Characters:** {entry['chars']}")
                 st.markdown(f"**Enemy Setup:** {entry['enemy']}")
                 st.markdown(f"**Trial Executed:** `{entry['field_sequences']}`")
+                # Which crit model this run used. Missing on old entries: they ran before
+                # the column existed, i.e. every carry was Manual.
+                st.markdown(f"**Crit Model:** {entry.get('standards') or 'Manual (CR / CD)'}")
                 
                 st.markdown("---")
                 st.subheader("Performance Calculations & Analytics")
