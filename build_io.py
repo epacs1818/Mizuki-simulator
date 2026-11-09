@@ -22,6 +22,7 @@ import datetime
 import json
 
 from abilities import ABILITY_REGISTRY, FIELD_SEQUENCE_REGISTRY
+from abilities import LEGACY_ABILITY_NAMES, LEGACY_SEQUENCE_NAMES
 from characters import get_character_element
 from models import FieldSequence, Rotation, Trial
 from presets import STANDARD_FIELD_SEQUENCES, STANDARD_TRIALS
@@ -326,6 +327,7 @@ def _ability_for(ability_name, character=None):
     """
     if not ability_name:
         return None
+    ability_name = LEGACY_ABILITY_NAMES.get(ability_name, ability_name)
     if character and ability_name in ABILITY_REGISTRY.get(character, {}):
         return ABILITY_REGISTRY[character][ability_name]
     for ability_map in ABILITY_REGISTRY.values():
@@ -385,7 +387,12 @@ def rotation_payload(rot) -> dict:
 
 
 def _lookup_sequence(name, custom_sequences=None):
-    """Fallback lookup for files that only stored sequence NAMES (schema 1.0)."""
+    """Fallback lookup for files that only stored sequence NAMES (schema 1.0).
+
+    Renamed sequences are translated (`LEGACY_SEQUENCE_NAMES`), so a file saved before
+    a rename keeps loading instead of losing the step with a warning.
+    """
+    name = LEGACY_SEQUENCE_NAMES.get(name, name)
     for pool in (custom_sequences or {}, STANDARD_FIELD_SEQUENCES, FIELD_SEQUENCE_REGISTRY):
         if name in pool:
             return pool[name]

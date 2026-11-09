@@ -5,7 +5,9 @@ from abilities import (
     odette_cast, odette_recast,
     odette_qe,
     faruzan_burst, faruzan_collapse_ability,
-    mizuki_skill, mizuki_sacfrag_skill,
+    # Mizuki's skill variants + burst field already hold their own hits/abilities.
+    mizuki_pullout_1_nuke, mizuki_pullout_2_nukes, mizuki_pullout_3_nukes,
+    mizuki_pullout_4_nukes, mizuki_burst_field,
     sucrose_skill, sucrose_burst,
     anastasya_e, anastasya_q, anastasya_eq, faruzan_e,
 )
@@ -34,8 +36,13 @@ STANDARD_FIELD_SEQUENCES = {
     "Aether ECQ": FieldSequence("AetherECQ", "Aether", swap_out_time=3.631),
     "Faruzan Q": FieldSequence("FaruzanQSwap", "Faruzan", swap_out_time=1.410),
     "Odette EE": FieldSequence("OdetteEE", "Odette", swap_out_time=2.371),
-    "Mizuki E (Sac Frag Proc)": FieldSequence("SacFragFill", "Mizuki", swap_out_time=1.750),
-    "Mizuki E (Pullout)": FieldSequence("BurstlessPullOut", "Mizuki", swap_out_time=10.0),
+    # Mizuki's pull-out lengths live in abilities.py: one sequence per number of
+    # stellar nukes (1/2/3/4 = 2/5/9/13 skill ticks), plus her burst field.
+    "Mizuki E (Sac Frag Proc)": mizuki_pullout_1_nuke,
+    "Mizuki E (Pullout)": mizuki_pullout_4_nukes,
+    "Mizuki E (2 nukes)": mizuki_pullout_2_nukes,
+    "Mizuki E (3 nukes)": mizuki_pullout_3_nukes,
+    "Mizuki Q": mizuki_burst_field,
     # Anastasya's sequences live in abilities.py (anastasya_e / anastasya_q /
     # anastasya_eq), built on Aether's EN1 / CQ timings.
     "Anastasya E": anastasya_e,
@@ -64,9 +71,7 @@ STANDARD_FIELD_SEQUENCES["Odette EE"].add_ability(1.170, odette_recast)
 
 STANDARD_FIELD_SEQUENCES["Faruzan Q"].add_ability(1.200, faruzan_burst)
 
-STANDARD_FIELD_SEQUENCES["Mizuki E (Pullout)"].add_ability(0.300, mizuki_skill)
-
-STANDARD_FIELD_SEQUENCES["Mizuki E (Sac Frag Proc)"].add_ability(0.300, mizuki_sacfrag_skill)
+# Mizuki's sequences are complete objects in abilities.py, so nothing to populate here.
 
 
 # 2. STANDARD ROTATIONS (Macro Loops)

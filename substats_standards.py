@@ -44,7 +44,7 @@ FLOWER_FEATHER_UTILITY_ROLLS = 1
 
 # Characters that get the 100% RV option (carries). Supports (Sucrose, Faruzan)
 # are excluded by design; the user can still fill their substats manually.
-CARRIES = ("Aether", "Odette", "Mizuki")
+CARRIES = ("Aether", "Odette", "Mizuki", "Anastasya")
 
 # Canonical main-stat values (5-star / 4-star). These mirror the app's
 # STANDARD_MAIN_STATS / STANDARD_4STAR_MAIN_STATS so the auto-mains feed the same
@@ -57,9 +57,10 @@ MAIN_STAT_VALUES = {
 # Per-carry standards: which stat substitutes for ATK% (the "utility" stat), and
 # the recommended Sands / Goblet / Circlet mains.
 CARRY_STANDARDS = {
-    "Aether": {"utility": "atk_percent", "goblet_main": "atk_percent", "circlet_main": "crit_dmg"},
-    "Odette": {"utility": "atk_percent", "goblet_main": "atk_percent", "circlet_main": "crit_dmg"},
-    "Mizuki": {"utility": "em",           "goblet_main": "em",         "circlet_main": "crit_dmg"},
+    "Aether": {"utility":       "atk_percent", "goblet_main": "atk_percent",    "circlet_main": "crit_dmg"},
+    "Odette": {"utility":       "atk_percent", "goblet_main": "atk_percent",    "circlet_main": "crit_dmg"},
+    "Mizuki": {"utility":       "em",          "goblet_main": "em",             "circlet_main": "crit_dmg"},
+    "Anastasya": {"utility":    "atk_percent", "goblet_main": "atk_percent",    "circlet_main": "crit_dmg"},
 }
 
 

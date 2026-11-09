@@ -1,0 +1,136 @@
+HOW TO ADD NEW HITS  (no new mechanics, no new buffs)
+=====================================================
+
+Use this when a character gains a new hit register - a new skill variant, a burst,
+extra ticks - and nothing about buffs, passives, stacks or flags changes.
+If your change adds a BUFF / STACK / any state, this file is not enough: that also
+needs an entry in buffs.py + FLAG_TO_BUFFS + a timeline flag (see the backlog).
+
+
+1. DAMAGE NUMBERS  ->  skill_scalings.py
+---------------------------------------------------------------------
+   CHARACTER_SKILLS["<character>"]["<Category>"]["<Sub ability>"]["scaling"] = [...]
+     * 13 values, one per talent level (index 0 = lv1), in percent (91.68).
+     * <Category> is what the character uses: "Normal", "Skill", "Burst".
+     * That key is what you later pass as scaling_key.
+
+   Check it resolves:
+     python -c "import skill_scalings as s; print(s.CHARACTER_SKILLS['Mizuki']['Burst'].keys())"
+
+
+2. DEFINE THE ABILITY  ->  abilities.py
+---------------------------------------------------------------------
+   my_char_burst = Ability(
+       name="My Char Burst",             # unique per character, shown in the UI
+       character="My Char",
+       cooldown=15.0,                    # 0.0 = never blocked across one trial
+       talent_level=10,
+       talent_type="burst_talent",       # normal_talent / skill_talent / burst_talent
+       hits=[
+           Hit("Burst_Cast", 0.000, element="Anemo", elemental_app="2U",
+               category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK,
+               motion_value=get_ability_motion_value("My Char", "Burst", "Skill DMG", 10),
+               attack_type=AttackType.BURST,
+               scaling_key=("My Char", "Burst", "Skill DMG")),
+           Hit("Shock 1", 1.800, element="Anemo", elemental_app="1U",
+               category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK,
+               motion_value=get_ability_motion_value("My Char", "Burst",
+                                                     "Shockwave DMG", 10),
+               attack_type=AttackType.BURST,
+               scaling_key=("My Char", "Burst", "Shockwave DMG")),
+           # ... one Hit per damage instance
+       ],
+   )
+
+   Hit fields
+     name           display name + a few engine hooks (see step 3)
+     relative_delay seconds after the cast; the cast itself is usually 0.000
+     element        damage element, always set it ("Anemo", "Cryo", "Physical", ...)
+     elemental_app  "1U"/"2U" ONLY on hits that apply aura, omit on the others
+     category       STANDARD_DMG for normal/skill/burst damage, STELLAR_DMG for
+                    stellar damage (reactions are injected by the engine)
+     stat_ref       ATK normally, HP/DEF if she scales on them, EM for stellar damage
+     motion_value   get_ability_motion_value(...) so talent levels recalculate it
+     attack_type    SKILL / BURST / NORMAL / CHARGED / PLUNGING. It decides which
+                    DMG bonus applies and which set triggers react (Tenacity fires
+                    on SKILL, Noblesse on a BURST cast). Use the real one.
+     scaling_key    the (character, category, sub ability) triple from step 1
+
+
+3. NAMING RULES  (engine hooks, not decoration)
+---------------------------------------------------------------------
+   * "Cast" on Mizuki means "enter Dreamdrifter (DDS)". Her BURST cast must be
+     "Burst_Cast", otherwise the burst switches her skill stance on.
+   * "TickN" are Mizuki's skill ticks: VBTD quills fire on them and "Tick13"
+     closes DDS. Do not reuse those names for other abilities.
+   * A burst cast should be tagged AttackType.BURST; a skill hit AttackType.SKILL.
+   * Two abilities may share a display name only for genuine variants (Aether's
+     "Elemental Burst", Odette's "Skill Recast"); they are listed in
+     VARIANT_ABILITY_NAMES.
+
+
+4. WRAP IT IN A FIELD SEQUENCE  (the rotation step the UI offers)
+---------------------------------------------------------------------
+   my_char_burst_field = FieldSequence("My Char Burst", "My Char", swap_out_time=12.8)
+   my_char_burst_field.add_ability(0.301, my_char_burst)
+
+   * A module-level name is registered automatically (FIELD_SEQUENCE_REGISTRY /
+     ABILITY_REGISTRY are collected from module globals), so it appears in the
+     editor for that character. Nothing else to register.
+   * swap_out_time should cover the last hit you want ON field; hits scheduled
+     later are still simulated (they count as off-field damage).
+   * start_time 0.301 = "cast 0.3s after the swap-in", matching the other characters.
+
+
+5. OPTIONAL: MAKE IT A PRESET STEP
+---------------------------------------------------------------------
+   presets.STANDARD_FIELD_SEQUENCES["My Char Q"] = my_char_burst_field
+   ... then reference that key from a Rotation/Trial if you want a preset trial.
+
+
+6. RENAMES
+---------------------------------------------------------------------
+   Renamed a sequence or ability? Add the old name to LEGACY_SEQUENCE_NAMES or
+   LEGACY_ABILITY_NAMES in abilities.py, so previously exported builds/trials
+   still load instead of dropping the step.
+
+
+7. VERIFY  (two commands, ~40 s)
+---------------------------------------------------------------------
+   python -c "import abilities, presets, build_io, timeline; print('ok')"
+   python smoke_test.py
+
+   The smoke test covers exactly the mistakes of this workflow:
+     [OK] hit catalogue: N sequences / M abilities, every hit scales and fits its field
+        (no empty sequence, no bad scaling_key, no zero motion value, no duplicate
+         names; it also lists sequences whose field ends before their last hit)
+     [OK] Mizuki burst: 9 BURST hits, no Dreamdrifter / quill leakage
+        (the burst stays a pure hit register)
+
+   Then in the app: the Team tab shows the character, and Rotation Setup lists the
+   new field sequence for that character.
+
+
+8. CHECKLIST OF MISTAKES ALREADY SEEN HERE
+---------------------------------------------------------------------
+   [ ] sequence defined but .add_ability(...) never called  -> empty step
+   [ ] typo in a variable name (mizuiki_... / mizuki_2)      -> NameError on import,
+       i.e. the whole app stops working
+   [ ] other modules still import the old names
+       (presets.py, smoke_test.py, streamlit_app.py)         -> ImportError
+   [ ] wrong attack_type                                    -> wrong bonus bucket,
+       and the wrong set triggers (Tenacity / Noblesse)
+   [ ] "Cast" used for a non-skill hit                       -> stance / DDS leak
+   [ ] swap_out_time shorter than the last hit               -> tail becomes off-field
+   [ ] scaling_key missing in skill_scalings                 -> zero motion value
+   [ ] two definitions with the same name                    -> one silently wins
+   [ ] renamed entry not added to LEGACY_*                   -> old files lose a step
+   [ ] a name-based check/test still uses the old ability name (e.g. "Mizuki Skill")
+
+
+KNOWN LIMITATION
+---------------------------------------------------------------------
+Cooldowns are tracked per (character, ability name). Variants that model the same
+in-game skill (Mizuki's 2 / 5 / 9 / 13-tick pull-outs) therefore do NOT share one
+cooldown, so alternating them inside 15 s is allowed by the engine even though the
+game would refuse it. Keep one variant per rotation unless you intend that.

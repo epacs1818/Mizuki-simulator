@@ -25,10 +25,12 @@ Checks:
 """
 from timeline import RotationTimeline, SUCROSE_BURST_WINDOW, ANASTASYA_TRIUMPH_DELAY
 from abilities import (
-    odette_qe, aether_en1, sucrose_eq, aether_n1, mizuki_skill, aether_skill,
+    odette_qe, aether_en1, sucrose_eq, aether_n1, aether_skill,
     sucrose_skill, sucrose_burst,
+    # The 13-tick skill is what the pre-existing Mizuki checks exercise.
+    mizuki_pullout_13 as mizuki_skill,
 )
-from models import FieldSequence, Rotation, Trial, ActionCategory
+from models import FieldSequence, Rotation, Trial, ActionCategory, AttackType
 from stats_calc import (
     build_initial_stats, build_snapshot_stats, compute_final_stats, compute_flat_em,
     compute_card_stats, is_rv_mode,
@@ -464,7 +466,7 @@ def _run_weapon_phase2_check() -> dict:
     on = [e for e in hits if e.get("starsealed_state") == "ON"]
     cast_times = [e["global_time"] for e in hits
                   if e.get("character") == "Mizuki"
-                  and e.get("ability_name") == "Mizuki Skill"
+                  and e.get("ability_name") == mizuki_skill.name
                   and e.get("hit_offset") == 0.0]
     out["starsealed_on"] = bool(on)
     out["starsealed_opens_at_cast"] = bool(on) and bool(cast_times) and \
@@ -1144,6 +1146,106 @@ def _run_rv_mode_check() -> dict:
         abs((e.get("average_damage") or 0.0) - (e.get("non_crit") or 0.0)) > 1e-6
         for e in man_swirls)
     return out
+
+
+def _run_hit_catalogue_check() -> dict:
+    """abilities.py data integrity: every sequence casts something, every hit scales.
+
+    Catches the mistakes that are otherwise silent: a FieldSequence whose add_ability()
+    call never ran (empty step), a scaling_key that does not exist in skill_scalings, a
+    hit with a zero motion value, two definitions sharing one display name (the registry
+    keeps only the first), a sequence that ends before its last hit, and a renamed entry
+    whose old name is still referenced somewhere.
+    """
+    import abilities as ab
+
+    out = {}
+    out["sequences"] = len(ab.FIELD_SEQUENCE_REGISTRY)
+    out["abilities"] = sum(len(map_) for map_ in ab.ABILITY_REGISTRY.values())
+    out["empty_bindings"] = sorted(
+        attr for attr, value in vars(ab).items()
+        if isinstance(value, ab.FieldSequence) and not value.calls
+    )
+
+    unresolved, zero_mv = [], []
+    for ability_map in ab.ABILITY_REGISTRY.values():
+        for ability in ability_map.values():
+            for hit in ability.hits:
+                if hit.scaling_key:
+                    char_key, cat_key, sub_key = hit.scaling_key
+                    try:
+                        value = ab.get_ability_motion_value(
+                            char_key, cat_key, sub_key, ability.talent_level)
+                    except (KeyError, IndexError):
+                        unresolved.append(f"{ability.name} / {hit.name}")
+                        continue
+                    if value <= 0:
+                        zero_mv.append(f"{ability.name} / {hit.name}")
+                elif hit.motion_value <= 0 and hit.category != ActionCategory.STELLAR_REACTION:
+                    zero_mv.append(f"{ability.name} / {hit.name}")
+    out["unresolved"] = unresolved
+    out["zero_mv"] = zero_mv
+
+    # The registry keeps the first definition of a name, so a duplicate is invisible.
+    # Intentional variants (Aether burst / Odette recast) share a name by design.
+    seen, duplicates = {}, []
+    for attr, value in vars(ab).items():
+        if isinstance(value, (ab.FieldSequence, ab.Ability)):
+            if getattr(value, "name", None) in ab.VARIANT_ABILITY_NAMES:
+                continue
+            key = (type(value).__name__, getattr(value, "character", None), value.name)
+            if key in seen:
+                duplicates.append(f"{value.character} / {value.name} ({seen[key]} vs {attr})")
+            seen.setdefault(key, attr)
+    out["duplicates"] = duplicates
+
+    # Informational: the engine keeps late hits (off-field damage is a feature here), so
+    # this is not an error - it just lists sequences whose field ends before the last hit.
+    late_hits = []
+    for name, seq in ab.FIELD_SEQUENCE_REGISTRY.items():
+        last_hit = 0.0
+        for call in seq.calls:
+            for hit in call.ability.hits:
+                last_hit = max(last_hit, call.start_time + hit.relative_delay)
+        if seq.calls and seq.swap_out_time < last_hit - 1e-9:
+            late_hits.append(name)
+    out["late_hit_sequences"] = sorted(late_hits)
+
+    # What the editor offers for Mizuki (sequences are auto-collected, not registered).
+    out["mizuki_ui"] = sorted(ab.field_sequences_for(["Mizuki"]))
+    return out
+
+
+def _run_mizuki_burst_check() -> dict:
+    """Mizuki's burst is a pure hit register: BURST-typed, and no Dreamdrifter leak.
+
+    Her DDS is entered by a "Cast" SKILL hit (timeline.py), so the burst cast must be
+    named "Burst_Cast" and its hits tagged BURST - otherwise the burst would switch her
+    skill stance on and poison every following snapshot.
+    """
+    import abilities as ab
+
+    out = {}
+    burst = ab.ABILITY_REGISTRY["Mizuki"]["Mizuki Burst"]
+    out["hit_count"] = len(burst.hits)
+    out["cast_name"] = burst.hits[0].name
+    out["all_burst"] = all(h.attack_type == AttackType.BURST for h in burst.hits)
+    out["positive_mv"] = all(h.motion_value > 0 for h in burst.hits)
+
+    t = RotationTimeline(party={k: dict(v) for k, v in presets.DEFAULT_PARTY.items()})
+    t.add_trial(Trial(name="mz_burst", end_mode="time", end_time=20.0,
+                      rotations=[Rotation(name="r", sequences=[ab.mizuki_burst_field],
+                                          repetitions=1)]))
+    t.evaluate_timeline()
+    hits = [e for e in t.global_events
+            if e.get("event_type") == "HIT" and e.get("character") == "Mizuki"]
+    out["engine_hits"] = len(hits)
+    out["engine_cast_name"] = hits[0].get("hit_name") if hits else None
+    out["dds_leak"] = any(e.get("dreamdrifter_state") == "ON" for e in t.global_events)
+    out["all_damage_positive"] = all((e.get("average_damage") or 0.0) > 0 for e in hits)
+    out["quill_leak"] = any((e.get("quills_total") or 0.0) > 0 for e in hits)
+    return out
+
 
 
 def _run_buff_catalogue_check() -> dict:
@@ -2182,6 +2284,52 @@ def run(verbose: bool = True) -> None:
     if not rv_failures and verbose:
         print(f"[OK] 100% RV / KQM: crit_mult {rv['mult_1']} = CV - 1 (cv {rv['cv_1']}) "
               f"instead of 1+CR*CD {rv['manual_1']}; reactions are deterministic")
+
+    # 3q. abilities.py hit catalogue: new hits must register, scale and fit their field.
+    hits_cat = _run_hit_catalogue_check()
+    hits_checks = [
+        (not hits_cat["empty_bindings"],
+         "field sequences with no hits (a lost add_ability() call): "
+         + ", ".join(hits_cat["empty_bindings"])),
+        (not hits_cat["unresolved"],
+         "hits whose scaling_key is not in skill_scalings: "
+         + ", ".join(hits_cat["unresolved"])),
+        (not hits_cat["zero_mv"],
+         "hits with a zero motion value: " + ", ".join(hits_cat["zero_mv"])),
+        (not hits_cat["duplicates"],
+         "duplicate ability/sequence display names: " + ", ".join(hits_cat["duplicates"])),
+        ({"Mizuki Burst", "Skill Pullout 1 Nuke", "Skill Pullout 2 Nukes",
+          "Skill Pullout 3 Nukes", "Skill Pullout 4 Nukes"}
+         <= set(hits_cat["mizuki_ui"]),
+         f"the editor catalogue for Mizuki is {hits_cat['mizuki_ui']}"),
+    ]
+    hits_failures = [msg for ok, msg in hits_checks if not ok]
+    failures.extend(hits_failures)
+    if not hits_failures and verbose:
+        print(f"[OK] hit catalogue: {hits_cat['sequences']} sequences / "
+              f"{hits_cat['abilities']} abilities, every hit scales and fits its field")
+
+    # 3r. Mizuki's burst: hit register only (BURST damage, no Dreamdrifter leakage).
+    mz = _run_mizuki_burst_check()
+    mz_checks = [
+        (mz["hit_count"] == 9, f"Mizuki's burst has {mz['hit_count']} hits, expected 9"),
+        (mz["cast_name"] == "Burst_Cast",
+         f"Mizuki's burst cast hit is {mz['cast_name']!r}; it must be 'Burst_Cast' so her "
+         f"burst does not enter Dreamdrifter"),
+        (mz["all_burst"], "Mizuki's burst hits are not AttackType.BURST"),
+        (mz["positive_mv"], "Mizuki's burst has zero-motion hits"),
+        (mz["engine_hits"] == 9,
+         f"the burst field produced {mz['engine_hits']} hits, expected 9"),
+        (mz["engine_cast_name"] == "Burst_Cast",
+         f"the engine cast hit is {mz['engine_cast_name']!r}"),
+        (not mz["dds_leak"], "Mizuki's burst switched Dreamdrifter ON"),
+        (not mz["quill_leak"], "Mizuki's burst picked up VBTD quill damage"),
+        (mz["all_damage_positive"], "Mizuki's burst produced a zero-damage hit"),
+    ]
+    mz_failures = [msg for ok, msg in mz_checks if not ok]
+    failures.extend(mz_failures)
+    if not mz_failures and verbose:
+        print("[OK] Mizuki burst: 9 BURST hits, no Dreamdrifter / quill leakage")
 
     # 3g. Buff catalogue integrity: buffs.py <-> stats_calc.FLAG_TO_BUFFS.
     cat = _run_buff_catalogue_check()

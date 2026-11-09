@@ -316,8 +316,8 @@ faruzan_e = FieldSequence("FaruzanESwap", "Faruzan", swap_out_time=1.410)
 faruzan_e.add_ability(1.200, faruzan_collapse_ability)
 
 # --- Mizuki ---
-mizuki_skill = Ability(
-    name="Mizuki Skill",
+mizuki_pullout_13 = Ability(
+    name="Mizuki Skill 13 Ticks",
     character="Mizuki",
     cooldown=15.0,
     talent_level=10,
@@ -340,11 +340,11 @@ mizuki_skill = Ability(
     ]
 )
 
-mizuki_burstless_pull_out = FieldSequence("BurstlessPullOut", "Mizuki", swap_out_time=10.0)
-mizuki_burstless_pull_out.add_ability(0.301, mizuki_skill)
+mizuki_pullout_4_nukes = FieldSequence("Skill Pullout 4 Nukes", "Mizuki", swap_out_time=10.0)
+mizuki_pullout_4_nukes.add_ability(0.301, mizuki_pullout_13)
 
-mizuki_sacfrag_skill = Ability(
-    name="Mizuki Skill (SacFrag)",
+mizuki_skill_2 = Ability(
+    name="Mizuki Skill 2 Ticks",
     character="Mizuki",
     cooldown=0.0,
     talent_level=10,
@@ -356,8 +356,76 @@ mizuki_sacfrag_skill = Ability(
     ]
 )
 
-mizuki_sacfrag_fill = FieldSequence("SacFragFill", "Mizuki", swap_out_time=1.750)
-mizuki_sacfrag_fill.add_ability(0.301, mizuki_sacfrag_skill)
+mizuki_pullout_1_nuke = FieldSequence("Skill Pullout 1 Nuke", "Mizuki", swap_out_time=1.750)
+mizuki_pullout_1_nuke.add_ability(0.301, mizuki_skill_2)
+
+mizuki_pullout_9 = Ability(
+    name="Mizuki Skill 9 Ticks",
+    character="Mizuki",
+    cooldown=15.0,
+    talent_level=10,
+    talent_type="skill_talent",
+    hits=[
+        Hit("Cast",   0.000, element="Anemo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Skill", "Skill DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Mizuki", "Skill", "Skill DMG")),
+        Hit("Tick1",  0.929, element="Anemo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Skill", "Continuous Attack DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Mizuki", "Skill", "Continuous Attack DMG")),
+        Hit("Tick2",  1.619, element="Anemo",                     category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Skill", "Continuous Attack DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Mizuki", "Skill", "Continuous Attack DMG")),
+        Hit("Tick3",  2.639, element="Anemo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Skill", "Continuous Attack DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Mizuki", "Skill", "Continuous Attack DMG")),
+        Hit("Tick4",  3.300, element="Anemo",                     category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Skill", "Continuous Attack DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Mizuki", "Skill", "Continuous Attack DMG")),
+        Hit("Tick5",  3.990, element="Anemo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Skill", "Continuous Attack DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Mizuki", "Skill", "Continuous Attack DMG")),
+        Hit("Tick6",  4.800, element="Anemo",                     category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Skill", "Continuous Attack DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Mizuki", "Skill", "Continuous Attack DMG")),
+        Hit("Tick7",  5.490, element="Anemo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Skill", "Continuous Attack DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Mizuki", "Skill", "Continuous Attack DMG")),
+        Hit("Tick8",  6.269, element="Anemo",                     category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Skill", "Continuous Attack DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Mizuki", "Skill", "Continuous Attack DMG")),
+        Hit("Tick9",  6.989, element="Anemo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Skill", "Continuous Attack DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Mizuki", "Skill", "Continuous Attack DMG")),
+    ]
+)
+
+mizuki_pullout_3_nukes = FieldSequence("Skill Pullout 3 Nukes", "Mizuki", swap_out_time=7.100)
+mizuki_pullout_3_nukes.add_ability(0.301, mizuki_pullout_9)
+
+mizuki_pullout_5 = Ability(
+    name="Mizuki Skill 5 Ticks",
+    character="Mizuki",
+    cooldown=15.0,
+    talent_level=10,
+    talent_type="skill_talent",
+    hits=[
+        Hit("Cast",   0.000, element="Anemo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Skill", "Skill DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Mizuki", "Skill", "Skill DMG")),
+        Hit("Tick1",  0.929, element="Anemo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Skill", "Continuous Attack DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Mizuki", "Skill", "Continuous Attack DMG")),
+        Hit("Tick2",  1.619, element="Anemo",                     category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Skill", "Continuous Attack DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Mizuki", "Skill", "Continuous Attack DMG")),
+        Hit("Tick3",  2.639, element="Anemo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Skill", "Continuous Attack DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Mizuki", "Skill", "Continuous Attack DMG")),
+        Hit("Tick4",  3.300, element="Anemo",                     category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Skill", "Continuous Attack DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Mizuki", "Skill", "Continuous Attack DMG")),
+        Hit("Tick5",  3.990, element="Anemo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Skill", "Continuous Attack DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Mizuki", "Skill", "Continuous Attack DMG")),
+    ]
+)
+
+mizuki_burst = Ability(
+    name="Mizuki Burst",
+    character="Mizuki",
+    cooldown=15.0,
+    talent_level=10,
+    talent_type="burst_talent",
+    hits=[
+        # The cast hit is "Burst_Cast", NOT "Cast": the timeline enters DDS on a "Cast"
+        # skill hit, so naming it "Cast" would make her burst switch the skill stance on.
+        Hit("Burst_Cast", 0.000, element="Anemo", elemental_app="2U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Burst", "Skill DMG", 10), attack_type=AttackType.BURST, scaling_key=("Mizuki", "Burst", "Skill DMG")),
+        Hit("Shock 1",  1.800, element="Anemo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Burst", "Munen Shockwave DMG", 10), attack_type=AttackType.BURST, scaling_key=("Mizuki", "Burst", "Munen Shockwave DMG")),
+        Hit("Shock 2",  3.300, element="Anemo",                     category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Burst", "Munen Shockwave DMG", 10), attack_type=AttackType.BURST, scaling_key=("Mizuki", "Burst", "Munen Shockwave DMG")),
+        Hit("Shock 3",  4.800, element="Anemo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Burst", "Munen Shockwave DMG", 10), attack_type=AttackType.BURST, scaling_key=("Mizuki", "Burst", "Munen Shockwave DMG")),
+        Hit("Shock 4",  6.300, element="Anemo",                     category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Burst", "Munen Shockwave DMG", 10), attack_type=AttackType.BURST, scaling_key=("Mizuki", "Burst", "Munen Shockwave DMG")),
+        Hit("Shock 5",  7.800, element="Anemo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Burst", "Munen Shockwave DMG", 10), attack_type=AttackType.BURST, scaling_key=("Mizuki", "Burst", "Munen Shockwave DMG")),
+        Hit("Shock 6",  9.300, element="Anemo",                     category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Burst", "Munen Shockwave DMG", 10), attack_type=AttackType.BURST, scaling_key=("Mizuki", "Burst", "Munen Shockwave DMG")),
+        Hit("Shock 7",  10.800, element="Anemo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Burst", "Munen Shockwave DMG", 10), attack_type=AttackType.BURST, scaling_key=("Mizuki", "Burst", "Munen Shockwave DMG")),
+        Hit("Shock 8",  12.300, element="Anemo",                     category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Burst", "Munen Shockwave DMG", 10), attack_type=AttackType.BURST, scaling_key=("Mizuki", "Burst", "Munen Shockwave DMG")),
+    ]
+)
+
+# Her burst field: hold the field until the last Munen Shockwave (12.601s after the
+# swap-in) so nothing is cut off. Pure hit register - no buffs, no flags.
+mizuki_burst_field = FieldSequence("Mizuki Burst", "Mizuki", swap_out_time=12.8)
+mizuki_burst_field.add_ability(0.301, mizuki_burst)
+
+mizuki_pullout_2_nukes = FieldSequence("Skill Pullout 2 Nukes", "Mizuki", swap_out_time=4.101)
+mizuki_pullout_2_nukes.add_ability(0.301, mizuki_pullout_5)
 
 mizuki_nuke_hit = Hit("Mizuki Nuke Hit", 0.500, element="Anemo", category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.EM, motion_value=10.00)
 mizuki_c1_mini_nuke_hit = Hit("Mizuki C1 Mini Nuke", 0.0, element="Anemo", category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.EM, motion_value=4.00)
@@ -538,6 +606,22 @@ anastasya_eq.add_ability(2.371, anastasya_burst)
 # ---------------------------------------------------------------------------
 # Editor registries
 # ---------------------------------------------------------------------------
+# Renames are translated, not dropped: exported builds/trials saved before a rename
+# still reference the old display names, so build_io maps them back on load.
+LEGACY_SEQUENCE_NAMES = {
+    "SacFragFill": "Skill Pullout 1 Nuke",
+    "BurstlessPullOut": "Skill Pullout 4 Nukes",
+}
+LEGACY_ABILITY_NAMES = {
+    "Mizuki Skill": "Mizuki Skill 13 Ticks",
+    "Mizuki Skill (SacFrag)": "Mizuki Skill 2 Ticks",
+}
+
+# Pairs that share a display name on purpose: the engine substitutes the right variant
+# (Aether's burst by Frostglow stacks, Odette's recast by her constellation), so a shared
+# name is not a mistake there.
+VARIANT_ABILITY_NAMES = {"Elemental Burst", "Skill Recast"}
+
 # The UI offers exactly what exists in this module: every FieldSequence and every
 # Ability is collected programmatically, so a new definition never has to be
 # registered anywhere else. Consumers filter by owner (a sequence/ability is only

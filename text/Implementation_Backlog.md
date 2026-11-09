@@ -549,3 +549,72 @@ value and the *next* row shows the new one:
 3. Mizuki's C1 mini-nuke now fires only on swirls that happen while the debuff is
    already up (it used to fire on the swirl that applied it). Needs a game check.
 
+## Mizuki hit-register round (new pull-out lengths + burst)
+
+Pure hit registers: no new buffs, flags or passives. The workflow is now documented
+in `text/How_to_add_hits.txt` so the next one is mechanical.
+
+### What was added
+
+| object | kind | field | hits |
+| --- | --- | --- | --- |
+| `mizuki_pullout_13` | Ability ("Mizuki Skill 13 Ticks") | 15 s CD | Cast + Ticks 1-13 |
+| `mizuki_pullout_9` | Ability ("Mizuki Skill 9 Ticks") | 15 s CD | Cast + Ticks 1-9 |
+| `mizuki_pullout_5` | Ability ("Mizuki Skill 5 Ticks") | 15 s CD | Cast + Ticks 1-5 |
+| `mizuki_skill_2` | Ability ("Mizuki Skill 2 Ticks") | 0 s (Sac Frag proc) | Cast + Ticks 1-2 |
+| `mizuki_burst` | Ability ("Mizuki Burst") | 15 s CD | `Burst_Cast` + `Shock 1-8` |
+| `mizuki_pullout_1_nuke` | FieldSequence | 1.750 s | the 2-tick skill |
+| `mizuki_pullout_2_nukes` | FieldSequence | 4.101 s | the 5-tick skill |
+| `mizuki_pullout_3_nukes` | FieldSequence | 7.100 s | the 9-tick skill |
+| `mizuki_pullout_4_nukes` | FieldSequence | 10.000 s | the 13-tick skill |
+| `mizuki_burst_field` | FieldSequence | 12.800 s | her burst (last shock at 12.601 s) |
+
+`presets.STANDARD_FIELD_SEQUENCES` now points at those objects instead of building
+duplicate shells, so `"Mizuki E (Sac Frag Proc)"` / `"Mizuki E (Pullout)"` keep
+working and `"Mizuki E (2 nukes)"`, `"Mizuki E (3 nukes)"`, `"Mizuki Q"` were added.
+
+### Bugs found while validating (all fixed)
+
+1. `abilities.py` did not import: two `add_ability()` calls referenced a variable that
+   did not exist (`mizuki_2`), and two sequences were bound to `mizuiki_...`
+   (typo). Any of these makes the whole app fail at import, not just the new hits.
+2. Stale imports in `presets.py` (`mizuki_skill`, `mizuki_sacfrag_skill`),
+   `smoke_test.py` (`mizuki_skill`) and `streamlit_app.py`
+   (`mizuki_sacfrag_fill`, `mizuki_burstless_pull_out` - unused, dropped).
+3. The burst cast was named `"Cast"`, which the timeline reads as "Mizuki enters
+   Dreamdrifter" (`hit_name == "Cast"`). Renamed to `"Burst_Cast"`; the burst no
+   longer touches DDS, the C1 chain or the VBTD quill.
+4. The burst hits were tagged `AttackType.SKILL`, so they would have used
+   skill_bonus, armed Tenacity and skipped Noblesse. Now `AttackType.BURST`.
+5. `smoke_test`'s Starsealed check filtered `ability_name == "Mizuki Skill"`, which
+   the rename broke; it now compares against `mizuki_skill.name`.
+
+### Renames and backwards compatibility
+
+`SacFragFill` -> "Skill Pullout 1 Nuke", `BurstlessPullOut` -> "Skill Pullout 4
+Nukes", "Mizuki Skill" -> "Mizuki Skill 13 Ticks", "Mizuki Skill (SacFrag)" ->
+"Mizuki Skill 2 Ticks". `LEGACY_SEQUENCE_NAMES` / `LEGACY_ABILITY_NAMES` in
+`abilities.py` translate the old names in `build_io`, so builds and trials exported
+before the rename still load (including `New test/*.json`).
+
+### New regression checks (`smoke_test.py`)
+
+* **hit catalogue**: no empty field sequence (a lost `add_ability()`), every
+  `scaling_key` resolves in `skill_scalings`, no zero motion values, no duplicate
+  display names (variant pairs whitelisted in `VARIANT_ABILITY_NAMES`), and the list
+  of sequences whose field ends before their last hit.
+* **Mizuki burst**: exactly 9 hits, cast named `Burst_Cast`, all `AttackType.BURST`,
+  the field produces 9 engine hits, and none of them sets `dreamdrifter_state` or
+  picks up quill damage.
+
+Baselines did not move: the standard 30 s trial is still **1,266,300.5** (the shared
+sequences cast at 0.301 s instead of 0.300 s, which is invisible at 0.1 dmg).
+
+### Known limitation (documented in the guide)
+
+Cooldowns are keyed on `(character, ability name)`, so the four skill variants of the
+same in-game skill do not share one cooldown: alternating them inside 15 s is
+allowed by the engine. A `cooldown_key` field on `Ability` would fix it; it was left
+out because it changes how rotations are validated and the current presets rely on
+the Sac-Frag proc variant having `cooldown = 0`.
+
