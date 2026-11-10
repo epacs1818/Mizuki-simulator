@@ -102,7 +102,45 @@ WHERE THINGS LIVE  (one home per thing - there is never a second copy)
    * start_time 0.301 = "cast 0.3s after the swap-in", matching the other characters.
 
 
-5. OPTIONAL: MAKE IT A PRESET STEP
+4b. TRIGGERED ABILITIES  (procs: never castable, never in a sequence)
+---------------------------------------------------------------------
+   An ability that only happens on a CONDITION (a passive, a proc, a state the
+   engine tracks) is a TRIGGERED ability. It is still an ordinary Ability in
+   abilities.py, but:
+
+     * it is NEVER referenced by a FieldSequence / preset - a sequence can only hold
+       things the player actively casts;
+     * its name is listed in abilities.ENGINE_INTERNAL_ABILITIES, so the editors do
+       not offer it and the smoke test fails if a sequence ever contains it;
+     * the timeline injects it through ONE helper, so the timing stays data:
+
+           hit.relative_delay  =  delay from the trigger  (= the FIRST hit's value)
+           event time          =  trigger_time + hit.relative_delay
+
+       0.0 is a real value. Leave it at 0.0 and the proc lands on the trigger; change
+       it later and the engine follows - never hardcode a delay in timeline.py.
+
+   Two shapes, pick by the motion value:
+     * fixed MV, not castable  -> a plain module-level Hit (e.g. mizuki_nuke_hit)
+     * talent-scaled           -> an Ability with a scaling_key (e.g.
+                                  faruzan_pressurized_collapse, diona_choice_treasures);
+                                  the engine resolves its MV at the party's talent.
+
+   Existing triggered hits and their delays:
+       Mizuki VBTD nuke        mizuki_nuke_hit                  0.500
+       Mizuki C1 mini nuke     mizuki_c1_mini_nuke_hit          0.000
+       Faruzan collapse        faruzan_pressurized_collapse     0.720  (3.0s CD, from the trigger)
+       Diona Icy Paws          diona_choice_treasures           0.270/0.360/0.360 (3.5s CD)
+       Anastasya extra stellar anastasya_extra_stellar          0.000
+
+   Adding one means THREE things: the Ability here, its entry in
+   ENGINE_INTERNAL_ABILITIES, and the trigger block in evaluate_timeline() that calls
+   self._insert_triggered_hit(hit, event, t, ability.name, index=..., owner="<char>").
+   ALWAYS pass owner: the default is the triggering event's character, which would
+   credit your proc to whoever happened to set it off (e.g. a Faruzan collapse
+   triggered by Mizuki's hit would be dealt with Mizuki's stats).
+
+
 ---------------------------------------------------------------------
    presets.STANDARD_FIELD_SEQUENCES["My Char Q"] = my_char_burst_field
    ... then reference that key from a Rotation/Trial if you want a preset trial.
@@ -148,6 +186,10 @@ WHERE THINGS LIVE  (one home per thing - there is never a second copy)
    [ ] two definitions with the same name                    -> one silently wins
    [ ] renamed entry not added to LEGACY_*                   -> old files lose a step
    [ ] a name-based check/test still uses the old ability name (e.g. "Mizuki Skill")
+   [ ] a triggered ability put in a FieldSequence            -> offered by the editor
+       and double counted; it belongs in ENGINE_INTERNAL_ABILITIES only
+   [ ] a trigger delay hardcoded in timeline.py              -> the smoke test pins
+       the delays from abilities.py, so this fails immediately
 
 
 KNOWN LIMITATION

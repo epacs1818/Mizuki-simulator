@@ -293,7 +293,11 @@ def assemble_party(slots) -> dict:
 
 
 def crit_model_label(char_data) -> str:
-    """Short label of the crit model a party entry uses (Manual / 100% RV / KQM 40)."""
+    """Short label of the substat standard a party entry uses (Manual / 100% RV / KQM 40).
+
+    Named after the old "crit model" UI wording; the cards now print it as
+    "Substats: <label>".
+    """
     char_data = char_data or {}
     standard = str(char_data.get("standard_mode") or "Manual")
     if standard.startswith("100% RV"):

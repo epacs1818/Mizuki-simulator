@@ -22,8 +22,22 @@ Checks:
      (name parsing / secondary keys) and the conditional passives of The Widsith,
      Sacrificial Jade and Sunny Morning Sleep-In honour their triggers, durations
      and cooldowns.
+ 10. Diona kit: "Choice Treasures" (20s state opened by her tap OR hold skill hit) fires
+     a 3-hit Icy Paw volley 0.270s after ANY Stellar Swirl (3.5s CD from the trigger),
+     and her C6 burst cast buffs the ACTIVE character (+200 EM / +0.40 stellar_bonus)
+     for the whole burst field, cast hit included.
+ 11. Triggered hits: every engine-injected proc takes its delay from abilities.py
+     (Mizuki nuke 0.500, C1 mini nuke 0.0, Faruzan collapse 0.720, Diona paws
+     0.270/0.360/0.360, Anastasya extra stellar 0.0), lands at trigger + that delay,
+     and respects its trigger-based cooldown.
+ 12. The Anastasya "Tsaritsa Nerfs" values (50.4% stellar swirl base, 0.354 burst
+     bonus at B13) are pinned as literals, so a revert cannot pass silently.
 """
-from timeline import RotationTimeline, SUCROSE_BURST_WINDOW, ANASTASYA_TRIUMPH_DELAY
+from timeline import (
+    RotationTimeline, SUCROSE_BURST_WINDOW, ANASTASYA_TRIUMPH_DELAY,
+    FARUZAN_COLLAPSE_CD, DIONA_CHOICE_TREASURES_WINDOW, DIONA_CHOICE_TREASURES_CD,
+    DIONA_C6_WINDOW,
+)
 from abilities import (
     aether_n1, aether_skill, sucrose_skill, sucrose_burst,
     # The 13-tick skill is what the pre-existing Mizuki checks exercise.
@@ -1169,11 +1183,21 @@ def _run_hit_catalogue_check() -> dict:
         if isinstance(value, ab.FieldSequence) and not value.calls
     )
 
-    unresolved, zero_mv = [], []
+    unresolved, zero_mv, bad_keys, talent_crash = [], [], [], []
     for ability_map in ab.ABILITY_REGISTRY.values():
         for ability in ability_map.values():
+            # Re-configuring the talent level must work for EVERY ability: a malformed
+            # scaling_key (e.g. a 4-tuple that still carries the talent level) used to
+            # crash timeline.add_field_sequence() the moment a party set talents.
+            try:
+                ab.update_ability_talent_level(copy.deepcopy(ability), 10)
+            except Exception as exc:  # noqa: BLE001 - reported, not raised
+                talent_crash.append(f"{ability.character} / {ability.name}: {exc!r}")
             for hit in ability.hits:
                 if hit.scaling_key:
+                    if len(hit.scaling_key) != 3:
+                        bad_keys.append(f"{ability.name} / {hit.name}: {hit.scaling_key}")
+                        continue
                     char_key, cat_key, sub_key = hit.scaling_key
                     try:
                         value = ab.get_ability_motion_value(
@@ -1187,6 +1211,8 @@ def _run_hit_catalogue_check() -> dict:
                     zero_mv.append(f"{ability.name} / {hit.name}")
     out["unresolved"] = unresolved
     out["zero_mv"] = zero_mv
+    out["bad_scaling_keys"] = bad_keys
+    out["talent_crash"] = talent_crash
 
     # The registries keep the first definition of a name, so a duplicate is invisible.
     # Intentional variants (Aether burst / Odette recast) share a name by design, and an
@@ -1375,6 +1401,19 @@ def _run_anastasya_check() -> dict:
 
     out = {}
 
+    # ---- 0. HARD-CODED KIT DATA (the "Tsaritsa Nerfs" round) -------------------
+    # Commit 7d23982 lowered her stellar swirl MV (60.0 -> 50.4) and the burst
+    # stellar bonus ([...0.575] -> [...0.354]). Those numbers are pinned as literals
+    # here on purpose: the ENTIRE sim's Anastasya output hangs off them, so a silent
+    # revert has to fail the suite instead of quietly inflating every total.
+    from skill_scalings import CHARACTER_SKILLS
+    _ana = CHARACTER_SKILLS["Anastasya"]
+    out["swirl_mv_base"] = _ana["Skill"]["Palestar Crown Stellar Swirl DMG"]["scaling"][0]
+    out["swirl_mv_lv13"] = _ana["Skill"]["Palestar Crown Stellar Swirl DMG"]["scaling"][12]
+    out["tap_lv13"] = _ana["Skill"]["Instantaneous Tap DMG"]["scaling"][12]
+    out["extra_stellar_lv13"] = _ana["Burst"]["Palestar Crown Extra Stellar Swirl DMG"]["scaling"][12]
+    out["burst_bonus_lv13"] = _ana["Burst"]["To the New World Stellar Glimmer Reaction DMG Increase"]["scaling"][12]
+
     timeline = RotationTimeline(party=_anastasya_party())
     timeline.add_trial(presets.STANDARD_TRIALS["Mizuki Sac Frag Pull out 6x rotations (Anastasya)"])
     timeline.evaluate_timeline()
@@ -1508,6 +1547,11 @@ def _run_anastasya_check() -> dict:
     out["extras_never_exceed_beats"] = len(extra) <= len(beats)
     out["no_extra_before_first_burst"] = bool(beats) and bool(casts) and not any(
         e["global_time"] < min(casts) for e in extra)
+    # Triggered-delay convention: the extra hit's delay is 0.0, so it must land on the
+    # stellar beat itself (one extra per beat, at the very same timestamp).
+    beat_times = {round(e["global_time"], 6) for e in beats}
+    out["extra_delay_ok"] = bool(extra) and all(
+        round(e["global_time"], 6) in beat_times for e in extra)
 
     # ---- 7. Triumph: armed by the burst, fires on the next swap-in >= 18s ----
     fill = FieldSequence("Filler", "Aether", swap_out_time=10.0)
@@ -1554,6 +1598,259 @@ def _run_anastasya_check() -> dict:
         and all(e["global_time"] > ana_swap_ins[0]["global_time"] + 1e-9 for e in rot_triumphs))
     return out
 
+def _diona_party(constellation: int = 6) -> dict:
+    """Diona + Mizuki: her skill opens the state, Mizuki's skill supplies the swirls."""
+    return {
+        "Diona": {"constellation": constellation, "level": 90, "refinement": 1,
+                  "weapon": "Favonius Warbow", "artifact_set": "Noblesse Oblige",
+                  "talents": "1/10/10"},
+        "Mizuki": {"constellation": 2, "level": 90, "refinement": 5,
+                   "weapon": "Sacrificial Fragments", "artifact_set": "2p/2p EM",
+                   "talents": "10/13/13"},
+    }
+
+
+def _run_sequences_trial(names, party, end_time: float):
+    """Evaluate *names* (STANDARD_FIELD_SEQUENCES keys) back to back in one trial."""
+    timeline = RotationTimeline(party=party)
+    timeline.add_trial(Trial(
+        name="seqs", end_mode="time", end_time=end_time,
+        rotations=[Rotation(
+            name="r",
+            sequences=[presets.STANDARD_FIELD_SEQUENCES[n] for n in names],
+            repetitions=1)]))
+    timeline.evaluate_timeline()
+    return timeline
+
+
+def _hit_time(event) -> float:
+    return round(event["global_time"], 3)
+
+
+def _run_diona_check() -> dict:
+    """Diona kit: Choice Treasures state + Icy Paw volleys, and the C6 burst buff.
+
+    Choice Treasures: her tap OR hold skill hit opens a 20s state (refreshed). While it
+    is up, a Stellar Swirl triggered by ANY character fires a 3-hit Icy Paw volley that
+    starts 0.270s after the trigger (3.5s CD, measured from the trigger).
+    C6: her burst cast hit gives the ACTIVE character +200 EM and +0.40 stellar_bonus
+    for the whole burst field (11.75s), INCLUDING the cast hit itself.
+    """
+    import abilities as ab
+
+    out = {}
+
+    # ---- 1. The state: opened by either skill, 20s, refreshed by the next cast ----
+    out["window"] = DIONA_CHOICE_TREASURES_WINDOW
+    out["cd"] = DIONA_CHOICE_TREASURES_CD
+    tap_tl = _run_sequences_trial(["Diona E"], _diona_party(), 3.0)
+    hold_tl = _run_sequences_trial(["Diona HE"], _diona_party(), 3.0)
+    out["ct_on_after_tap"] = any(e.get("diona_ct_state") == "ON" for e in tap_tl.global_events)
+    out["ct_on_after_hold"] = any(e.get("diona_ct_state") == "ON" for e in hold_tl.global_events)
+
+    # Refresh + expiry: her tap at 0.66 opens the window until 20.66, her hold at 2.07
+    # refreshes it until 22.07. Anastasya's 10 skill beats (3.42 .. 23.22) are the probe.
+    refresh_party = dict(_diona_party())
+    refresh_party["Anastasya"] = {"constellation": 0, "level": 90, "refinement": 1,
+                                  "weapon": "Favonius Warbow", "artifact_set": "2p/2p ATK",
+                                  "talents": "1/13/13"}
+    refresh_tl = _run_sequences_trial(["Diona E", "Diona HE", "Anastasya E"],
+                                      refresh_party, 26.0)
+    probe_hits = [e for e in refresh_tl.global_events
+                  if e.get("event_type") == "HIT" and e.get("character") == "Anastasya"]
+    between = [e for e in probe_hits if 20.66 < e["global_time"] <= 22.07]
+    after = [e for e in probe_hits if e["global_time"] > 22.07 + 1e-9]
+    out["ct_refresh_hits"] = [_hit_time(e) for e in between]
+    out["ct_refresh_on"] = bool(between) and all(
+        e.get("diona_ct_state") == "ON" for e in between)
+    out["ct_late_hits"] = [_hit_time(e) for e in after]
+    out["ct_expires"] = bool(after) and all(
+        e.get("diona_ct_state") == "OFF" for e in after)
+
+    # ---- 2. No state -> no paws, however many swirls happen ----
+    # (Anastasya supplies the Cryo, Mizuki the Anemo: plenty of Stellar Swirls, but
+    # Diona never presses her skill, so the Choice Treasures state never opens.)
+    idle_party = dict(_diona_party())
+    idle_party["Anastasya"] = {"constellation": 0, "level": 90, "refinement": 1,
+                               "weapon": "Favonius Warbow", "artifact_set": "2p/2p ATK",
+                               "talents": "1/13/13"}
+    idle_tl = _run_sequences_trial(["Anastasya E", "Mizuki E (Pullout)"], idle_party, 16.0)
+    paws_name = ab.diona_choice_treasures.name
+    out["paws_without_state"] = len(
+        [e for e in idle_tl.global_events if e.get("ability_name") == paws_name])
+    out["swirls_without_state"] = len(
+        [e for e in idle_tl.global_events if e.get("hit_name") == "Stellar_Swirl_Hit"])
+
+    # ---- 3. Volleys inside a real rotation (hold + burst, then Mizuki's pull-out) ----
+    timeline = _run_sequences_trial(["Diona HEQ", "Mizuki E (Pullout)"], _diona_party(), 16.0)
+    events = timeline.global_events
+    paw_hits = [e for e in events if e.get("ability_name") == paws_name]
+    swirl_times = [e["global_time"] for e in events if e.get("hit_name") == "Stellar_Swirl_Hit"]
+    out["paw_count"] = len(paw_hits)
+    out["paw_owner_ok"] = bool(paw_hits) and all(
+        e.get("character") == "Diona" for e in paw_hits)
+    out["paw_shape_ok"] = bool(paw_hits) and all(
+        e.get("category") == ActionCategory.STANDARD_DMG
+        and e.get("attack_type") == AttackType.SKILL for e in paw_hits)
+    out["paw_aura_ok"] = bool(paw_hits) and all(
+        (e.get("elem_app") == "1U") == (i % 3 == 0) for i, e in enumerate(paw_hits))
+
+    volleys = [paw_hits[i:i + 3] for i in range(0, len(paw_hits), 3)]
+    volley_errors, volley_triggers = [], []
+    first_delay = ab.diona_choice_treasures.hits[0].relative_delay
+    expected_offsets = [round(h.relative_delay - first_delay, 6)
+                        for h in ab.diona_choice_treasures.hits]
+    for volley in volleys:
+        if len(volley) != 3:
+            volley_errors.append(f"{_hit_time(volley[0])}: partial volley ({len(volley)} paws)")
+            continue
+        first = volley[0]["global_time"]
+        earlier = [s for s in swirl_times if s <= first + 1e-9]
+        if not earlier:
+            volley_errors.append(f"{_hit_time(volley[0])}: no swirl trigger")
+            continue
+        trigger = earlier[-1]
+        volley_triggers.append(trigger)
+        if abs((first - trigger) - first_delay) > 1e-6:
+            volley_errors.append(
+                f"{_hit_time(volley[0])}: first paw {first - trigger:.3f}s after the trigger")
+        offsets = [round(v["global_time"] - first, 6) for v in volley]
+        if offsets != expected_offsets:
+            volley_errors.append(
+                f"{_hit_time(volley[0])}: offsets {offsets} != {expected_offsets}")
+    out["volley_count"] = len(volleys)
+    out["volley_errors"] = volley_errors
+    out["volley_trigger_gaps"] = [round(b - a, 3)
+                                  for a, b in zip(volley_triggers, volley_triggers[1:])]
+    out["volley_cd_ok"] = all(
+        gap >= DIONA_CHOICE_TREASURES_CD - 1e-6 for gap in out["volley_trigger_gaps"])
+
+    # ---- 4. C6: value, target scope, cast-hit inclusion, window, constellation gate ----
+    out["c6_window"] = DIONA_C6_WINDOW
+    cast = [e for e in events if e.get("character") == "Diona"
+            and e.get("ability_name") == "Diona Burst" and e.get("hit_name") == "Burst Cast"]
+    out["c6_cast_hits"] = len(cast)
+    out["c6_includes_cast_hit"] = bool(cast) and all(
+        e.get("diona_c6_state") == "ON" for e in cast)
+    if cast:
+        cast_time = cast[0]["global_time"]
+        burst_hits = [e for e in events if e.get("character") == "Diona"
+                      and e.get("ability_name") == "Diona Burst"]
+        last_tick = max(burst_hits, key=lambda e: e["global_time"])
+        out["c6_last_tick_on"] = last_tick.get("diona_c6_state") == "ON"
+        out["c6_last_tick_offset"] = round(last_tick["global_time"] - cast_time, 6)
+        out["c6_on_past_window"] = sum(
+            1 for e in events if e.get("diona_c6_state") == "ON"
+            and e["global_time"] > cast_time + DIONA_C6_WINDOW + 1e-9)
+    else:
+        out["c6_last_tick_on"] = False
+        out["c6_last_tick_offset"] = None
+        out["c6_on_past_window"] = -1
+
+    # Values isolated from every EM share: Diona + Faruzan, ACTIVE = Faruzan, so
+    # Diona's own (off-field) stats must NOT move.
+    probe_party = {
+        "Diona": _diona_party()["Diona"],
+        "Faruzan": {"constellation": 6, "level": 90, "refinement": 1,
+                    "weapon": "Favonius Warbow", "artifact_set": "Instructor",
+                    "talents": "1/13/13"},
+    }
+    probe_tl = RotationTimeline(party=probe_party)
+    probe_ev = {"event_type": "HIT", "character": "Faruzan",
+                "category": ActionCategory.STANDARD_DMG, "element": "Anemo",
+                "attack_type": AttackType.SKILL, "active_character": "Faruzan",
+                "diona_c6_state": "ON"}
+    out["c6_em_active"] = _flag_delta(probe_tl, probe_ev, "Faruzan", "diona_c6_state", "EM")
+    out["c6_stellar_active"] = _flag_delta(probe_tl, probe_ev, "Faruzan", "diona_c6_state",
+                                           "Stellar Bonus")
+    out["c6_em_offfield_owner"] = _flag_delta(probe_tl, probe_ev, "Diona", "diona_c6_state", "EM")
+
+    # C5 must never receive it (the UI only offers C6, the engine gates it anyway).
+    c5_events = _run_sequences_trial(["Diona HEQ"], _diona_party(5), 6.0).global_events
+    out["c5_never_on"] = not any(e.get("diona_c6_state") == "ON" for e in c5_events)
+    return out
+
+
+def _run_triggered_ability_check(ana=None) -> dict:
+    """Every triggered hit reads its delay from abilities.py - never from the engine.
+
+    Audit table (the number is the FIRST hit's relative_delay, i.e. the trigger delay;
+    every hit of a triggered ability lands at trigger_time + its own relative_delay):
+        Mizuki VBTD nuke ....... mizuki_nuke_hit                (0.500)
+        Mizuki C1 mini nuke .... mizuki_c1_mini_nuke_hit        (0.000)
+        Faruzan collapse ....... faruzan_pressurized_collapse   (0.720)
+        Diona Icy Paws ......... diona_choice_treasures         (0.270/0.360/0.360)
+        Anastasya extra stellar  anastasya_extra_stellar        (0.000)
+        Anastasya Triumph ...... anastasya_triumph (trigger = her swap-in)
+    """
+    import abilities as ab
+
+    out = {}
+    templates = {
+        "Mizuki VBTD nuke": (ab.mizuki_nuke_hit, 0.500),
+        "Mizuki C1 mini nuke": (ab.mizuki_c1_mini_nuke_hit, 0.000),
+        "Faruzan collapse": (ab.faruzan_pressurized_collapse.hits[0], 0.720),
+        "Diona Icy Paws tick 1": (ab.diona_choice_treasures.hits[0], 0.270),
+        "Diona Icy Paws tick 2": (ab.diona_choice_treasures.hits[1], 0.360),
+        "Diona Icy Paws tick 3": (ab.diona_choice_treasures.hits[2], 0.360),
+        "Anastasya extra stellar": (ab.anastasya_extra_stellar.hits[0], 0.000),
+    }
+    out["delays"] = {label: hit.relative_delay for label, (hit, _exp) in templates.items()}
+    out["expected"] = {label: exp for label, (_hit, exp) in templates.items()}
+    out["delay_mismatch"] = sorted(
+        label for label, (hit, exp) in templates.items()
+        if abs(hit.relative_delay - exp) > 1e-12)
+
+    # The convention itself: the shared helper schedules at trigger + relative_delay,
+    # and a 0.0 delay is honoured instead of being treated as "missing".
+    probe_tl = RotationTimeline(party={})
+    trigger = {"global_time": 10.0, "character": "Someone", "event_type": "HIT",
+               "hit_name": "Trigger", "active_character": "Someone"}
+    convention_errors = []
+    for label, (hit, _exp) in templates.items():
+        built = probe_tl._triggered_hit_event(hit, trigger, 10.0, label)
+        if abs(built["global_time"] - (10.0 + hit.relative_delay)) > 1e-12:
+            convention_errors.append(
+                f"{label}: {built['global_time']} != 10 + {hit.relative_delay}")
+        if abs(built["hit_offset"] - hit.relative_delay) > 1e-12:
+            convention_errors.append(f"{label}: hit_offset is {built['hit_offset']}")
+    out["convention_errors"] = convention_errors
+    out["engine_windows"] = {
+        "Faruzan collapse CD": FARUZAN_COLLAPSE_CD,
+        "Diona paw CD": DIONA_CHOICE_TREASURES_CD,
+        "Diona state": DIONA_CHOICE_TREASURES_WINDOW,
+        "Diona C6": DIONA_C6_WINDOW,
+    }
+
+    # ---- Engine level: Faruzan collapses land 0.720s after a NON-collapse hit, and
+    #      the 3.0s internal CD is measured from the TRIGGER (not from the collapse).
+    timeline = RotationTimeline(party=presets.DEFAULT_PARTY)
+    timeline.add_trial(presets.STANDARD_TRIALS["Mizuki Sac Frag Pull out 6x rotations"])
+    timeline.evaluate_timeline()
+    events = timeline.global_events
+    collapse_name = ab.faruzan_pressurized_collapse.name
+    collapses = [e for e in events if e.get("ability_name") == collapse_name]
+    other_hit_times = {round(e["global_time"], 6) for e in events
+                       if e.get("event_type") == "HIT"
+                       and e.get("ability_name") != collapse_name}
+    delay = ab.faruzan_pressurized_collapse.hits[0].relative_delay
+    out["collapse_count"] = len(collapses)
+    out["collapse_delay_ok"] = bool(collapses) and all(
+        round(e["global_time"] - delay, 6) in other_hit_times for e in collapses)
+    out["collapse_gaps"] = [round(b["global_time"] - a["global_time"], 3)
+                            for a, b in zip(collapses, collapses[1:])]
+    out["collapse_cd_ok"] = all(
+        gap >= FARUZAN_COLLAPSE_CD - 1e-6 for gap in out["collapse_gaps"])
+
+    # ---- Engine level: Anastasya's extra stellar beat keeps its 0.0 delay (it lands on
+    #      the beat itself). Reuses the Anastasya run when run() already has it.
+    if ana is None:
+        ana = _run_anastasya_check()
+    out["extra_count"] = ana["extra_count"]
+    out["extra_delay_ok"] = ana["extra_delay_ok"]
+    return out
+
+
 def _run_editor_catalogue_check() -> dict:
     """Editor catalogues + preset trial team gating (what the UI is allowed to offer).
 
@@ -1569,19 +1866,19 @@ def _run_editor_catalogue_check() -> dict:
     out["sequence_count"] = len(seq_names)
     out["ability_count"] = len(ab_names)
 
-    # Faruzan E: collapse only, same insertion time / field time as her Q swap.
+    # Faruzan E: her skill CAST only (the collapse is a triggered ability now).
     fe = presets.FIELD_SEQUENCE_REGISTRY.get("FaruzanESwap")
     fq = presets.FIELD_SEQUENCE_REGISTRY.get("FaruzanQSwap")
     out["faruzan_e_exists"] = fe is not None
     if fe is not None and fq is not None:
         out["faruzan_e_same_swap"] = abs(fe.swap_out_time - fq.swap_out_time) <= 1e-9
         out["faruzan_e_same_insert"] = abs(fe.calls[0].start_time - fq.calls[0].start_time) <= 1e-9
-        out["faruzan_e_is_collapse"] = (len(fe.calls) == 1
-                                        and fe.calls[0].ability.name == "Pressurized Collapse")
+        out["faruzan_e_is_skill_cast"] = (len(fe.calls) == 1
+                                          and fe.calls[0].ability.name == "Skill Cast")
         out["faruzan_e_no_burst"] = all(c.ability.name != "Elemental Burst" for c in fe.calls)
     else:
         out["faruzan_e_same_swap"] = out["faruzan_e_same_insert"] = False
-        out["faruzan_e_is_collapse"] = out["faruzan_e_no_burst"] = False
+        out["faruzan_e_is_skill_cast"] = out["faruzan_e_no_burst"] = False
 
     # Party-gated filtering helper used by the UI.
     only_mizuki = presets.field_sequences_for(["Mizuki"])
@@ -1589,10 +1886,29 @@ def _run_editor_catalogue_check() -> dict:
         seq.character == "Mizuki" for seq in only_mizuki.values())
     out["filter_hides_outside"] = "AnastasyaEQ" not in only_mizuki
     out["abilities_for_anastasya"] = sorted(abilities.abilities_for("Anastasya").keys())
-    out["abilities_for_absent"] = abilities.abilities_for("Diona")
+    # A character that is not registered at all must yield NOTHING ("Diona" is a real
+    # character now, so it can no longer be used as the "absent" probe).
+    out["abilities_for_absent"] = abilities.abilities_for("Nobody")
     # Engine-injected procs stay registered but are never offered by the editor.
-    out["internal_hidden"] = ("Triumph" in abilities.ABILITY_REGISTRY.get("Anastasya", {})
-                              and "Triumph" not in abilities.abilities_for("Anastasya"))
+    out["internal_hidden"] = ({"Triumph", "Palestar Crown Extra Stellar"}
+                              <= set(abilities.ABILITY_REGISTRY.get("Anastasya", {}))
+                              and not ({"Triumph", "Palestar Crown Extra Stellar"}
+                                       & set(abilities.abilities_for("Anastasya"))))
+    # Triggered abilities: registered, never castable, never inside a field sequence.
+    out["triggered_registered"] = {
+        "Diona Choice Treasures": "Diona Choice Treasures" in abilities.ABILITY_REGISTRY.get("Diona", {}),
+        "Pressurized Collapse": "Pressurized Collapse" in abilities.ABILITY_REGISTRY.get("Faruzan", {}),
+    }
+    out["triggered_hidden"] = {
+        "Diona": "Diona Choice Treasures" not in abilities.abilities_for("Diona"),
+        "Faruzan": "Pressurized Collapse" not in abilities.abilities_for("Faruzan"),
+    }
+    out["triggered_in_sequences"] = sorted({
+        f"{seq.character} / {seq.name}: {call.ability.name}"
+        for seq in presets.FIELD_SEQUENCE_REGISTRY.values()
+        for call in seq.calls
+        if call.ability.name in abilities.ENGINE_INTERNAL_ABILITIES
+    })
 
     # Preset trials: required team == the characters their rotations actually use.
     mismatched = []
@@ -2312,6 +2628,12 @@ def run(verbose: bool = True) -> None:
          "hits with a zero motion value: " + ", ".join(hits_cat["zero_mv"])),
         (not hits_cat["duplicates"],
          "duplicate ability/sequence display names: " + ", ".join(hits_cat["duplicates"])),
+        (not hits_cat["bad_scaling_keys"],
+         "scaling_key must be exactly (character, category, sub ability); the talent "
+         "LEVEL is never part of it: " + "; ".join(hits_cat["bad_scaling_keys"])),
+        (not hits_cat["talent_crash"],
+         "update_ability_talent_level() fails on these abilities (a party that sets "
+         "talents would crash): " + "; ".join(hits_cat["talent_crash"])),
         ({"Burst Pullout 4 Nukes", "Skill Pullout 1 Nuke", "Skill Pullout 2 Nukes",
           "Skill Pullout 3 Nukes", "Skill Pullout 4 Nukes"}
          <= set(hits_cat["mizuki_ui"]),
@@ -2382,13 +2704,29 @@ def run(verbose: bool = True) -> None:
     #     stellar beat and Triumph arming.
     ana = _run_anastasya_check()
     ana_checks = [
+        # Pinned post-nerf kit data (see section 0 of _run_anastasya_check).
+        (abs(ana["swirl_mv_base"] - 50.4) <= 1e-9,
+         f"Anastasya Palestar Crown Stellar Swirl DMG base is {ana['swirl_mv_base']}, "
+         f"expected 50.4 (nerfed from 60.0)"),
+        (abs(ana["swirl_mv_lv13"] - 107.1) <= 1e-9,
+         f"Anastasya stellar swirl MV at lv13 is {ana['swirl_mv_lv13']}, expected 107.1 "
+         f"(50.4 base)"),
+        (abs(ana["tap_lv13"] - 251.175) <= 1e-9,
+         f"Anastasya Instantaneous Tap DMG at lv13 is {ana['tap_lv13']}, expected 251.175"),
+        (abs(ana["extra_stellar_lv13"] - 35.7) <= 1e-9,
+         f"Anastasya extra stellar swirl DMG at lv13 is {ana['extra_stellar_lv13']}, "
+         f"expected 35.7"),
+        (abs(ana["burst_bonus_lv13"] - 0.354) <= 1e-12,
+         f"Anastasya burst stellar bonus at lv13 is {ana['burst_bonus_lv13']}, "
+         f"expected 0.354 (nerfed from 0.575)"),
         (ana["burst_on"] and ana["burst_casts"] > 0,
          "Anastasya burst buff never activated"),
-        (abs((ana["burst_bonus_ally"] or 0.0) - 0.575) <= 1e-6,
+        (abs((ana["burst_bonus_ally"] or 0.0) - 0.354) <= 1e-6,
          f"Anastasya burst stellar_bonus on allies is {ana['burst_bonus_ally']}, "
-         f"expected 0.575 (burst lv13)"),
-        (abs((ana["burst_bonus_self"] or 0.0) - 0.575) <= 1e-6,
-         f"Anastasya burst stellar_bonus on herself is {ana['burst_bonus_self']}"),
+         f"expected 0.354 (burst lv13, nerfed)"),
+        (abs((ana["burst_bonus_self"] or 0.0) - 0.354) <= 1e-6,
+         f"Anastasya burst stellar_bonus on herself is {ana['burst_bonus_self']}, "
+         f"expected 0.354 (burst lv13, nerfed)"),
         (ana["burst_offenders"] == 0,
          f"{ana['burst_offenders']} hits kept the burst buff past its 20s window"),
         (ana["a1_on"], "Anastasya A1 window never activated"),
@@ -2448,9 +2786,97 @@ def run(verbose: bool = True) -> None:
     ana_failures = [msg for ok, msg in ana_checks if not ok]
     failures.extend(ana_failures)
     if not ana_failures and verbose:
-        print(f"[OK] Anastasya: burst buff (0.575/20s), A1 (+16% CD others/19s), "
+        print(f"[OK] Anastasya: burst buff (0.354/20s, nerfed), A1 (+16% CD others/19s), "
               f"A4 reaction jubilee + Lv2 vortices, extra beat, Triumph")
         print(f"     Anastasya preset total_avg_dmg={ana['total']:,.1f}")
+
+    # 2o-bis. Diona: Choice Treasures state, Icy Paw volleys and the C6 burst buff.
+    diona = _run_diona_check()
+    diona_checks = [
+        (abs(diona["window"] - 20.0) <= 1e-12,
+         f"Diona Choice Treasures window is {diona['window']}, expected 20.0"),
+        (abs(diona["cd"] - 3.5) <= 1e-12,
+         f"Diona Choice Treasures CD is {diona['cd']}, expected 3.5"),
+        (diona["ct_on_after_tap"], "her tap did not open the Choice Treasures state"),
+        (diona["ct_on_after_hold"], "her hold did not open the Choice Treasures state"),
+        (diona["ct_refresh_on"],
+         f"a second skill cast did not refresh the state (hits {diona['ct_refresh_hits']} "
+         f"after the first 20s are OFF)"),
+        (diona["ct_expires"],
+         f"the state outlived its 20s (hits {diona['ct_late_hits']} are still ON)"),
+        (diona["paws_without_state"] == 0 and diona["swirls_without_state"] > 0,
+         f"{diona['paws_without_state']} Icy Paw hits fired without the state "
+         f"({diona['swirls_without_state']} swirls happened)"),
+        (diona["paw_count"] > 0, "no Icy Paw volley fired in the Diona rotation"),
+        (diona["paw_owner_ok"], "an Icy Paw hit is not owned by Diona"),
+        (diona["paw_shape_ok"], "an Icy Paw hit is not STANDARD DMG / Elemental Skill"),
+        (diona["paw_aura_ok"], "Icy Paws apply Cryo on the wrong tick (expected tick 1 only)"),
+        (diona["volley_count"] >= 2,
+         f"only {diona['volley_count']} Icy Paw volley(s) fired (need 2+ to test the CD)"),
+        (not diona["volley_errors"],
+         "Icy Paw timing errors: " + "; ".join(diona["volley_errors"])),
+        (diona["volley_cd_ok"],
+         f"two volleys were fired less than 3.5s apart "
+         f"(trigger gaps {diona['volley_trigger_gaps']})"),
+        (abs(diona["c6_window"] - 11.75) <= 1e-12,
+         f"Diona C6 window is {diona['c6_window']}, expected 11.75 (the whole burst)"),
+        (diona["c6_cast_hits"] > 0, "Diona never cast her burst in the probe rotation"),
+        (diona["c6_includes_cast_hit"],
+         "Diona C6 buff does not include her own burst cast hit"),
+        (diona["c6_last_tick_on"] and diona["c6_last_tick_offset"] is not None
+         and abs(diona["c6_last_tick_offset"] - 11.73) <= 1e-9,
+         f"Diona C6 buff does not cover her last burst tick "
+         f"(offset {diona['c6_last_tick_offset']}, expected 11.73)"),
+        (diona["c6_on_past_window"] == 0,
+         f"{diona['c6_on_past_window']} hits kept the C6 buff past its 11.75s window"),
+        (abs(diona["c6_em_active"] - 200.0) <= 1e-9,
+         f"Diona C6 EM on the ACTIVE character is {diona['c6_em_active']}, expected 200"),
+        (abs(diona["c6_stellar_active"] - 0.40) <= 1e-12,
+         f"Diona C6 stellar_bonus on the ACTIVE character is "
+         f"{diona['c6_stellar_active']}, expected 0.40"),
+        (abs(diona["c6_em_offfield_owner"]) <= 1e-12,
+         f"Diona C6 leaked to Diona while she is OFF field "
+         f"({diona['c6_em_offfield_owner']} EM)"),
+        (diona["c5_never_on"], "Diona C6 buff activated below C6"),
+    ]
+    diona_failures = [msg for ok, msg in diona_checks if not ok]
+    failures.extend(diona_failures)
+    if not diona_failures and verbose:
+        print(f"[OK] Diona: Choice Treasures 20s -> {diona['volley_count']} Icy Paw volleys "
+              f"({diona['cd']}s CD, gaps {diona['volley_trigger_gaps']}), C6 +200 EM / "
+              f"+0.40 stellar on the active char")
+
+    # 2o-ter. Triggered-hit convention: the delay lives in abilities.py, never in the engine.
+    trig = _run_triggered_ability_check(ana)
+    trig_checks = [
+        (not trig["delay_mismatch"],
+         "triggered-hit delays drifted from the pinned values: "
+         + ", ".join(f"{k} {trig['delays'][k]} != {trig['expected'][k]}"
+                     for k in trig["delay_mismatch"])),
+        (not trig["convention_errors"],
+         "the triggered-hit helper does not schedule at trigger + relative_delay: "
+         + "; ".join(trig["convention_errors"])),
+        (trig["collapse_count"] > 0, "no Pressurized Collapse fired in the preset"),
+        (trig["collapse_delay_ok"],
+         "a Pressurized Collapse did not land 0.720s after its trigger hit"),
+        (trig["collapse_cd_ok"],
+         f"Pressurized Collapses are closer than the 3.0s trigger CD "
+         f"({trig['collapse_gaps']})"),
+        (trig["extra_count"] > 0, "no Anastasya extra stellar beat fired"),
+        (trig["extra_delay_ok"],
+         "the extra stellar beat did not land on its stellar beat (0.0 delay ignored)"),
+        (abs(trig["engine_windows"]["Faruzan collapse CD"] - 3.0) <= 1e-12
+         and abs(trig["engine_windows"]["Diona paw CD"] - 3.5) <= 1e-12
+         and abs(trig["engine_windows"]["Diona state"] - 20.0) <= 1e-12
+         and abs(trig["engine_windows"]["Diona C6"] - 11.75) <= 1e-12,
+         f"engine windows changed: {trig['engine_windows']}"),
+    ]
+    trig_failures = [msg for ok, msg in trig_checks if not ok]
+    failures.extend(trig_failures)
+    if not trig_failures and verbose:
+        print(f"[OK] triggered hits: delays are data ("
+              f"{', '.join(f'{k}={v:g}' for k, v in trig['delays'].items())}), "
+              f"{trig['collapse_count']} collapses at +0.720s, 3.0s trigger CD")
 
     # 2p. Editor catalogues + preset trial team gating.
     cat2 = _run_editor_catalogue_check()
@@ -2460,8 +2886,8 @@ def run(verbose: bool = True) -> None:
          "faruzan_e swap-out time differs from faruzan_q"),
         (cat2["faruzan_e_same_insert"],
          "faruzan_e insertion time differs from faruzan_q's burst cast"),
-        (cat2["faruzan_e_is_collapse"],
-         "faruzan_e does not call Pressurized Collapse only"),
+        (cat2["faruzan_e_is_skill_cast"],
+         "faruzan_e does not call her Skill Cast only"),
         (cat2["faruzan_e_no_burst"], "faruzan_e contains a burst cast"),
         (cat2["filter_only_party"],
          "field_sequences_for() returned a sequence owned by a non-party character"),
@@ -2471,6 +2897,16 @@ def run(verbose: bool = True) -> None:
          f"abilities_for('Anastasya') is {cat2['abilities_for_anastasya']}"),
         (cat2["abilities_for_absent"] == {},
          "abilities_for() returned abilities for a character that is not registered"),
+        (all(cat2["triggered_registered"].values()),
+         "a triggered ability is missing from ABILITY_REGISTRY: "
+         + ", ".join(k for k, ok in cat2["triggered_registered"].items() if not ok)),
+        (all(cat2["triggered_hidden"].values()),
+         "a triggered ability is offered by the field-sequence editor (it can only be "
+         "cast on its own conditions): "
+         + ", ".join(k for k, ok in cat2["triggered_hidden"].items() if not ok)),
+        (not cat2["triggered_in_sequences"],
+         "triggered abilities must never be part of a FieldSequence: "
+         + "; ".join(cat2["triggered_in_sequences"])),
         (cat2["internal_hidden"],
          "engine-injected abilities (Triumph / extra stellar) are offered by the editor"),
         (not cat2["trial_team_mismatches"],

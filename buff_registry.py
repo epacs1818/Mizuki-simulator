@@ -44,6 +44,8 @@ BUFFS = [
     {"key": "anastasya_a1_state", "label": "Anastasya A1 CD", "group": "Character", "owner": "Anastasya"},
     {"key": "anastasya_a4_state", "label": "Anastasya A4 Jubilee", "group": "Character", "owner": "Anastasya"},
     {"key": "anastasya_triumph_ready", "label": "Anastasya Triumph", "group": "Character", "owner": "Anastasya"},
+    {"key": "diona_ct_state", "label": "Diona Choice Treasures", "group": "Character", "owner": "Diona"},
+    {"key": "diona_c6_state", "label": "Diona C6 Buff", "group": "Character", "owner": "Diona", "min_constellation": 6},
     # --- Weapons -----------------------------------------------------------
     {"key": "exaiphanes_blade_state", "label": "Exaiphanes ATK%", "group": "Weapon", "owner": "Exaiphanes Blade"},
     {"key": "silver_light_stacks", "label": "Silver Light EM Stacks", "group": "Weapon", "owner": "Silver Light"},

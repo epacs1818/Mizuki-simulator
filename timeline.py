@@ -1,7 +1,7 @@
 import copy
 from typing import Dict, List, Optional, Tuple
 
-from models import ActionCategory, FieldSequence, AttackType, StatRef, Rotation, Trial
+from models import ActionCategory, FieldSequence, AttackType, Rotation, Trial
 from aura import CryoAuraTracker
 from mechanics import StellarVortex, stellar_swirl_hit
 from abilities import (
@@ -12,6 +12,8 @@ from abilities import (
     odette_recast_c1,
     anastasya_extra_stellar,
     anastasya_triumph,
+    faruzan_pressurized_collapse,
+    diona_choice_treasures,
     sucrose_burst,
     update_ability_talent_level,
     configure_field_sequence_talents,
@@ -48,6 +50,34 @@ _WINDOW_EPS = 1e-9
 #   With the current rotations this makes it proc on every loop from the 2nd one
 #   onwards. Raise it (18.0 was the earlier guess) once the kit rule is confirmed.
 ANASTASYA_TRIUMPH_DELAY = 0.0
+
+
+# ---------------------------------------------------------------------------
+# Triggered-hit convention (shared by every conditional proc)
+# ---------------------------------------------------------------------------
+# A triggered hit is ALWAYS scheduled at `trigger_time + hit.relative_delay`, read
+# from the ability/hit definition in abilities.py. The trigger delay is data: the
+# engine must never hardcode it, and 0.0 is a real value (so a delay-less proc can
+# gain a delay later without touching this module).
+#
+# Who uses what:
+#   Mizuki VBTD nuke ....... mizuki_nuke_hit.relative_delay      (0.500)
+#   Mizuki C1 mini nuke .... mizuki_c1_mini_nuke_hit.relative_delay (0.0)
+#   Faruzan collapse ....... faruzan_pressurized_collapse.hits[0]  (0.720)
+#   Diona Icy Paws ......... diona_choice_treasures.hits[i]        (0.270 / 0.360 / 0.360)
+#   Anastasya extra stellar  anastasya_extra_stellar.hits[0]      (0.0)
+#   Anastasya Triumph ...... anastasya_triumph.hits[0] (trigger = her swap-in, the
+#                            minimum gap stays in ANASTASYA_TRIUMPH_DELAY above)
+
+# Faruzan: Pressurized Collapse internal cooldown, measured FROM THE TRIGGER hit.
+FARUZAN_COLLAPSE_CD = 3.0
+
+# Diona: "Choice Treasures" state, opened/refreshed by her tap or hold skill hits.
+DIONA_CHOICE_TREASURES_WINDOW = 20.0
+DIONA_CHOICE_TREASURES_CD = 3.5          # between two Icy Paw volleys, from the trigger
+DIONA_SKILL_ABILITIES = ("Diona Skill [Tap]", "Diona Skill [Hold]")
+# Diona C6: the burst cast hit buffs the ACTIVE character for the whole burst field.
+DIONA_C6_WINDOW = 11.750
 
 
 # ==========================================
@@ -252,6 +282,91 @@ class RotationTimeline:
             )
         ]
 
+    # -----------------------------------------------------------------------
+    # Triggered hits (engine-injected procs)
+    # -----------------------------------------------------------------------
+    # Every conditional proc goes through these two helpers, so the "delay lives in
+    # the ability definition, never in the engine" rule is enforced in ONE place:
+    # a triggered hit is placed at `trigger_time + hit.relative_delay`.
+    #
+    # Keys that must never be inherited from the triggering event: they accumulate
+    # damage (quill_damage / c1_quill), re-route the event (Aether's burst variant
+    # substitution) or mark it as a reaction contributor (swirl / vortex metadata).
+    _TRIGGERED_DROP_KEYS = (
+        "quill_damage", "c1_quill", "burst_variant", "burst_call_id",
+        "frostglow_consumed", "aether_c6_consumed_on",
+        "swirl_metadata", "vortex_metadata", "reaction",
+    )
+
+    def _resolved_triggered_ability(self, ability, character: Optional[str] = None):
+        """The triggered ability, deep-copied and scaled at the PARTY's talent level.
+
+        Triggered hits never go through add_field_sequence(), so nobody else sets
+        their talent level; resolving it here keeps their motion value data-driven
+        (scaling_key -> skill_scalings) instead of frozen at the definition level.
+        """
+        resolved = copy.deepcopy(ability)
+        talent_type = resolved.talent_type
+        index = {"normal_talent": 0, "skill_talent": 1, "burst_talent": 2}.get(talent_type, 1)
+        level = resolved.talent_level
+        talents = self.party.get(character or resolved.character, {}).get("talents")
+        if isinstance(talents, str):
+            parts = talents.split("/")
+            if len(parts) > index:
+                level = int(parts[index])
+        elif isinstance(talents, (list, tuple)) and len(talents) > index:
+            level = int(talents[index])
+        update_ability_talent_level(resolved, level)
+        return resolved
+
+    def _triggered_hit_event(self, hit, trigger_event: Dict, trigger_time: float,
+                             ability_name: str, *, hit_name: Optional[str] = None,
+                             owner: Optional[str] = None,
+                             extra: Optional[Dict] = None) -> Dict:
+        """Build (without inserting) one triggered hit from its Hit template.
+
+        `owner` is the character the triggered hit BELONGS to. Always pass it
+        explicitly unless the proc is self-triggered: the default (the triggering
+        event's character) would credit the proc to whoever caused it, e.g. a Faruzan
+        collapse triggered by Mizuki's hit would be dealt with Mizuki's stats.
+        """
+        event = {key: value for key, value in trigger_event.items()
+                 if key not in self._TRIGGERED_DROP_KEYS}
+        event.update({
+            "global_time": trigger_time + hit.relative_delay,
+            "character": owner or trigger_event.get("character"),
+            "active_character": trigger_event.get("active_character"),
+            "action": hit.name,
+            "hit_name": hit_name or hit.name,
+            "ability_name": ability_name,
+            "category": hit.category,
+            "element": hit.element,
+            "elem_app": hit.elemental_app if hit.elemental_app else "-",
+            "event_type": "HIT",
+            "stat_ref": hit.stat_ref,
+            "multiplier": hit.multiplier,
+            "attack_type": hit.attack_type,
+            # Offset inside its own (triggered) ability: "hit_offset == 0" keeps
+            # meaning "first hit of this cast" for the set/burst-once rules.
+            "hit_offset": hit.relative_delay,
+            "reaction": "-",
+            "triggered": ability_name,
+        })
+        if extra:
+            event.update(extra)
+        return event
+
+    def _insert_triggered_hit(self, hit, trigger_event: Dict, trigger_time: float,
+                              ability_name: str, *, index: int, **kwargs) -> Dict:
+        """Build and INSERT one triggered hit. The caller owns the slot (`index`):
+        an injected hit should be processed right after its trigger so the buff
+        windows are read in chronological order."""
+        event = self._triggered_hit_event(hit, trigger_event, trigger_time,
+                                          ability_name, **kwargs)
+        self.global_events.insert(index, event)
+        return event
+
+
     def _parse_gauge(self, elem_app: str) -> float:
         if elem_app and elem_app != "-" and elem_app.endswith("U"):
             try:
@@ -353,6 +468,11 @@ class RotationTimeline:
         faruzan_buff_expiration: Optional[float] = None
         faruzan_debuff_expiration: Optional[float] = None
         faruzan_collapse_cd_expires: float = -1.0
+
+        # Diona State Trackers
+        diona_ct_expiration: Optional[float] = None   # Choice Treasures state (20s, refreshed)
+        diona_ct_cd_ready: float = -1.0               # next Icy Paw volley allowed (3.5s)
+        diona_c6_expiration: Optional[float] = None   # C6 Active EM / stellar buff (11.75s)
 
         # Weapon State Trackers (all holder-only; None when not equipped)
         widsith_holder = (self._weapon_holder("The Widsith (Average)")
@@ -620,13 +740,6 @@ class RotationTimeline:
 
             # 3. Faruzan Buff & Debuff Logic
             if "Faruzan" in self.party:
-                # Helper to safely pull Faruzan's skill talent level (index 1 of int/int/int)
-                far_talents = self.party.get("Faruzan", {}).get("talents", "1/13/13")
-                if isinstance(far_talents, str):
-                    skill_lvl = int(far_talents.split("/")[1])
-                else:
-                    skill_lvl = far_talents[1]
-
                 # Faruzan's BASE ATK (character + weapon base, ignoring atk% / flat).
                 faruzan_base_atk = self.char_initial_stats_map.get("Faruzan", {}).get("base_atk", 0.0)
 
@@ -637,23 +750,12 @@ class RotationTimeline:
                 # from the pre-event expiration (the cast's damage comes first).
                 faruzan_buff_active = (faruzan_buff_expiration is not None) and (t <= faruzan_buff_expiration)
 
-                # Helper function to build the dynamic collapse event dictionary
-                def create_collapse_event(c_time):
-                    collapse_mv = get_ability_motion_value("Faruzan", "Skill", "Pressurized Collapse Vortex DMG", skill_lvl)
-                    return {
-                        "global_time": c_time,
-                        "character": "Faruzan",
-                        "action": "Pressurized Collapse",
-                        "category": ActionCategory.STANDARD_DMG,
-                        "elem_app": "1U",
-                        "element": "Anemo",
-                        "event_type": "HIT",
-                        "hit_name": "Pressurized_Collapse",
-                        "ability_name": "Pressurized Collapse",
-                        "stat_ref": StatRef.ATK,
-                        "multiplier": collapse_mv,
-                        "attack_type": AttackType.SKILL
-                    }
+                # Pressurized Collapse is a TRIGGERED ability: its 0.72s trigger delay
+                # and its motion value both come from abilities.py (the MV is resolved
+                # at the party's skill talent level), never from this module.
+                def _collapse_hit():
+                    return self._resolved_triggered_ability(
+                        faruzan_pressurized_collapse, "Faruzan").hits[0]
 
                 # 1. Insertion upon Burst Cast
                 if e_type == "HIT" and char == "Faruzan" and ability_name == "Elemental Burst" and hit_name == "Burst_Cast":
@@ -661,10 +763,11 @@ class RotationTimeline:
                     # Debuff "bigger number wins": burst opens the full 22s window.
                     old_debuff = faruzan_debuff_expiration if faruzan_debuff_expiration is not None else 0.0
                     faruzan_debuff_expiration = max(old_debuff, t + 22.0)
-                    collapse_time = t + 0.720  # standard delay for pressurized collapse
-                    faruzan_collapse_cd_expires = collapse_time + 3.0
-
-                    self.global_events.insert(i + 1, create_collapse_event(collapse_time))
+                    # CD measured FROM THE TRIGGER (same rule as every other proc).
+                    faruzan_collapse_cd_expires = t + FARUZAN_COLLAPSE_CD
+                    self._insert_triggered_hit(
+                        _collapse_hit(), event, t, faruzan_pressurized_collapse.name,
+                        index=i + 1, hit_name="Pressurized_Collapse", owner="Faruzan")
 
                 # Pressurized Collapse refreshes the debuff by 4s, but never overrides
                 # a longer 22s window already in effect (bigger number priority).
@@ -675,9 +778,10 @@ class RotationTimeline:
                 # 2. Insertion upon Passive Trigger during Buff Window
                 if faruzan_buff_active and e_type == "HIT" and hit_name != "Pressurized_Collapse":
                     if t >= faruzan_collapse_cd_expires:
-                        collapse_time = t + 0.720
-                        faruzan_collapse_cd_expires = collapse_time + 3.0
-                        self.global_events.insert(i + 1, create_collapse_event(collapse_time))
+                        faruzan_collapse_cd_expires = t + FARUZAN_COLLAPSE_CD
+                        self._insert_triggered_hit(
+                            _collapse_hit(), event, t, faruzan_pressurized_collapse.name,
+                            index=i + 1, hit_name="Pressurized_Collapse", owner="Faruzan")
 
                 # 3. Faruzan Quill: 32% of her BASE_ATK added to any ANEMO + STANDARD hit
                 #    from a buffed character (base = character+weapon, ignores atk% / flat).
@@ -774,33 +878,10 @@ class RotationTimeline:
                         # computed in the reaction calc from Mizuki's event-time stats.
                         swirl_hit_event["c1_quill"] = True
 
-                        mini_nuke_event = {
-                            "global_time": t + mizuki_c1_mini_nuke_hit.relative_delay,
-                            "active_character": active_character,
-                            "character": "Mizuki",
-                            "action": mizuki_c1_mini_nuke_hit.name,
-                            "category": mizuki_c1_mini_nuke_hit.category,
-                            "elem_app": mizuki_c1_mini_nuke_hit.elemental_app if mizuki_c1_mini_nuke_hit.elemental_app else "-",
-                            "element": mizuki_c1_mini_nuke_hit.element,
-                            "event_type": "HIT",
-                            "hit_name": "C1_Mini_Nuke",
-                            "ability_name": "Mizuki C1",
-                            "stat_ref": mizuki_c1_mini_nuke_hit.stat_ref,
-                            "multiplier": mizuki_c1_mini_nuke_hit.multiplier,
-                            "attack_type": mizuki_c1_mini_nuke_hit.attack_type,
-                            "reaction": "-",
-                            "dreamdrifter_state": event.get("dreamdrifter_state", "OFF"),
-                            "mizuki_a4_state": event.get("mizuki_a4_state", "OFF"),
-                            "vbtd_state": event.get("vbtd_state", "OFF"),
-                            "c1_debuff_state": event.get("c1_debuff_state", "OFF"),
-                            "faruzan_buff_state": event.get("faruzan_buff_state", "OFF"),
-                        "faruzan_buff_window": event.get("faruzan_buff_window", "OFF"),
-                            "faruzan_debuff_state": event.get("faruzan_debuff_state", "OFF"),
-                            "aether_c2_state": event.get("aether_c2_state", "OFF"),
-                            "marvelous_stacks": event.get("marvelous_stacks", 0),
-                            "hotf_state": event.get("hotf_state", "OFF")
-                        }
-                        self.global_events.insert(i + 2, mini_nuke_event)
+                        # Triggered hit: delay comes from mizuki_c1_mini_nuke_hit.
+                        self._insert_triggered_hit(
+                            mizuki_c1_mini_nuke_hit, event, t, "Mizuki C1",
+                            index=i + 2, hit_name="C1_Mini_Nuke", owner="Mizuki")
 
                     if active_vortex is None or not active_vortex.is_active:
                         # Anastasya A4: vortices spawn already at level 2 and only
@@ -854,38 +935,15 @@ class RotationTimeline:
 
             # VBTD Nuke Hit Insertion (fired on subsequent skill tick)
             if fire_vbtd_nuke:
-                nuke_hit_time = t + mizuki_nuke_hit.relative_delay
-                nuke_event = {
-                    "global_time": nuke_hit_time,
-                    "active_character": active_character,
-                    "character": "Mizuki",
-                    "action": mizuki_nuke_hit.name,
-                    "category": mizuki_nuke_hit.category,
-                    "elem_app": mizuki_nuke_hit.elemental_app if mizuki_nuke_hit.elemental_app else "-",
-                    "element": mizuki_nuke_hit.element,
-                    "event_type": "HIT",
-                    "hit_name": mizuki_nuke_hit.name,
-                    "ability_name": "Mizuki Nuke",
-                    "stat_ref": mizuki_nuke_hit.stat_ref,
-                    "multiplier": mizuki_nuke_hit.multiplier,
-                    "attack_type": mizuki_nuke_hit.attack_type,
-                    "reaction": "-",
-                    "dreamdrifter_state": event.get("dreamdrifter_state", "OFF"),
-                    "mizuki_a4_state": event.get("mizuki_a4_state", "OFF"),
-                    "vbtd_state": "OFF",
-                    "c1_debuff_state": event.get("c1_debuff_state", "OFF"),
-                    "faruzan_buff_state": event.get("faruzan_buff_state", "OFF"),
-                    "faruzan_debuff_state": event.get("faruzan_debuff_state", "OFF"),
-                    "aether_c2_state": event.get("aether_c2_state", "OFF"),
-                    "marvelous_stacks": event.get("marvelous_stacks", 0),
-                    "hotf_state": event.get("hotf_state", "OFF"),
-                }
+                # Triggered hit: delay comes from mizuki_nuke_hit (0.500s).
                 nuke_offset = 1
                 if is_stellar_swirl and swirl_meta:
                     nuke_offset += 1
                     if current_c1_active:
                         nuke_offset += 1
-                self.global_events.insert(i + nuke_offset, nuke_event)
+                self._insert_triggered_hit(
+                    mizuki_nuke_hit, event, t, "Mizuki Nuke",
+                    index=i + nuke_offset, owner="Mizuki", extra={"vbtd_state": "OFF"})
 
             # The Aura column reports the state this event was resolved against (before
             # its own elemental application), so it only changes on the NEXT row after
@@ -1342,25 +1400,14 @@ class RotationTimeline:
 
                 # Conditional hit: while her burst buff is up, every stellar beat of
                 # her skill additionally fires an extra Stellar Swirl DMG hit.
+                # Triggered hit: it lands at trigger + anastasya_extra_stellar's delay.
                 if (e_type == "HIT" and char == "Anastasya"
                         and hit_name.startswith("Palestar Crown Stellar")
                         and ana_burst_open):
-                    extra = anastasya_extra_stellar.hits[0]
-                    extra_event = dict(event)
-                    extra_event.update({
-                        "action": extra.name,
-                        "hit_name": extra.name,
-                        "category": extra.category,
-                        "element": extra.element,
-                        "elem_app": extra.elemental_app if extra.elemental_app else "-",
-                        "ability_name": anastasya_extra_stellar.name,
-                        "stat_ref": extra.stat_ref,
-                        "multiplier": extra.multiplier,
-                        "hit_offset": event.get("hit_offset", 0.0),
-                        "attack_type": extra.attack_type,
-                        "burst_call_id": None,
-                    })
-                    self.global_events.insert(i + 1, extra_event)
+                    self._insert_triggered_hit(
+                        anastasya_extra_stellar.hits[0], event, t,
+                        anastasya_extra_stellar.name, index=i + 1,
+                        owner="Anastasya", extra={"burst_call_id": None})
 
                 # Triumph: fired by her next swap-in once 18s have elapsed since the
                 # burst cast; one trigger per burst cast.
@@ -1387,6 +1434,57 @@ class RotationTimeline:
                     }
                     self.global_events.insert(i + 1, triumph_event)
                     anastasya_triumph_armed = False
+
+            # 7c. Diona: the "Choice Treasures" state (20s, refreshed by her tap/hold
+            #     skill hits), the Icy Paw volley she fires on any Stellar Swirl while
+            #     it is up (3.5s CD, from the trigger) and her C6 burst buff.
+            if "Diona" in self.party:
+                diona_c6_unlocked = self.party.get("Diona", {}).get("constellation", 0) >= 6
+
+                # Any hit of her tap or hold cast (re)opens the 20s state.
+                if (e_type == "HIT" and char == "Diona"
+                        and ability_name in DIONA_SKILL_ABILITIES):
+                    diona_ct_expiration = t + DIONA_CHOICE_TREASURES_WINDOW
+
+                diona_ct_on = (diona_ct_expiration is not None
+                               and t <= diona_ct_expiration + _WINDOW_EPS)
+
+                # Choice Treasures: a Stellar Swirl triggered by ANY character fires
+                # the Icy Paw volley. The 3.5s CD is measured from the TRIGGER, and
+                # every paw lands at trigger + its own relative_delay (abilities.py).
+                if diona_ct_on and is_stellar_swirl and t >= diona_ct_cd_ready:
+                    diona_ct_cd_ready = t + DIONA_CHOICE_TREASURES_CD
+                    paws = self._resolved_triggered_ability(
+                        diona_choice_treasures, "Diona").hits
+                    # Insert after everything already scheduled up to the first paw,
+                    # so the volley is processed in chronological order (this swirl's
+                    # own invented rows included) without disturbing older procs.
+                    insert_at = i + 1
+                    first_paw_time = t + paws[0].relative_delay
+                    while (insert_at < len(self.global_events)
+                           and self.global_events[insert_at]["global_time"] <= first_paw_time):
+                        insert_at += 1
+                    for paw in paws:
+                        self._insert_triggered_hit(
+                            paw, event, t, diona_choice_treasures.name,
+                            index=insert_at, owner="Diona")
+                        insert_at += 1
+
+                # C6: her burst cast hit buffs the ACTIVE character (+EM, +stellar
+                # bonus) for the whole burst field, and INCLUDING the cast hit itself.
+                # That is the one deliberate exception to the "read pre-arm" rule: the
+                # window is armed first and the flag resolved after it.
+                if (e_type == "HIT" and char == "Diona" and diona_c6_unlocked
+                        and ability_name == "Diona Burst" and hit_name == "Burst Cast"):
+                    diona_c6_expiration = t + DIONA_C6_WINDOW
+
+                diona_c6_on = (diona_c6_expiration is not None
+                               and t <= diona_c6_expiration + _WINDOW_EPS)
+                event["diona_ct_state"] = "ON" if diona_ct_on else "OFF"
+                event["diona_c6_state"] = "ON" if diona_c6_on else "OFF"
+            else:
+                event["diona_ct_state"] = "OFF"
+                event["diona_c6_state"] = "OFF"
 
             # 8. Heart of the Furnace (HotF) Gear Effect Logic
             # Triggers when whoever holds the piece deals Stellar DMG OR triggers a

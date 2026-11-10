@@ -15,6 +15,7 @@ if not hasattr(buffs, "TEAM_BUFFS"):
     buffs.TEAM_BUFFS = getattr(buffs, "STATIC_BUFFS", {})
 
 from artifacts import ARTIFACTS_BONUSES
+from characters import get_character_element
 from weapons import WEAPON_STATS
 # Gear -> stat math now lives in build_io (shared by the UI and file loading).
 from substats_standards import CARRIES, standard_piece_mains
@@ -518,45 +519,77 @@ def validate_talents(talent_str):
     return True, None, levels
 
 
+def _talents_label(data: dict) -> str:
+    """Talent levels as the user typed them ("10/13/13"), for the party cards."""
+    talents = data.get("talents")
+    if isinstance(talents, str) and talents.strip():
+        return talents.strip()
+    levels = data.get("talent_levels")
+    if isinstance(levels, (list, tuple)) and len(levels) == 3:
+        return "/".join(str(int(level)) for level in levels)
+    return "—"
+
+
+def _card_element(char_name: str, data: dict) -> str:
+    """Element shown next to the level: the stored one, else the character table."""
+    element = data.get("element")
+    if element:
+        return element
+    return get_character_element(char_name) or "?"
+
+
+def render_party_card(char_name: str, data: dict, *, image_width: int = 74,
+                      font_size: str = "0.82rem", column_gap: int = 12) -> None:
+    """One character card: portrait, identity lines, then the gear stat grid.
+
+    Shared by the Tab 1 party cards and the Tab 4 result snapshots, so the two can
+    never show different information again. (Tab 4 used to lack the element, the
+    talent levels, the artifact set and the substat standard.)
+    """
+    img_col, id_col = st.columns([1, 1.7], vertical_alignment="center")
+    with img_col:
+        img_path = Path(f"assets/characters/{char_name.lower()}.webp")
+        if img_path.exists():
+            st.image(str(img_path), width=image_width)
+    with id_col:
+        st.markdown(f"**{char_name}** `C{data.get('constellation', 0)}`")
+        st.caption(f"Lv {data.get('level', 90)} · {_card_element(char_name, data)}")
+        st.caption(f"{data.get('weapon') or 'No weapon'} R{data.get('refinement', 1)}")
+        st.caption(f"Talents: {_talents_label(data)}")
+        st.caption(f"{data.get('artifact_set') or data.get('artifact') or 'None'}")
+        # Substat standard: an RV/KQM build carries crit as one Crit Value (CV) line in
+        # the grid below, a manual build carries CR / CD. Same options, new label.
+        model_label = crit_model_label(data)
+        st.caption(f"Substats: **{model_label}**" if model_label != "Manual"
+                   else "Substats: Manual (CR / CD)")
+
+    rows = "".join(
+        f"<div style='opacity:0.85'>{label}</div>"
+        f"<div style='text-align:right;font-weight:600'>{value}</div>"
+        for label, value in (data.get("card_stats") or {}).items()
+    )
+    st.markdown(
+        "<div style='display:grid;grid-template-columns:auto auto;"
+        f"column-gap:{column_gap}px;font-size:{font_size};line-height:1.45;margin-top:4px'>"
+        f"{rows}</div>",
+        unsafe_allow_html=True,
+    )
+
+
 def render_character_cards(my_party: dict) -> None:
     """Compact off-field stat cards for the current party.
 
     Shown directly under the team section header so the party stays visible while the
     slots/artifacts below are edited. Deliberately small: a thumbnail portrait next to
-    the identity block, then the gear stats as a two-column grid.
+    the identity block, then the gear stats as a two-column grid. Every card is drawn
+    by render_party_card(), i.e. exactly like the Tab 4 snapshots.
     """
     st.markdown("##### Character Cards (Off-Field Stats)")
     card_cols = st.columns(max(len(my_party), 1))
     for col, (char_name, data) in zip(card_cols, my_party.items()):
         with col:
             with st.container(border=True):
-                img_col, id_col = st.columns([1, 1.7], vertical_alignment="center")
-                with img_col:
-                    img_path = Path(f"assets/characters/{char_name.lower()}.webp")
-                    if img_path.exists():
-                        st.image(str(img_path), width=74)
-                with id_col:
-                    st.markdown(f"**{char_name}** `C{data['constellation']}`")
-                    st.caption(f"Lv {data.get('level', 90)} · {data.get('element') or '?'}")
-                    st.caption(f"{data['weapon']} R{data['refinement']}")
-                    st.caption(f"{data['artifact_set']}")
-                    # Which crit model the party actually uses: an RV/KQM carry shows a
-                    # single CV line below, a manual one shows CR / CD.
-                    model_label = crit_model_label(data)
-                    st.caption(f"Crit model: **{model_label}**" if model_label != "Manual"
-                               else "Crit model: Manual (CR / CD)")
-
-                rows = "".join(
-                    f"<div style='opacity:0.85'>{label}</div>"
-                    f"<div style='text-align:right;font-weight:600'>{value}</div>"
-                    for label, value in (data.get("card_stats") or {}).items()
-                )
-                st.markdown(
-                    "<div style='display:grid;grid-template-columns:auto auto;"
-                    "column-gap:12px;font-size:0.82rem;line-height:1.45;margin-top:4px'>"
-                    f"{rows}</div>",
-                    unsafe_allow_html=True,
-                )
+                render_party_card(char_name, data)
     st.markdown("")
 
 
@@ -1061,7 +1094,7 @@ with tab2:
                             st.image(str(enemy_img_path), width=88)
                     with head_text:
                         st.markdown(f"**Level {enemy_lv} Target**")
-                        st.caption("Damage target · off-field buffs apply")
+                        st.caption("Elemental & Physical Resistances")
 
                     st.markdown("---")
                     rows = [
@@ -1199,8 +1232,8 @@ with tab3:
                     for name, data in party.items()
                 )
                 enemy_summary = f"Lv{enemy.get('enemy_lv','?')} | Cryo Res {int(enemy.get('cryo_res',0.1)*100)}% | Anemo Res {int(enemy.get('anemo_res',0.1)*100)}%"
-                # Crit model used by THIS run (empty when every member is Manual), so an
-                # old manual entry can never be confused with an RV/KQM one.
+                # Substat standard used by THIS run (empty when every member is Manual),
+                # so an old manual entry can never be confused with an RV/KQM one.
                 standards = party_rv_summary(party)
                 timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
 
@@ -1473,8 +1506,8 @@ with tab4:
                 entry["sim_name"] = f"Simulation #{real_idx + 1}"
             
             with st.expander(f"[{entry['timestamp']}] {entry['sim_name']}", expanded=(i == 0)):
-                
-                # 1. RENAME CONTROLS
+    
+                # 1. RENAME CONTROLS & DELETE
                 col_name_input, col_info = st.columns([3, 1], vertical_alignment="bottom")
                 with col_name_input:
                     new_name = st.text_input(
@@ -1491,16 +1524,65 @@ with tab4:
                         st.session_state["history"].pop(real_idx)
                         st.rerun()
 
-                st.markdown(f"**Characters:** {entry['chars']}")
-                st.markdown(f"**Enemy Setup:** {entry['enemy']}")
-                st.markdown(f"**Trial Executed:** `{entry['field_sequences']}`")
-                # Which crit model this run used. Missing on old entries: they ran before
-                # the column existed, i.e. every carry was Manual.
-                st.markdown(f"**Crit Model:** {entry.get('standards') or 'Manual (CR / CD)'}")
-                
+                st.markdown("---")
+
+                # 2. SIDE-BY-SIDE VISUAL CARDS (Party Cards & Enemy Target Card)
+                party_cards_col, enemy_card_col = st.columns([2.2, 1], gap="medium")
+
+                # Left: Party Character Cards
+                with party_cards_col:
+                    st.markdown("##### Party Setup")
+                    snapshot_party = entry.get("snapshot_party", {})
+                    if snapshot_party:
+                        card_cols = st.columns(max(len(snapshot_party), 1))
+                        for col, (char_name, data) in zip(card_cols, snapshot_party.items()):
+                            with col:
+                                with st.container(border=True):
+                                    # Same card as Tab 1 (element, talents, gear, substat
+                                    # standard), only more compact: the column is narrow.
+                                    render_party_card(char_name, data, image_width=60,
+                                                      font_size="0.75rem", column_gap=8)
+
+                # Right: Enemy Target Card
+                with enemy_card_col:
+                    st.markdown("##### Target Overview")
+                    snapshot_enemy = entry.get("snapshot_enemy", {})
+                    if snapshot_enemy:
+                        with st.container(border=True):
+                            head_img, head_text = st.columns([1, 2], vertical_alignment="center")
+                            with head_img:
+                                enemy_img_path = Path("assets/enemy/target.webp")
+                                if enemy_img_path.exists():
+                                    st.image(str(enemy_img_path), width=70)
+                            with head_text:
+                                st.markdown(f"**Level {snapshot_enemy.get('enemy_lv', 100)} Target**")
+                                st.caption("Elemental & Physical Resistances")
+
+                            st.markdown("---")
+                            elements = ["pyro", "cryo", "hydro", "electro", "anemo", "geo", "dendro", "physical"]
+                            rows = [
+                                (elem.capitalize(), f"{snapshot_enemy.get(f'{elem}_res', 0.1) * 100:.1f}")
+                                for elem in elements
+                            ]
+                            # Every resistance, exactly like the Tab 1 enemy card (the grid
+                            # used to be cut at 4 entries).
+                            grid = "".join(
+                                f"<div style='opacity:0.85'>{name}</div>"
+                                f"<div style='text-align:right;font-weight:600'>{value}%</div>"
+                                for name, value in rows
+                            )
+                            st.markdown(
+                                "<div style='display:grid;grid-template-columns:auto auto;"
+                                "column-gap:14px;font-size:0.86rem;line-height:1.5'>"
+                                f"{grid}</div>",
+                                unsafe_allow_html=True,
+                            )
+
+                # 3. SINGLE LINE TRIAL ROTATION SUMMARY
+                st.markdown(f"**Trial Rotation Executed:** `{entry['field_sequences']}`")
+
                 st.markdown("---")
                 st.subheader("Performance Calculations & Analytics")
-
                 # --- FALLBACK: Compute analytics on-the-fly for old history entries ---
                 analytics = entry.get("analytics", {})
                 if not analytics and "timeline_events" in entry and entry["timeline_events"]:

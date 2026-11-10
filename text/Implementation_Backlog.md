@@ -15,10 +15,10 @@ Legend: ✔ = verified (the `New test` set or an automated invariant in
 | Mizuki | Anemo | C0-C6 | ✔ | C2 verified (shred + flat-EM PHEC bonus); C6 verified (party stellar crit + flat-EM crit) |
 | Aether | Cryo | C4-C6 | ✔ | C6 verified (Frostglow / Aether C6 stellar) |
 | Odette | Cryo | C0 | ✔ | C2 verified (Marvelous stacks); Snow Swan's Dream = 20s self stellar_bonus |
-| Anastasya | Cryo | C0 | ✔ | Burst party stellar_bonus (0.575 @ B13, 20s), A1 (+16% CD others/19s), A4 reaction-only jubilee (+0.15) + Lv2 vortices (3 swirls to detonate), Jubilee passive, Triumph (next swap-in, provisional delay 0.0 → every loop from the 2nd), conditional extra stellar beat |
-| Faruzan | Anemo | C6 | ✔ | C6 CD buff + Anemo shred verified |
+| Anastasya | Cryo | C0 | ✔ | Burst party stellar_bonus (**0.354 @ B13**, 20s — nerfed from 0.575), A1 (+16% CD others/19s), A4 reaction-only jubilee (+0.15) + Lv2 vortices (3 swirls to detonate), Jubilee passive, Triumph (next swap-in, provisional delay 0.0 → every loop from the 2nd), conditional extra stellar beat |
+| Faruzan | Anemo | C6 | ✔ | C6 CD buff + Anemo shred verified; her Skill Cast and the triggered Pressurized Collapse are separate abilities (collapse delay + 3.0s CD live in abilities.py) |
 | Sucrose | Anemo | C0-C6 | ✔ | A1/A4/C6 verified (scope, magnitude and window) |
-| Diona | Cryo | C6 | ◻ | C6 EM / stellar buff only — no timeline trigger yet |
+| Diona | Cryo | C6 | ✔ | Choice Treasures (20s state from either skill hit) → Icy Paw volley 0.270s after ANY Stellar Swirl (3.5s CD from the trigger); C6 burst-cast buff (+200 EM / +0.40 stellar) on the ACTIVE character for the whole burst (11.75s) |
 
 ## Weapons
 
@@ -234,8 +234,10 @@ removing it from `buffs.DORMANT`.
 
 | Effect | Kind | Trigger that is still missing |
 | --- | --- | --- |
-| Diona C6 | Character | burst field -> Active EM / stellar_bonus |
 | Odette C6 (self/party) | Character | elevation_mult on her stellar hits |
+
+(Diona C6 left this list: its timeline flag `diona_c6_state` + `FLAG_TO_BUFFS`
+descriptor are in place since the Diona round.)
 
 ## Next verification targets
 
@@ -244,10 +246,9 @@ and Odette's Snow Swan's Dream are all implemented and covered by `smoke_test.py
 Remaining work:
 
 1. Odette's constellations (C1 recast / C2 stacks / C3) end-to-end verification.
-2. Diona (C6 only): burst field -> Active EM / stellar_bonus.
-3. Sucrose's burst absorption stays hardcoded to `Cryo` **by design** for the
+2. Sucrose's burst absorption stays hardcoded to `Cryo` **by design** for the
    foreseeable future (no work planned).
-4. Anastasya: Triumph's rule is **provisional on purpose**
+3. Anastasya: Triumph's rule is **provisional on purpose**
    (`ANASTASYA_TRIUMPH_DELAY = 0.0` in `timeline.py`, i.e. it fires on her next
    swap-in, so every loop from the 2nd one). Replace that constant with the real
    rule once the content is released — nothing else in the engine needs to change.
@@ -275,13 +276,15 @@ visit (EQ, 2.851s). The loop only becomes legal because Odette uses her QE
 (3.071s field): 2.851 + 1.410 + 1.750 + 3.071 + 10.0 = 19.082s >= Faruzan's 19s
 burst cooldown. Odette's own Snow Swan's Dream stays up on her as a side effect.
 
-New field sequence `faruzan_e` (`FaruzanESwap`): the actively called Pressurized
-Collapse at the same 1.200s insertion time and the same 1.410s field time as her
-burst swap. Not used by the presets; kept for future loops.
+New field sequence `faruzan_e` (`FaruzanESwap`): her skill CAST at the same 1.200s
+insertion time and the same 1.410s field time as her burst swap. The collapse is a
+triggered ability and is not part of the sequence (see the triggered-hit round below).
+Not used by the presets; kept for future loops.
 
 `DEFAULT_PARTY` still runs Aether, so **the baseline did not move**:
 1064651.5 / 1211525.5 / 1273564.4 / 1476591.7 (C0/C1/C2/C6).
-The Anastasya trial totals **4,904,232.3** average damage over its 6 passes.
+The Anastasya trial totals ~~4,904,232.3~~ → **4,460,586.2** average damage over its
+6 passes (see the triggered-hit round: -3.6 % from the nerf + the Faruzan CD rule).
 
 **Triumph is on a provisional rule** (unreleased content): it is armed by her burst
 cast and fires on her next swap-in, with `ANASTASYA_TRIUMPH_DELAY = 0.0` in
@@ -665,8 +668,8 @@ could not change a number.
   ability directly (a local burst-only `FieldSequence`) and expect the current
   `STANDARD_FIELD_SEQUENCES` names. Every damage number, aura, stack and total in the run
   is byte-identical, including `1,266,300.5` (30 s trial).
-* The pre-existing Anastasya failure is untouched and still fails the same way
-  (`burst stellar_bonus on allies / herself is 0.354, expected 0.575 at burst lv13`).
+* The Anastasya failure that was open at the time (`burst stellar_bonus ... 0.354,
+  expected 0.575`) is **fixed**: the nerf is now pinned deliberately in the smoke test.
 
 `text/How_to_add_hits.txt` was updated with the module map so the next hit register only
 needs one file per thing.
@@ -678,4 +681,109 @@ needs one file per thing.
    registered sequence". The first one is already in the hit-catalogue check.
 2. `presets.describe_rotation(key)`: dump each step (name, character, swap_out, calls,
    owning module) to debug a failing preset trial in one command.
+
+---
+
+## Triggered-hit round: Diona, Faruzan's trigger CD and the standardized delay
+
+### The convention (one rule, one helper)
+
+> A triggered hit is scheduled at `trigger_time + hit.relative_delay`, ALWAYS read from
+> the ability definition in `abilities.py`. The FIRST hit's `relative_delay` **is** the
+> trigger delay, `0.0` is an explicit value (so it can be turned into a delay later
+> without touching the engine), and the engine never hardcodes a trigger delay.
+
+Implemented once, in `timeline.RotationTimeline`:
+
+* `_resolved_triggered_ability(ability, character)` - deep copy + talent level from the
+  party, so a triggered hit's MV stays data-driven (`scaling_key` -> skill_scalings).
+* `_triggered_hit_event()` / `_insert_triggered_hit()` - build/insert the event at
+  `trigger + relative_delay`, with `hit_offset` = that delay, the trigger's audit flags
+  inherited (minus `quill_damage`, `c1_quill`, `burst_variant`, burst ids, swirl/vortex
+  metadata - all of which must not leak into a proc) and an explicit `owner`.
+
+### Audit table of every triggered hit
+
+| Triggered hit | Definition (abilities.py) | Triggered by | Delay | Cooldown |
+| --- | --- | --- | --- | --- |
+| Mizuki VBTD nuke | `mizuki_nuke_hit` (bare Hit, 1000% EM) | her next skill tick while DDS is up (armed by her own swirl, 2.5s prep CD) | **0.500** | - |
+| Mizuki C1 mini nuke | `mizuki_c1_mini_nuke_hit` (bare Hit, 400% EM) | a Stellar Swirl while her C1 shred is up | **0.000** | - |
+| Faruzan Pressurized Collapse | `faruzan_pressurized_collapse` (Ability, 108% skill) | her burst cast hit, or ANY hit while her C6 buff window is up | **0.720** | 3.0s **from the trigger** |
+| Diona Icy Paws | `diona_choice_treasures` (Ability, 3 x 41.92% skill) | ANY character's Stellar Swirl while her Choice Treasures state (20s) is up | **0.270 / 0.360 / 0.360** | 3.5s **from the trigger** |
+| Anastasya extra stellar | `anastasya_extra_stellar` (Ability, 16.8% burst) | her Palestar Crown Stellar beat while her burst window is up | **0.000** | - |
+| Anastasya Triumph | `anastasya_triumph` (Ability, 334% burst) | her swap-in (trigger = SWAP_IN, not a hit) | `ANASTASYA_TRIUMPH_DELAY` (0.0, provisional) | once per burst |
+
+Triggered abilities are listed in `abilities.ENGINE_INTERNAL_ABILITIES`, so they stay in
+`ABILITY_REGISTRY` but are never offered by the editor and never appear in a
+`FieldSequence` (a smoke check enforces that). An ability that can happen both ways gets
+two entries, like Faruzan's `Skill Cast` (active) and `Pressurized Collapse` (triggered).
+
+### What changed
+
+* **Faruzan**: the two hardcoded `t + 0.720` in `timeline.py` are gone; the delay lives
+  on `faruzan_pressurized_collapse.hits[0]`. The MV is resolved from the party's skill
+  talent. Her collapse CD is now measured **from the trigger** (`FARUZAN_COLLAPSE_CD`,
+  3.0s) instead of from the collapse itself, per the same rule as Diona's paws.
+* **Anastasya**: the extra stellar beat no longer ignores its `relative_delay` (it used
+  to copy the trigger's `global_time` and `hit_offset`); it is scheduled through the
+  helper with `owner="Anastasya"`.
+* **Mizuki**: nuke + C1 mini nuke were rewritten onto the helper with no behaviour change
+  (same MV, same insertion slots, `vbtd_state="OFF"` kept on the nuke).
+* **Bug found by the totals** while doing this: the first version of the collapse
+  insertion did not pass `owner`, so a collapse triggered by Mizuki's hit was credited to
+  **Mizuki** (wrong stats, -46,344 on the Anastasya preset). `owner` is now always
+  explicit and documented in the helper.
+
+### Diona (new)
+
+* Choice Treasures: her tap OR hold skill **hit** opens a 20s state (refreshed by either).
+  While it is up, a Stellar Swirl from ANY character fires `diona_choice_treasures`
+  (3 Cryo hits, only tick 1 applies `1U`), 0.270s after the trigger, 3.5s CD from the
+  trigger. The volley rows are inserted in chronological order (they are not the first
+  injected rows of that event).
+* C6: her burst cast hit gives the ACTIVE character `em: 200` + `stellar_bonus: 0.40`
+  (`buffs.CONDITIONAL_CONSTANT_BUFFS["Diona C6"]`, flag `diona_c6_state`,
+  `FLAG_TO_BUFFS` descriptor with `target: "Active"` and `min_constellation: 6`).
+  Window = **11.75s from the cast hit** (`DIONA_C6_WINDOW`), i.e. the whole burst: the
+  last burst tick at +11.73 is still buffed. The cast hit itself is INCLUDED - the one
+  deliberate exception to the "read pre-arm" rule: arm first, resolve the flag after.
+* `Diona C6` left `buffs.DORMANT`; `buff_registry` shows two columns for her
+  ("Diona Choice Treasures", "Diona C6 Buff" - the latter only at C6).
+* `diona_hEQ` swap-out time 3.071 -> **3.100**: her burst is cast 0.029s before leaving,
+  so the cast hit is still ON FIELD (at 3.071 = swap-out it resolved with
+  `active_character = None`, which dropped her own C6 buff and Faruzan's quill on it).
+* `Diona C6`'s permanent `hp_percent: 0.25` stays unconditional (the UI only offers C6;
+  gating it would move every Diona number).
+
+### Damage effect of this round
+
+| Trial | Before | After | Why |
+| --- | --- | --- | --- |
+| 30s fixed trial (DEFAULT_PARTY) | 1,266,300.5 | **1,274,954.5** | Faruzan CD from the trigger |
+| Aether 6x preset | 5,386,893.6 | **5,594,119.9** | the same rule, +3 collapses over the 6 loops |
+| Anastasya 6x preset | 4,628,073.7 | **4,460,586.2** | extra collapses burn the Cryo aura before the swirls (swirls 93 -> 92) |
+
+Proof the refactor itself is neutral: with `FARUZAN_COLLAPSE_CD` temporarily set to
+3.72 (the old "CD from the hit" rule) the current engine reproduces the old Anastasya
+total **exactly** (4,628,073.7), so every remaining difference comes from the CD rule.
+
+### Smoke test additions
+
+* Anastasya: the post-nerf kit data is pinned as literals (`50.4` stellar swirl base ->
+  107.1 @ lv13, `0.354` burst bonus, 35.7 extra stellar, 251.175 tap) and the derived
+  buff checks expect **0.354**; the [OK] line says "(nerfed)".
+* New `_run_diona_check()`: state opened by tap AND hold, 20s refresh + expiry, no paws
+  without the state, 3 paws per volley with the right owner/category/attack type/aura,
+  first paw at trigger + 0.270, 3.5s CD between triggers, C6 = +200 EM / +0.40 stellar
+  on the ACTIVE char only, cast hit included, last burst tick covered, nothing past
+  11.75s, nothing at C5.
+* New `_run_triggered_ability_check()`: the delay table above (data + helper convention),
+  Faruzan collapses landing at +0.720 with the 3.0s trigger CD, Anastasya's 0.0 delay
+  landing on the beat, and the engine window constants.
+* Hit catalogue: `scaling_key` must be exactly 3 elements and
+  `update_ability_talent_level()` must work on EVERY ability (a 4-tuple key crashed
+  `add_field_sequence()` for anyone who set talents).
+* Editor catalogue: `faruzan_e` checks `Skill Cast`; the "absent character" probe is now
+  `"Nobody"` (Diona is a real character); triggered abilities must be registered, hidden
+  from the editor and absent from every `FieldSequence`.
 

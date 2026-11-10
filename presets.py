@@ -16,10 +16,11 @@ from models import FieldSequence, Rotation, Trial
 from abilities import (
     aether_skill, aether_n1, aether_n1ca, aether_burst_enhanced,
     odette_cast, odette_recast, odette_burst,
-    faruzan_burst, faruzan_collapse_ability,
+    faruzan_skill_cast, faruzan_burst,
     mizuki_n1, mizuki_charged, mizuki_pullout_2,
     mizuki_pullout_5, mizuki_pullout_9, mizuki_pullout_13, mizuki_burst,
     sucrose_skill, sucrose_burst,
+    diona_skill_tap, diona_skill_hold, diona_burst,
     anastasya_tap, anastasya_burst,
 )
 
@@ -70,11 +71,32 @@ odette_qe.add_ability(2.851, odette_recast)
 faruzan_q = FieldSequence("FaruzanQSwap", "Faruzan", swap_out_time=1.410)
 faruzan_q.add_ability(1.200, faruzan_burst)
 
-# Faruzan E: only the actively called Pressurized Collapse. Same insertion time and
-# swap-out time as the burst cast of her Q swap, so both visits last exactly as long.
-# Kept for rotations that cannot afford a burst every loop.
+# Faruzan E: her skill CAST only. The Pressurized Collapse is a TRIGGERED ability and
+# is therefore not part of this (or any) field sequence: it only fires when its own
+# trigger conditions are met (her burst cast, or any hit while her C6 window is up,
+# 3.0s CD). Same insertion time and swap-out time as the burst cast of her Q swap, so
+# both visits last exactly as long. Kept for rotations that cannot afford a burst
+# every loop.
 faruzan_e = FieldSequence("FaruzanESwap", "Faruzan", swap_out_time=1.410)
-faruzan_e.add_ability(1.200, faruzan_collapse_ability)
+faruzan_e.add_ability(1.200, faruzan_skill_cast)
+
+# --- Diona ---
+# Tap / hold skill and the burst. Her "Choice Treasures" Icy Paws are triggered by a
+# Stellar Swirl (20s state opened by either skill hit), so they live in abilities.py
+# as an engine-internal ability and never appear in a sequence.
+diona_e = FieldSequence("DionaE", "Diona", swap_out_time=1.410)
+diona_e.add_ability(0.660, diona_skill_tap)
+
+diona_hE = FieldSequence("DionaHE", "Diona", swap_out_time=1.410)
+diona_hE.add_ability(0.660, diona_skill_hold)
+
+# The burst is cast 0.029s before she leaves the field, so her own burst cast hit is
+# still ON FIELD: her C6 buff ("the ACTIVE character") and every active-character-gated
+# effect must reach that hit (swap_out_time was 3.071 = the cast time, which made the
+# cast hit resolve with active_character = None).
+diona_hEQ = FieldSequence("DionaHEQ", "Diona", swap_out_time=3.100)
+diona_hEQ.add_ability(0.660, diona_skill_hold)
+diona_hEQ.add_ability(3.071, diona_burst)
 
 # --- Mizuki ---
 # One sequence per pull-out length (the number of stellar nukes she banks), plus the
@@ -138,6 +160,9 @@ STANDARD_FIELD_SEQUENCES = {
     "Anastasya EQ": anastasya_eq,
     "Faruzan E": faruzan_e,
     "Odette QE": odette_qe,
+    "Diona E": diona_e,
+    "Diona HE": diona_hE,
+    "Diona HEQ": diona_hEQ,
 }
 
 # ---------------------------------------------------------------------------

@@ -265,7 +265,37 @@ faruzan_burst = Ability(
     ]
 )
 
-faruzan_collapse_ability = Ability(
+faruzan_skill_cast = Ability(
+    name="Skill Cast",
+    character="Faruzan",
+    talent_level=13,
+    talent_type="skill_talent",
+    hits=[
+        Hit(
+            "Skill Cast", 
+            0.000, 
+            element="Anemo", 
+            elemental_app="1U", 
+            category=ActionCategory.STANDARD_DMG, 
+            stat_ref=StatRef.ATK, 
+            motion_value=get_ability_motion_value("Faruzan", "Skill", "Skill DMG", 13), 
+            attack_type=AttackType.SKILL, 
+            # scaling_key is exactly (character, category, sub ability): the talent
+            # LEVEL is never part of it (update_ability_talent_level resolves it).
+            scaling_key=("Faruzan", "Skill", "Skill DMG")
+        )
+    ]
+)
+
+
+# TRIGGERED ABILITY. Her skill cast and her Pressurized Collapse are two different
+# abilities: the cast is a plain hit that only procs the collapse when the collapse's
+# own trigger conditions are met (burst cast / while her C6 window is up, 3.0s CD).
+# Triggered abilities are injected by timeline.evaluate_timeline() and are listed in
+# ENGINE_INTERNAL_ABILITIES, so they never appear in the field-sequence editor.
+# Their FIRST hit's relative_delay IS the trigger delay: the engine always schedules
+# them at trigger_time + hit.relative_delay (0.0 is a valid, explicit value).
+faruzan_pressurized_collapse = Ability(
     name="Pressurized Collapse",
     character="Faruzan",
     talent_level=13,
@@ -273,7 +303,7 @@ faruzan_collapse_ability = Ability(
     hits=[
         Hit(
             "Pressurized_Collapse", 
-            0.000, 
+            0.720,   # trigger delay: the collapse lands 0.72s after its trigger
             element="Anemo", 
             elemental_app="1U", 
             category=ActionCategory.STANDARD_DMG, 
@@ -403,6 +433,9 @@ mizuki_burst = Ability(
     ]
 )
 
+# TRIGGERED HIT TEMPLATES (not castable, so they are bare Hits and never enter
+# ABILITY_REGISTRY). Their relative_delay IS the delay from the trigger: the timeline
+# schedules them at trigger_time + relative_delay, so the value can be tuned here only.
 mizuki_nuke_hit = Hit("Mizuki Nuke Hit", 0.500, element="Anemo", category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.EM, motion_value=10.00)
 mizuki_c1_mini_nuke_hit = Hit("Mizuki C1 Mini Nuke", 0.0, element="Anemo", category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.EM, motion_value=4.00)
 
@@ -460,17 +493,68 @@ sucrose_burst = Ability(
 )
 
 # -- Diona ---
-#diona_skill_tap = Ability(
-#    name="Diona Skill [Tap]",
-#    character="Diona",
-#    cooldown=15.0,
-#    talent_level=10,
-#    talent_type="skill_talent",
-#    hits=[
-#        Hit("Cast",  0.000, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Diona", "Skill", "Skill DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Diona", "Skill", "Skill DMG")),
-#    ]
-#)
+diona_skill_tap = Ability(
+    name="Diona Skill [Tap]",
+    character="Diona",
+    cooldown=6.0,
+    talent_level=10,
+    talent_type="skill_talent",
+    hits=[
+        Hit("Icy Paw [1]",  0.000, element="Cryo", elemental_app="1U",    category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Diona", "Skill", "Icy Paw DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Diona", "Skill", "Icy Paw DMG")),
+        Hit("Icy Paw [2]",  0.030, element="Cryo",                        category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Diona", "Skill", "Icy Paw DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Diona", "Skill", "Icy Paw DMG")),
+    ]
+)
 
+diona_skill_hold = Ability(
+    name="Diona Skill [Hold]",
+    character="Diona",
+    cooldown=15.0,
+    talent_level=10,
+    talent_type="skill_talent",
+    hits=[
+        Hit("Icy Paw [1]",  0.000, element="Cryo", elemental_app="1U",  category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Diona", "Skill", "Icy Paw DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Diona", "Skill", "Icy Paw DMG")),
+        Hit("Icy Paw [2]",  0.000, element="Cryo",                      category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Diona", "Skill", "Icy Paw DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Diona", "Skill", "Icy Paw DMG")),
+        Hit("Icy Paw [3]",  0.031, element="Cryo",                      category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Diona", "Skill", "Icy Paw DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Diona", "Skill", "Icy Paw DMG")),
+        Hit("Icy Paw [4]",  0.031, element="Cryo", elemental_app="1U",  category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Diona", "Skill", "Icy Paw DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Diona", "Skill", "Icy Paw DMG")),
+        Hit("Icy Paw [5]",  0.031, element="Cryo",                      category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Diona", "Skill", "Icy Paw DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Diona", "Skill", "Icy Paw DMG"))
+    ]
+)
+
+diona_burst = Ability(
+    name="Diona Burst",
+    character="Diona",
+    cooldown=20.0,
+    talent_level=10,
+    talent_type="burst_talent",
+    hits=[
+        Hit("Burst Cast", 0.000, element="Cryo",    elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Diona", "Burst", "Skill DMG", 10), attack_type=AttackType.BURST, scaling_key=("Diona", "Burst", "Skill DMG")),
+        Hit("Burst Tick 1", 1.980, element="Cryo",                      category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Diona", "Burst", "Continuous Field DMG", 10), attack_type=AttackType.BURST, scaling_key=("Diona", "Burst", "Continuous Field DMG")),
+        Hit("Burst Tick 2", 3.931, element="Cryo",  elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Diona", "Burst", "Continuous Field DMG", 10), attack_type=AttackType.BURST, scaling_key=("Diona", "Burst", "Continuous Field DMG")),
+        Hit("Burst Tick 3", 5.881, element="Cryo",                      category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Diona", "Burst", "Continuous Field DMG", 10), attack_type=AttackType.BURST, scaling_key=("Diona", "Burst", "Continuous Field DMG")),
+        Hit("Burst Tick 4", 7.831, element="Cryo",  elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Diona", "Burst", "Continuous Field DMG", 10), attack_type=AttackType.BURST, scaling_key=("Diona", "Burst", "Continuous Field DMG")),
+        Hit("Burst Tick 5", 9.810, element="Cryo",                      category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Diona", "Burst", "Continuous Field DMG", 10), attack_type=AttackType.BURST, scaling_key=("Diona", "Burst", "Continuous Field DMG")),
+        Hit("Burst Tick 6", 11.730, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Diona", "Burst", "Continuous Field DMG", 10), attack_type=AttackType.BURST, scaling_key=("Diona", "Burst", "Continuous Field DMG")),
+    ]
+)
+
+# TRIGGERED ABILITY. Diona's Choice Treasures state is opened by her tap/hold skill
+# hits (20s, refreshed) and every Stellar Swirl triggered by ANY character while it is
+# up fires this Icy Paw volley 0.270s after the trigger (3.5s CD, measured from the
+# trigger). The first hit's relative_delay IS the trigger delay; the following hits are
+# their own delays from the SAME trigger. Injected by timeline.evaluate_timeline(),
+# never insertable in the field-sequence editor.
+diona_choice_treasures = Ability(
+    name="Diona Choice Treasures",
+    character="Diona",
+    talent_level=10,
+    talent_type="skill_talent",
+    hits=[
+        Hit("Choice Treasures [Tick 1]", 0.270, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Diona", "Skill", "Icy Paw DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Diona", "Skill", "Icy Paw DMG")),
+        Hit("Choice Treasures [Tick 2]", 0.360, element="Cryo",                     category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Diona", "Skill", "Icy Paw DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Diona", "Skill", "Icy Paw DMG")),
+        Hit("Choice Treasures [Tick 3]", 0.360, element="Cryo",                     category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Diona", "Skill", "Icy Paw DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Diona", "Skill", "Icy Paw DMG")),
+    ]
+    
+)
 
 
 def configure_field_sequence_talents(field_sequence: FieldSequence, talents: Union[str, Tuple[int, int, int], list]) -> FieldSequence:
@@ -583,7 +667,7 @@ anastasya_triumph = Ability(
 
 # Conditional hit: injected by the timeline on every stellar beat of her skill
 # while her burst buff is active. Kept as a one-hit ability so the motion value
-# stays data-driven.
+# stays data-driven. TRIGGERED: its relative_delay is the delay after the beat.
 anastasya_extra_stellar = Ability(
     name="Palestar Crown Extra Stellar",
     character="Anastasya",
@@ -629,9 +713,22 @@ ABILITY_REGISTRY = _collect_ability_registry()
 # Abilities the timeline injects on its own (conditional procs). They stay in
 # ABILITY_REGISTRY for completeness, but must never be insertable by hand or they
 # would double count.
+#
+# TRIGGERED vs ACTIVE: an ability that can only happen on a condition (a proc, a
+# passive, a state the engine tracks) is a TRIGGERED ability. It lives here and is
+# never referenced by a FieldSequence, because a sequence can only hold abilities the
+# user actively casts. If one day an ability can happen BOTH ways, add two entries to
+# this module: the active one (castable, in presets) and the triggered one (listed
+# below), exactly like Faruzan's "Skill Cast" and "Pressurized Collapse".
+#
+# A triggered ability's delay is its FIRST hit's relative_delay, always read by the
+# engine as `trigger_time + hit.relative_delay` (0.0 included, so the delay can be
+# changed later without touching timeline.py).
 ENGINE_INTERNAL_ABILITIES = {
     "Palestar Crown Extra Stellar",   # injected while Anastasya's burst buff is up
     "Triumph",                        # injected on her next swap-in after the burst
+    "Pressurized Collapse",           # Faruzan: burst cast / her C6 window, 3.0s CD
+    "Diona Choice Treasures",         # Diona: any Stellar Swirl in her 20s state, 3.5s CD
 }
 
 

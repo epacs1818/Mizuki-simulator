@@ -517,6 +517,13 @@ FLAG_TO_BUFFS = {
     "silverdawn_state": [
         {"type": "constant",     "key": "Silverdawn",                        "target": "User",   "caster": "holder:Silverdawn"},
     ],
+    # ---- Diona (C6) ---------------------------------------------------------
+    # Her burst cast hit gives the ACTIVE character flat EM + stellar_bonus for the
+    # whole burst field. The timeline flag is already C6-gated; min_constellation here
+    # is defence in depth (same pattern as Sucrose C6).
+    "diona_c6_state": [
+        {"type": "constant",     "key": "Diona C6",                        "target": "Active", "caster": "Diona", "min_constellation": 6},
+    ],
     # --- Anastasya -----------------------------------------------------------
     # Burst cast: whole party gains stellar_bonus (talent-scaled).
     "anastasya_burst_state": [

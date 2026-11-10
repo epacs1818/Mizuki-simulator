@@ -103,6 +103,9 @@ CONDITIONAL_CONSTANT_BUFFS = {
     },
 
     #Diona
+    # C6: her burst cast hit buffs the ACTIVE character for the whole burst field
+    # (11.75s, i.e. until her last burst tick). Timeline flag: "diona_c6_state",
+    # resolved by timeline.evaluate_timeline() and gated at C6.
     "Diona C6":{
         "em": 200.0,
         "stellar_bonus":0.40,
@@ -353,7 +356,6 @@ CONDITIONAL_NON_CONSTANT_BUFFS = {
 # entry can never hide again.
 DORMANT = {
     # Characters
-    "Diona C6",
     "Odette C6 self",
     "Odette C6 party",
 }
