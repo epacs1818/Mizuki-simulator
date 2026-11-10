@@ -7,6 +7,22 @@ If your change adds a BUFF / STACK / any state, this file is not enough: that al
 needs an entry in buffs.py + FLAG_TO_BUFFS + a timeline flag (see the backlog).
 
 
+WHERE THINGS LIVE  (one home per thing - there is never a second copy)
+---------------------------------------------------------------------
+   skill_scalings.py   damage percentages per talent level (data only)
+   abilities.py        Ability objects: hits, motion values, cooldowns, attack types.
+                       Immutable character data. Collected into ABILITY_REGISTRY.
+   presets.py          FieldSequence objects: which ability is cast when, and how long
+                       you stay on field. Collected into FIELD_SEQUENCE_REGISTRY.
+                       Also the preset rotations/trials and STANDARD_FIELD_SEQUENCES
+                       (readable keys used only by those rotations).
+   build JSON          user-made sequences/rotations/trials (saved inline, no registry)
+
+   A sequence therefore does NOT need an entry in two places: define it in presets.py
+   and the editors see it. Abilities are the same, in abilities.py.
+
+
+
 1. DAMAGE NUMBERS  ->  skill_scalings.py
 ---------------------------------------------------------------------
    CHARACTER_SKILLS["<character>"]["<Category>"]["<Sub ability>"]["scaling"] = [...]
@@ -71,12 +87,16 @@ needs an entry in buffs.py + FLAG_TO_BUFFS + a timeline flag (see the backlog).
 
 4. WRAP IT IN A FIELD SEQUENCE  (the rotation step the UI offers)
 ---------------------------------------------------------------------
+   In presets.py, next to the other sequences:
+
    my_char_burst_field = FieldSequence("My Char Burst", "My Char", swap_out_time=12.8)
    my_char_burst_field.add_ability(0.301, my_char_burst)
 
-   * A module-level name is registered automatically (FIELD_SEQUENCE_REGISTRY /
-     ABILITY_REGISTRY are collected from module globals), so it appears in the
-     editor for that character. Nothing else to register.
+   * A module-level name in presets.py is registered automatically
+     (FIELD_SEQUENCE_REGISTRY is collected from that module's globals), so it
+     appears in the editor for that character. Nothing else to register.
+   * abilities.py holds ONLY Ability data: a sequence is composition (which
+     ability, cast when, how long you stay), so it belongs with the presets.
    * swap_out_time should cover the last hit you want ON field; hits scheduled
      later are still simulated (they count as off-field damage).
    * start_time 0.301 = "cast 0.3s after the swap-in", matching the other characters.
@@ -86,13 +106,15 @@ needs an entry in buffs.py + FLAG_TO_BUFFS + a timeline flag (see the backlog).
 ---------------------------------------------------------------------
    presets.STANDARD_FIELD_SEQUENCES["My Char Q"] = my_char_burst_field
    ... then reference that key from a Rotation/Trial if you want a preset trial.
+   The key is a readable handle for you; the UI shows FieldSequence.name.
 
 
 6. RENAMES
 ---------------------------------------------------------------------
-   Renamed a sequence or ability? Add the old name to LEGACY_SEQUENCE_NAMES or
-   LEGACY_ABILITY_NAMES in abilities.py, so previously exported builds/trials
-   still load instead of dropping the step.
+   Renamed an ability? Add the old name to LEGACY_ABILITY_NAMES in abilities.py.
+   Renamed a sequence? Add it to LEGACY_SEQUENCE_NAMES in presets.py.
+   Either way, previously exported builds/trials keep loading instead of dropping
+   the step.
 
 
 7. VERIFY  (two commands, ~40 s)

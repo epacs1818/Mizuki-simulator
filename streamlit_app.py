@@ -7,16 +7,8 @@ import hashlib
 import plotly.express as px
 from pathlib import Path
 from timeline import RotationTimeline
-from abilities import (
-    aether_en1,
-    aether_cq,
-    faruzan_q,
-    odette_ee,
-    ABILITY_REGISTRY,
-    FIELD_SEQUENCE_REGISTRY,
-    abilities_for,
-    field_sequences_for,
-)
+from abilities import ABILITY_REGISTRY, abilities_for
+from presets import field_sequences_for
 
 # Ensure TEAM_BUFFS exists on buffs module for stats_calc
 if not hasattr(buffs, "TEAM_BUFFS"):
@@ -333,10 +325,11 @@ BUILD_CATALOGUE = {
 }
 
 # --- Editor catalogues -------------------------------------------------------
-# Everything the editors offer comes from abilities.py (see FIELD_SEQUENCE_REGISTRY /
-# ABILITY_REGISTRY there), so a new ability or field sequence shows up automatically
-# and never has to be listed twice. Availability is gated by the CURRENT PARTY: only
-# sequences/abilities whose owner is actually in the team are offered.
+# Everything the editors offer comes from the catalogues: field sequences from
+# presets.py (FIELD_SEQUENCE_REGISTRY) and abilities from abilities.py
+# (ABILITY_REGISTRY), so a new definition shows up automatically and never has to be
+# listed twice. Availability is gated by the CURRENT PARTY: only sequences/abilities
+# whose owner is actually in the team are offered.
 
 def _party_characters() -> list:
     """Character names selected in the current party (order preserved)."""

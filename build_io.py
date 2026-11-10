@@ -21,11 +21,16 @@ import copy
 import datetime
 import json
 
-from abilities import ABILITY_REGISTRY, FIELD_SEQUENCE_REGISTRY
-from abilities import LEGACY_ABILITY_NAMES, LEGACY_SEQUENCE_NAMES
+from abilities import ABILITY_REGISTRY
+from abilities import LEGACY_ABILITY_NAMES
 from characters import get_character_element
 from models import FieldSequence, Rotation, Trial
-from presets import STANDARD_FIELD_SEQUENCES, STANDARD_TRIALS
+from presets import (
+    FIELD_SEQUENCE_REGISTRY,
+    LEGACY_SEQUENCE_NAMES,
+    STANDARD_FIELD_SEQUENCES,
+    STANDARD_TRIALS,
+)
 from stats_calc import (
     apply_weapon_party_stats,
     build_initial_stats,

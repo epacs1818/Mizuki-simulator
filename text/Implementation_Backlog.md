@@ -618,3 +618,64 @@ allowed by the engine. A `cooldown_key` field on `Ability` would fix it; it was 
 out because it changes how rotations are validated and the current presets rely on
 the Sac-Frag proc variant having `cooldown = 0`.
 
+
+---
+
+## Architecture cleanup: field sequences now live in `presets.py`
+
+Pure move, no behaviour change (verified below). Before this, sequences were defined in
+`abilities.py` *and* re-declared in `presets.py`, so "where do I add a hit" had two
+answers and two definitions of the same name could drift apart.
+
+### New split
+
+| file | owns | registry |
+| --- | --- | --- |
+| `abilities.py` | `Ability` objects (hits, motion values, CD, attack type) - character data | `ABILITY_REGISTRY`, `abilities_for()` |
+| `presets.py` | `FieldSequence` objects (cast order + field time), rotations, trials | `FIELD_SEQUENCE_REGISTRY`, `field_sequences_for()` |
+| build JSON | user-made sequences / rotations / trials | none (payloads saved inline) |
+
+`abilities.py` keeps `configure_field_sequence_talents()` and `update_ability_talent_level()`
+because `timeline.py` imports them and they only manipulate `Ability` data.
+
+### What actually moved
+
+All 18 `FieldSequence` definitions moved verbatim, plus `FIELD_SEQUENCE_REGISTRY`,
+`field_sequences_for()` and `LEGACY_SEQUENCE_NAMES`. Import sites updated:
+`build_io` (registry + legacy sequence names now from `presets`), `streamlit_app`
+(`field_sequences_for` from `presets`; four unused sequence imports dropped),
+`smoke_test` (`aether_en1` / `odette_qe` / `sucrose_eq` / `sucrose_e` from `presets`,
+catalogue checks read both registries).
+
+### The duplicate objects are gone
+
+Five sequences existed twice with the same name and *identical* contents
+(`AetherEN1`, `AetherCQ`, `AetherECQ`, `FaruzanQSwap`, `OdetteEE`): the rotations used the
+`presets` copy while the editor offered the `abilities` copy. There is now exactly one
+object per name. Before deleting the shells I compared both versions - name, character,
+`swap_out_time` and every `(start_time, ability)` call were identical, so consolidation
+could not change a number.
+
+### Proof it is a pure move
+
+- Registry dump before/after: identical (same order, same 18 names, same `swap_out_time`,
+  same call lists).
+* `smoke_test` output diff: only four lines changed - the assertions that had gone stale
+  when "Mizuki Burst" was replaced by "Burst Pullout 4 Nukes". They now probe the burst
+  ability directly (a local burst-only `FieldSequence`) and expect the current
+  `STANDARD_FIELD_SEQUENCES` names. Every damage number, aura, stack and total in the run
+  is byte-identical, including `1,266,300.5` (30 s trial).
+* The pre-existing Anastasya failure is untouched and still fails the same way
+  (`burst stellar_bonus on allies / herself is 0.354, expected 0.575 at burst lv13`).
+
+`text/How_to_add_hits.txt` was updated with the module map so the next hit register only
+needs one file per thing.
+
+### Follow-ups (optional)
+
+1. `smoke_test`: add the guards suggested earlier - "no two distinct sequence objects share
+   a name" (identity based, so imports do not count) and "every preset key resolves to a
+   registered sequence". The first one is already in the hit-catalogue check.
+2. `presets.describe_rotation(key)`: dump each step (name, character, swap_out, calls,
+   owning module) to debug a failing preset trial in one command.
+

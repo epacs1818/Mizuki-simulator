@@ -157,19 +157,6 @@ aether_burst_standard = Ability(
     ]
 )
 
-aether_ecq = FieldSequence("AetherECQ", "Aether", swap_out_time=3.631)
-aether_ecq.add_ability(0.601, aether_skill)
-aether_ecq.add_ability(1.2, aether_n1ca)
-aether_ecq.add_ability(3.061, aether_burst_enhanced)
-
-aether_en1 = FieldSequence("AetherEN1", "Aether", swap_out_time=1.23)
-aether_en1.add_ability(0.601, aether_skill)
-aether_en1.add_ability(1.2, aether_n1)
-
-aether_cq = FieldSequence("AetherCQ", "Aether", swap_out_time=2.941)
-aether_cq.add_ability(0.51, aether_n1ca)
-aether_cq.add_ability(2.371, aether_burst_enhanced)
-
 # --- Odette ---
 odette_cast = Ability(
     name="Skill Cast",
@@ -266,14 +253,6 @@ odette_burst = Ability(
 )
 
 
-odette_ee = FieldSequence("OdetteEE", "Odette", swap_out_time=2.371)
-odette_ee.add_ability(0.660, odette_cast)
-odette_ee.add_ability(1.170, odette_recast)
-
-odette_qe = FieldSequence("OdetteQE", "Odette", swap_out_time=3.071)
-odette_qe.add_ability(2.16, odette_burst)
-odette_qe.add_ability(2.851, odette_recast)
-
 # --- Faruzan ---
 faruzan_burst = Ability(
     name="Elemental Burst",
@@ -306,18 +285,32 @@ faruzan_collapse_ability = Ability(
     ]
 )
 
-faruzan_q = FieldSequence("FaruzanQSwap", "Faruzan", swap_out_time=1.410)
-faruzan_q.add_ability(1.200, faruzan_burst)
-
-# Faruzan E: only the actively called Pressurized Collapse. Same insertion time and
-# swap-out time as the burst cast of her Q swap, so both visits last exactly as
-# long. Kept for rotations that cannot afford a burst every loop.
-faruzan_e = FieldSequence("FaruzanESwap", "Faruzan", swap_out_time=1.410)
-faruzan_e.add_ability(1.200, faruzan_collapse_ability)
-
 # --- Mizuki ---
+
+mizuki_n1 = Ability(
+    name="N1",
+    character="Mizuki",
+    cooldown=0.0,
+    talent_level=10,
+    talent_type="normal_talent",
+    hits=[
+        Hit("N1", 0.000, element="Anemo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Normal Attack", "1-Hit DMG", 10), attack_type=AttackType.NORMAL, scaling_key=("Mizuki", "Normal Attack", "1-Hit DMG"))
+    ]
+)
+
+mizuki_charged = Ability(
+    name="Charged Attack",
+    character="Mizuki",
+    cooldown=0.0,
+    talent_level=10,
+    talent_type="normal_talent",
+    hits=[
+        Hit("Charged Attack", 0.000, element="Anemo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Charged Attack", "Charged Attack DMG", 10), attack_type=AttackType.CHARGED, scaling_key=("Mizuki", "Charged Attack", "Charged Attack DMG"))
+    ]
+)
+
 mizuki_pullout_13 = Ability(
-    name="Mizuki Skill 13 Ticks",
+    name="Mizuki Skill [13 Ticks]",
     character="Mizuki",
     cooldown=15.0,
     talent_level=10,
@@ -340,11 +333,8 @@ mizuki_pullout_13 = Ability(
     ]
 )
 
-mizuki_pullout_4_nukes = FieldSequence("Skill Pullout 4 Nukes", "Mizuki", swap_out_time=10.0)
-mizuki_pullout_4_nukes.add_ability(0.301, mizuki_pullout_13)
-
-mizuki_skill_2 = Ability(
-    name="Mizuki Skill 2 Ticks",
+mizuki_pullout_2 = Ability(
+    name="Mizuki Skill [2 Ticks]",
     character="Mizuki",
     cooldown=0.0,
     talent_level=10,
@@ -356,11 +346,8 @@ mizuki_skill_2 = Ability(
     ]
 )
 
-mizuki_pullout_1_nuke = FieldSequence("Skill Pullout 1 Nuke", "Mizuki", swap_out_time=1.750)
-mizuki_pullout_1_nuke.add_ability(0.301, mizuki_skill_2)
-
 mizuki_pullout_9 = Ability(
-    name="Mizuki Skill 9 Ticks",
+    name="Mizuki Skill [9 Ticks]",
     character="Mizuki",
     cooldown=15.0,
     talent_level=10,
@@ -379,11 +366,8 @@ mizuki_pullout_9 = Ability(
     ]
 )
 
-mizuki_pullout_3_nukes = FieldSequence("Skill Pullout 3 Nukes", "Mizuki", swap_out_time=7.100)
-mizuki_pullout_3_nukes.add_ability(0.301, mizuki_pullout_9)
-
 mizuki_pullout_5 = Ability(
-    name="Mizuki Skill 5 Ticks",
+    name="Mizuki Skill [5 Ticks]",
     character="Mizuki",
     cooldown=15.0,
     talent_level=10,
@@ -419,18 +403,33 @@ mizuki_burst = Ability(
     ]
 )
 
-# Her burst field: hold the field until the last Munen Shockwave (12.601s after the
-# swap-in) so nothing is cut off. Pure hit register - no buffs, no flags.
-mizuki_burst_field = FieldSequence("Mizuki Burst", "Mizuki", swap_out_time=12.8)
-mizuki_burst_field.add_ability(0.301, mizuki_burst)
-
-mizuki_pullout_2_nukes = FieldSequence("Skill Pullout 2 Nukes", "Mizuki", swap_out_time=4.101)
-mizuki_pullout_2_nukes.add_ability(0.301, mizuki_pullout_5)
-
 mizuki_nuke_hit = Hit("Mizuki Nuke Hit", 0.500, element="Anemo", category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.EM, motion_value=10.00)
 mizuki_c1_mini_nuke_hit = Hit("Mizuki C1 Mini Nuke", 0.0, element="Anemo", category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.EM, motion_value=4.00)
 
 #Sucrose
+
+sucrose_n1 = Ability(
+    name="N1",
+    character="Sucrose",
+    cooldown=0.0,
+    talent_level=10,
+    talent_type="normal_talent",
+    hits=[
+        Hit("N1", 0.000, element="Anemo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Sucrose", "Normal Attack", "1-Hit DMG", 10), attack_type=AttackType.NORMAL, scaling_key=("Sucrose", "Normal Attack", "1-Hit DMG"))
+    ]
+),
+
+sucrose_n2 = Ability(
+    name="N2",
+    character="Sucrose",
+    cooldown=0.0,
+    talent_level=10,
+    talent_type="normal_talent",
+    hits=[
+        Hit("N2", 0.000, element="Anemo", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Sucrose", "Normal Attack", "2-Hit DMG", 10), attack_type=AttackType.NORMAL, scaling_key=("Sucrose", "Normal Attack", "2-Hit DMG"))
+    ]
+)
+
 sucrose_skill = Ability(
     name="Sucrose Skill",
     character="Sucrose",
@@ -459,12 +458,20 @@ sucrose_burst = Ability(
         Hit("Absorption",  5.729, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Sucrose", "Burst", "Additional Elemental DMG", 10), attack_type=AttackType.BURST, scaling_key=("Sucrose", "Burst", "Additional Elemental DMG")),
     ]
 )
-sucrose_e = FieldSequence("Sucrose E", "Sucrose", swap_out_time=1.259)
-sucrose_e.add_ability(1.02, sucrose_skill)
 
-sucrose_eq = FieldSequence("Sucrose EQ", "Sucrose", swap_out_time=1.59)
-sucrose_eq.add_ability(1.02, sucrose_skill)
-sucrose_eq.add_ability(3.119, sucrose_burst)
+# -- Diona ---
+#diona_skill_tap = Ability(
+#    name="Diona Skill [Tap]",
+#    character="Diona",
+#    cooldown=15.0,
+#    talent_level=10,
+#    talent_type="skill_talent",
+#    hits=[
+#        Hit("Cast",  0.000, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Diona", "Skill", "Skill DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Diona", "Skill", "Skill DMG")),
+#    ]
+#)
+
+
 
 def configure_field_sequence_talents(field_sequence: FieldSequence, talents: Union[str, Tuple[int, int, int], list]) -> FieldSequence:
     """
@@ -590,31 +597,12 @@ anastasya_extra_stellar = Ability(
     ],
 )
 
-# Field sequences. E / Q mirror Aether's EN1 / CQ timings (the rotation swaps
-# Aether out for Anastasya in both slots); EQ is the combined variant.
-anastasya_e = FieldSequence("AnastasyaE", "Anastasya", swap_out_time=1.23)
-anastasya_e.add_ability(0.601, anastasya_tap)
-
-anastasya_q = FieldSequence("AnastasyaQ", "Anastasya", swap_out_time=2.941)
-anastasya_q.add_ability(2.371, anastasya_burst)
-
-anastasya_eq = FieldSequence("AnastasyaEQ", "Anastasya", swap_out_time=2.851)
-anastasya_eq.add_ability(0.601, anastasya_tap)
-anastasya_eq.add_ability(2.371, anastasya_burst)
-
-
 # ---------------------------------------------------------------------------
-# Editor registries
+# Ability registry (read by the editors)
 # ---------------------------------------------------------------------------
 # Renames are translated, not dropped: exported builds/trials saved before a rename
 # still reference the old display names, so build_io maps them back on load.
-LEGACY_SEQUENCE_NAMES = {
-    "SacFragFill": "Skill Pullout 1 Nuke",
-    "BurstlessPullOut": "Skill Pullout 4 Nukes",
-}
 LEGACY_ABILITY_NAMES = {
-    "Mizuki Skill": "Mizuki Skill 13 Ticks",
-    "Mizuki Skill (SacFrag)": "Mizuki Skill 2 Ticks",
 }
 
 # Pairs that share a display name on purpose: the engine substitutes the right variant
@@ -622,23 +610,21 @@ LEGACY_ABILITY_NAMES = {
 # name is not a mistake there.
 VARIANT_ABILITY_NAMES = {"Elemental Burst", "Skill Recast"}
 
-# The UI offers exactly what exists in this module: every FieldSequence and every
-# Ability is collected programmatically, so a new definition never has to be
-# registered anywhere else. Consumers filter by owner (a sequence/ability is only
-# playable when its character is in the party).
-def _collect_editor_registries():
-    sequences = {}
+# The UI offers exactly what exists in this module: every Ability is collected
+# programmatically, so a new ability never has to be registered anywhere else.
+# Field sequences are deliberately NOT here: a sequence is composition (which ability,
+# cast when, how long you stay), not character data. They live in presets.py, which
+# owns FIELD_SEQUENCE_REGISTRY and field_sequences_for().
+def _collect_ability_registry():
     abilities = {}
     for value in list(globals().values()):
-        if isinstance(value, FieldSequence):
-            sequences.setdefault(value.name, value)
-        elif isinstance(value, Ability):
+        if isinstance(value, Ability):
             abilities.setdefault(value.character, {})
             abilities[value.character].setdefault(value.name, value)
-    return sequences, abilities
+    return abilities
 
 
-FIELD_SEQUENCE_REGISTRY, ABILITY_REGISTRY = _collect_editor_registries()
+ABILITY_REGISTRY = _collect_ability_registry()
 
 # Abilities the timeline injects on its own (conditional procs). They stay in
 # ABILITY_REGISTRY for completeness, but must never be insertable by hand or they
@@ -647,13 +633,6 @@ ENGINE_INTERNAL_ABILITIES = {
     "Palestar Crown Extra Stellar",   # injected while Anastasya's burst buff is up
     "Triumph",                        # injected on her next swap-in after the burst
 }
-
-
-def field_sequences_for(characters) -> dict:
-    """{sequence name: FieldSequence} for the characters that are actually in play."""
-    party = {c for c in (characters or []) if c}
-    return {name: seq for name, seq in FIELD_SEQUENCE_REGISTRY.items()
-            if seq.character in party}
 
 
 def abilities_for(character: str) -> dict:

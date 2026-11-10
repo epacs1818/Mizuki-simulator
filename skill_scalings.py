@@ -49,6 +49,16 @@ CHARACTER_SKILLS = {
         }
     },
     "Mizuki": {
+        "Normal Attack":{
+            "1-Hit DMG": {
+                "scaling": get_scaled_list(52.28, "Elemental 1"),
+            }
+        },
+        "Charged Attack": {
+            "Charged Attack DMG": {
+                "scaling": get_scaled_list(130.00, "Elemental 1"),
+            },
+        },
         "Skill": {
             "Skill DMG": {
                 "scaling": get_scaled_list(57.74, "Elemental 1"),
@@ -124,6 +134,14 @@ CHARACTER_SKILLS = {
         }
     },
     "Sucrose": {
+        "Normal Attack": {
+            "1-Hit DMG": {
+                "scaling": get_scaled_list(44.5, "Elemental 1"),
+            },
+            "2-Hit DMG":{
+                "scaling": get_scaled_list(43.5, "Elemental 1"),
+            }
+        },        
         "Skill": {
             "Skill DMG": {
                 "scaling": get_scaled_list(211.2, "Elemental 1"),

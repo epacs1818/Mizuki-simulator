@@ -1,16 +1,28 @@
+"""Presets: the field-sequence library, the rotation macros and the preset trials.
+
+Division of labour with abilities.py:
+
+  * `Ability` (hits, motion values, cooldowns) is immutable DATA -> abilities.py.
+  * `FieldSequence` (which ability is cast when, how long you stay on field) is a saved
+    COMPOSITION: the ones below are mine (presets); the user's are created in the editor
+    and stored inside the build JSON.
+  * This module therefore owns the sequence catalogue the editors read
+    (FIELD_SEQUENCE_REGISTRY / field_sequences_for); abilities.py owns ABILITY_REGISTRY.
+
+Ordering matters: sequences are defined first, the catalogue is collected right after
+them, then the rotations/trials reference the objects directly.
+"""
 from models import FieldSequence, Rotation, Trial
 from abilities import (
     aether_skill, aether_n1, aether_n1ca, aether_burst_enhanced,
-    aether_ecq as aether_ecq_ability_seq, # imported or built natively
-    odette_cast, odette_recast,
-    odette_qe,
+    odette_cast, odette_recast, odette_burst,
     faruzan_burst, faruzan_collapse_ability,
-    # Mizuki's skill variants + burst field already hold their own hits/abilities.
-    mizuki_pullout_1_nuke, mizuki_pullout_2_nukes, mizuki_pullout_3_nukes,
-    mizuki_pullout_4_nukes, mizuki_burst_field,
+    mizuki_n1, mizuki_charged, mizuki_pullout_2,
+    mizuki_pullout_5, mizuki_pullout_9, mizuki_pullout_13, mizuki_burst,
     sucrose_skill, sucrose_burst,
-    anastasya_e, anastasya_q, anastasya_eq, faruzan_e,
+    anastasya_tap, anastasya_burst,
 )
+
 
 # Default party used when no saved JSON configuration is available
 # (main_test.py fallback, smoke_test.py).
@@ -29,49 +41,137 @@ DEFAULT_PARTY = {
                "talents": "1/13/13"},
 }
 
-# 1. STANDARD FIELD SEQUENCES (Building Blocks)
+# 1. SEQUENCE LIBRARY - one definition per sequence, no duplicates anywhere else.
+# Every module-level FieldSequence here is collected into FIELD_SEQUENCE_REGISTRY.
+# --- Aether ---
+aether_ecq = FieldSequence("AetherECQ", "Aether", swap_out_time=3.631)
+aether_ecq.add_ability(0.601, aether_skill)
+aether_ecq.add_ability(1.2, aether_n1ca)
+aether_ecq.add_ability(3.061, aether_burst_enhanced)
+
+aether_en1 = FieldSequence("AetherEN1", "Aether", swap_out_time=1.23)
+aether_en1.add_ability(0.601, aether_skill)
+aether_en1.add_ability(1.2, aether_n1)
+
+aether_cq = FieldSequence("AetherCQ", "Aether", swap_out_time=2.941)
+aether_cq.add_ability(0.51, aether_n1ca)
+aether_cq.add_ability(2.371, aether_burst_enhanced)
+
+# --- Odette ---
+odette_ee = FieldSequence("OdetteEE", "Odette", swap_out_time=2.371)
+odette_ee.add_ability(0.660, odette_cast)
+odette_ee.add_ability(1.170, odette_recast)
+
+odette_qe = FieldSequence("OdetteQE", "Odette", swap_out_time=3.071)
+odette_qe.add_ability(2.16, odette_burst)
+odette_qe.add_ability(2.851, odette_recast)
+
+# --- Faruzan ---
+faruzan_q = FieldSequence("FaruzanQSwap", "Faruzan", swap_out_time=1.410)
+faruzan_q.add_ability(1.200, faruzan_burst)
+
+# Faruzan E: only the actively called Pressurized Collapse. Same insertion time and
+# swap-out time as the burst cast of her Q swap, so both visits last exactly as long.
+# Kept for rotations that cannot afford a burst every loop.
+faruzan_e = FieldSequence("FaruzanESwap", "Faruzan", swap_out_time=1.410)
+faruzan_e.add_ability(1.200, faruzan_collapse_ability)
+
+# --- Mizuki ---
+# One sequence per pull-out length (the number of stellar nukes she banks), plus the
+# skill+burst combo and a normal-attack filler.
+mizuki_pullout_4_nukes = FieldSequence("Skill Pullout 4 Nukes", "Mizuki", swap_out_time=10.000)
+mizuki_pullout_4_nukes.add_ability(0.301, mizuki_pullout_13)
+
+mizuki_pullout_1_nuke = FieldSequence("Skill Pullout 1 Nuke", "Mizuki", swap_out_time=1.750)
+mizuki_pullout_1_nuke.add_ability(0.301, mizuki_pullout_2)
+
+mizuki_pullout_3_nukes = FieldSequence("Skill Pullout 3 Nukes", "Mizuki", swap_out_time=7.100)
+mizuki_pullout_3_nukes.add_ability(0.301, mizuki_pullout_9)
+
+mizuki_pullout_2_nukes = FieldSequence("Skill Pullout 2 Nukes", "Mizuki", swap_out_time=4.101)
+mizuki_pullout_2_nukes.add_ability(0.301, mizuki_pullout_5)
+
+mizuki_n1c = FieldSequence("N1C", "Mizuki", swap_out_time=1.410)
+mizuki_n1c.add_ability(0.660, mizuki_n1)
+mizuki_n1c.add_ability(1.080, mizuki_charged)
+
+mizuki_pullout_burst_4_nukes = FieldSequence("Burst Pullout 4 Nukes", "Mizuki", swap_out_time=9.3)
+mizuki_pullout_burst_4_nukes.add_ability(0.301, mizuki_pullout_13)
+mizuki_pullout_burst_4_nukes.add_ability(8.100, mizuki_burst)
+
+# --- Sucrose ---
+sucrose_e = FieldSequence("Sucrose E", "Sucrose", swap_out_time=1.259)
+sucrose_e.add_ability(1.02, sucrose_skill)
+
+sucrose_eq = FieldSequence("Sucrose EQ", "Sucrose", swap_out_time=1.59)
+sucrose_eq.add_ability(1.02, sucrose_skill)
+sucrose_eq.add_ability(3.119, sucrose_burst)
+
+# --- Anastasya ---
+# E / Q mirror Aether's EN1 / CQ timings (the rotation swaps Aether out for Anastasya in
+# both slots); EQ is the combined variant.
+anastasya_e = FieldSequence("AnastasyaE", "Anastasya", swap_out_time=1.23)
+anastasya_e.add_ability(0.601, anastasya_tap)
+
+anastasya_q = FieldSequence("AnastasyaQ", "Anastasya", swap_out_time=2.941)
+anastasya_q.add_ability(2.371, anastasya_burst)
+
+anastasya_eq = FieldSequence("AnastasyaEQ", "Anastasya", swap_out_time=2.851)
+anastasya_eq.add_ability(0.601, anastasya_tap)
+anastasya_eq.add_ability(2.371, anastasya_burst)
+
+# Preset keys: readable handles for the rotations below (they are NOT the UI labels,
+# which come from FieldSequence.name through FIELD_SEQUENCE_REGISTRY).
 STANDARD_FIELD_SEQUENCES = {
-    "Aether EN1": FieldSequence("AetherEN1", "Aether", swap_out_time=1.23),
-    "Aether CQ": FieldSequence("AetherCQ", "Aether", swap_out_time=2.941),
-    "Aether ECQ": FieldSequence("AetherECQ", "Aether", swap_out_time=3.631),
-    "Faruzan Q": FieldSequence("FaruzanQSwap", "Faruzan", swap_out_time=1.410),
-    "Odette EE": FieldSequence("OdetteEE", "Odette", swap_out_time=2.371),
-    # Mizuki's pull-out lengths live in abilities.py: one sequence per number of
-    # stellar nukes (1/2/3/4 = 2/5/9/13 skill ticks), plus her burst field.
+    "Aether EN1": aether_en1,
+    "Aether CQ": aether_cq,
+    "Aether ECQ": aether_ecq,
+    "Faruzan Q": faruzan_q,
+    "Odette EE": odette_ee,
     "Mizuki E (Sac Frag Proc)": mizuki_pullout_1_nuke,
     "Mizuki E (Pullout)": mizuki_pullout_4_nukes,
     "Mizuki E (2 nukes)": mizuki_pullout_2_nukes,
     "Mizuki E (3 nukes)": mizuki_pullout_3_nukes,
-    "Mizuki Q": mizuki_burst_field,
-    # Anastasya's sequences live in abilities.py (anastasya_e / anastasya_q /
-    # anastasya_eq), built on Aether's EN1 / CQ timings.
+    "Mizuki EQ (4 nukes)": mizuki_pullout_burst_4_nukes,
     "Anastasya E": anastasya_e,
     "Anastasya Q": anastasya_q,
     "Anastasya EQ": anastasya_eq,
     "Faruzan E": faruzan_e,
-    # Odette's QE lives in abilities.py (burst + recast, 3.071s field).
     "Odette QE": odette_qe,
 }
 
-# Populate calls for sequences (covering all abilities)
-STANDARD_FIELD_SEQUENCES["Aether EN1"].add_ability(0.601, aether_skill)
-STANDARD_FIELD_SEQUENCES["Aether EN1"].add_ability(1.2, aether_n1)
+# ---------------------------------------------------------------------------
+# Sequence catalogue (read by the editors and by build_io's legacy lookups)
+# ---------------------------------------------------------------------------
+# Renames are translated, not dropped: exported builds/trials saved before a rename
+# still reference the old display names, so build_io maps them back on load.
+LEGACY_SEQUENCE_NAMES = {
+    "SacFragFill": "Skill Pullout 1 Nuke",
+    "BurstlessPullOut": "Skill Pullout 4 Nukes",
+}
 
-# Aether CQ sequence population
-STANDARD_FIELD_SEQUENCES["Aether CQ"].add_ability(0.51, aether_n1ca)
-STANDARD_FIELD_SEQUENCES["Aether CQ"].add_ability(2.371, aether_burst_enhanced)
 
-# Aether ECQ sequence population (Completing the 12 abilities transition)
-STANDARD_FIELD_SEQUENCES["Aether ECQ"].add_ability(0.601, aether_skill)
-STANDARD_FIELD_SEQUENCES["Aether ECQ"].add_ability(1.2, aether_n1ca)
-STANDARD_FIELD_SEQUENCES["Aether ECQ"].add_ability(3.061, aether_burst_enhanced)
+def _collect_field_sequences():
+    """{name: FieldSequence} from every sequence bound to a module global.
 
-STANDARD_FIELD_SEQUENCES["Odette EE"].add_ability(0.660, odette_cast)
-STANDARD_FIELD_SEQUENCES["Odette EE"].add_ability(1.170, odette_recast)
+    Module-level definition is the whole registration step: a new sequence needs no
+    second entry anywhere else, it shows up in the editors for its character.
+    """
+    sequences = {}
+    for value in list(globals().values()):
+        if isinstance(value, FieldSequence):
+            sequences.setdefault(value.name, value)
+    return sequences
 
-STANDARD_FIELD_SEQUENCES["Faruzan Q"].add_ability(1.200, faruzan_burst)
 
-# Mizuki's sequences are complete objects in abilities.py, so nothing to populate here.
+FIELD_SEQUENCE_REGISTRY = _collect_field_sequences()
+
+
+def field_sequences_for(characters) -> dict:
+    """{sequence name: FieldSequence} for the characters that are actually in play."""
+    party = {c for c in (characters or []) if c}
+    return {name: seq for name, seq in FIELD_SEQUENCE_REGISTRY.items()
+            if seq.character in party}
 
 
 # 2. STANDARD ROTATIONS (Macro Loops)

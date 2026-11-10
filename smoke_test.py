@@ -25,11 +25,12 @@ Checks:
 """
 from timeline import RotationTimeline, SUCROSE_BURST_WINDOW, ANASTASYA_TRIUMPH_DELAY
 from abilities import (
-    odette_qe, aether_en1, sucrose_eq, aether_n1, aether_skill,
-    sucrose_skill, sucrose_burst,
+    aether_n1, aether_skill, sucrose_skill, sucrose_burst,
     # The 13-tick skill is what the pre-existing Mizuki checks exercise.
     mizuki_pullout_13 as mizuki_skill,
 )
+# Field sequences live in presets.py (abilities.py holds only immutable Ability data).
+from presets import aether_en1, odette_qe, sucrose_eq
 from models import FieldSequence, Rotation, Trial, ActionCategory, AttackType
 from stats_calc import (
     build_initial_stats, build_snapshot_stats, compute_final_stats, compute_flat_em,
@@ -770,7 +771,7 @@ def _run_artifact_stat_check() -> dict:
 def _run_artifact_phase1_check() -> dict:
     """Artifact set buffs, phase 1: Instructor, Gilded Dreams, Noblesse Oblige,
     Tenacity, A Day Carved From Rising Winds, Scarlet Proof, New Tsaritsa set."""
-    from abilities import sucrose_e
+    from presets import sucrose_e
 
     out = {}
     aether = {"constellation": 0, "level": 90, "refinement": 1,
@@ -1160,10 +1161,11 @@ def _run_hit_catalogue_check() -> dict:
     import abilities as ab
 
     out = {}
-    out["sequences"] = len(ab.FIELD_SEQUENCE_REGISTRY)
+    out["sequences"] = len(presets.FIELD_SEQUENCE_REGISTRY)
     out["abilities"] = sum(len(map_) for map_ in ab.ABILITY_REGISTRY.values())
+    # Sequences are declared in presets.py, abilities in abilities.py: scan both.
     out["empty_bindings"] = sorted(
-        attr for attr, value in vars(ab).items()
+        attr for attr, value in vars(presets).items()
         if isinstance(value, ab.FieldSequence) and not value.calls
     )
 
@@ -1186,23 +1188,30 @@ def _run_hit_catalogue_check() -> dict:
     out["unresolved"] = unresolved
     out["zero_mv"] = zero_mv
 
-    # The registry keeps the first definition of a name, so a duplicate is invisible.
-    # Intentional variants (Aether burst / Odette recast) share a name by design.
-    seen, duplicates = {}, []
-    for attr, value in vars(ab).items():
-        if isinstance(value, (ab.FieldSequence, ab.Ability)):
+    # The registries keep the first definition of a name, so a duplicate is invisible.
+    # Intentional variants (Aether burst / Odette recast) share a name by design, and an
+    # object imported into the other module is the SAME object, not a duplicate.
+    seen, duplicates, seen_ids = {}, [], set()
+    for module in (ab, presets):
+        for attr, value in vars(module).items():
+            if not isinstance(value, (ab.FieldSequence, ab.Ability)):
+                continue
             if getattr(value, "name", None) in ab.VARIANT_ABILITY_NAMES:
                 continue
+            if id(value) in seen_ids:
+                continue
+            seen_ids.add(id(value))
             key = (type(value).__name__, getattr(value, "character", None), value.name)
             if key in seen:
-                duplicates.append(f"{value.character} / {value.name} ({seen[key]} vs {attr})")
-            seen.setdefault(key, attr)
+                duplicates.append(
+                    f"{value.character} / {value.name} ({seen[key]} vs {module.__name__}.{attr})")
+            seen.setdefault(key, f"{module.__name__}.{attr}")
     out["duplicates"] = duplicates
 
     # Informational: the engine keeps late hits (off-field damage is a feature here), so
     # this is not an error - it just lists sequences whose field ends before the last hit.
     late_hits = []
-    for name, seq in ab.FIELD_SEQUENCE_REGISTRY.items():
+    for name, seq in presets.FIELD_SEQUENCE_REGISTRY.items():
         last_hit = 0.0
         for call in seq.calls:
             for hit in call.ability.hits:
@@ -1211,8 +1220,8 @@ def _run_hit_catalogue_check() -> dict:
             late_hits.append(name)
     out["late_hit_sequences"] = sorted(late_hits)
 
-    # What the editor offers for Mizuki (sequences are auto-collected, not registered).
-    out["mizuki_ui"] = sorted(ab.field_sequences_for(["Mizuki"]))
+    # What the editor offers for Mizuki (module-level sequence = registered).
+    out["mizuki_ui"] = sorted(presets.field_sequences_for(["Mizuki"]))
     return out
 
 
@@ -1232,9 +1241,14 @@ def _run_mizuki_burst_check() -> dict:
     out["all_burst"] = all(h.attack_type == AttackType.BURST for h in burst.hits)
     out["positive_mv"] = all(h.motion_value > 0 for h in burst.hits)
 
+    # Burst-only probe: the presets also ship a skill+burst combo, so the burst cannot be
+    # checked through a preset sequence without pulling her skill (and DDS) into it.
+    burst_only = FieldSequence("BurstProbe", "Mizuki", swap_out_time=12.8)
+    burst_only.add_ability(0.301, burst)
+
     t = RotationTimeline(party={k: dict(v) for k, v in presets.DEFAULT_PARTY.items()})
     t.add_trial(Trial(name="mz_burst", end_mode="time", end_time=20.0,
-                      rotations=[Rotation(name="r", sequences=[ab.mizuki_burst_field],
+                      rotations=[Rotation(name="r", sequences=[burst_only],
                                           repetitions=1)]))
     t.evaluate_timeline()
     hits = [e for e in t.global_events
@@ -1543,21 +1557,21 @@ def _run_anastasya_check() -> dict:
 def _run_editor_catalogue_check() -> dict:
     """Editor catalogues + preset trial team gating (what the UI is allowed to offer).
 
-    Every FieldSequence / Ability in abilities.py must be reachable through the
-    registries, ownership must resolve, and a preset trial must advertise exactly the
-    team its rotation actually plays.
+    Every FieldSequence / Ability must be reachable through the registries (sequences
+    from presets.py, abilities from abilities.py), ownership must resolve, and a preset
+    trial must advertise exactly the team its rotation actually plays.
     """
     import abilities
 
     out = {}
-    seq_names = {seq.name for seq in abilities.FIELD_SEQUENCE_REGISTRY.values()}
+    seq_names = {seq.name for seq in presets.FIELD_SEQUENCE_REGISTRY.values()}
     ab_names = {(char, name) for char, m in abilities.ABILITY_REGISTRY.items() for name in m}
     out["sequence_count"] = len(seq_names)
     out["ability_count"] = len(ab_names)
 
     # Faruzan E: collapse only, same insertion time / field time as her Q swap.
-    fe = abilities.FIELD_SEQUENCE_REGISTRY.get("FaruzanESwap")
-    fq = abilities.FIELD_SEQUENCE_REGISTRY.get("FaruzanQSwap")
+    fe = presets.FIELD_SEQUENCE_REGISTRY.get("FaruzanESwap")
+    fq = presets.FIELD_SEQUENCE_REGISTRY.get("FaruzanQSwap")
     out["faruzan_e_exists"] = fe is not None
     if fe is not None and fq is not None:
         out["faruzan_e_same_swap"] = abs(fe.swap_out_time - fq.swap_out_time) <= 1e-9
@@ -1570,7 +1584,7 @@ def _run_editor_catalogue_check() -> dict:
         out["faruzan_e_is_collapse"] = out["faruzan_e_no_burst"] = False
 
     # Party-gated filtering helper used by the UI.
-    only_mizuki = abilities.field_sequences_for(["Mizuki"])
+    only_mizuki = presets.field_sequences_for(["Mizuki"])
     out["filter_only_party"] = bool(only_mizuki) and all(
         seq.character == "Mizuki" for seq in only_mizuki.values())
     out["filter_hides_outside"] = "AnastasyaEQ" not in only_mizuki
@@ -2298,7 +2312,7 @@ def run(verbose: bool = True) -> None:
          "hits with a zero motion value: " + ", ".join(hits_cat["zero_mv"])),
         (not hits_cat["duplicates"],
          "duplicate ability/sequence display names: " + ", ".join(hits_cat["duplicates"])),
-        ({"Mizuki Burst", "Skill Pullout 1 Nuke", "Skill Pullout 2 Nukes",
+        ({"Burst Pullout 4 Nukes", "Skill Pullout 1 Nuke", "Skill Pullout 2 Nukes",
           "Skill Pullout 3 Nukes", "Skill Pullout 4 Nukes"}
          <= set(hits_cat["mizuki_ui"]),
          f"the editor catalogue for Mizuki is {hits_cat['mizuki_ui']}"),
