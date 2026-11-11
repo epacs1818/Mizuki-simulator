@@ -1,0 +1,9 @@
+# Streamlit configuration.
+#
+# The UI is built for ONE dark look: the wallpaper sits behind a dark scrim and every
+# block is a translucent dark "glass" panel whose colours come from the theme variables.
+# Pinning the theme here keeps widgets (inputs, selects, sliders) in the same palette as
+# those panels, and it also removes the light/dark switch from the app menu.
+[theme]
+base = "dark"
+primaryColor = "#3b82f6"

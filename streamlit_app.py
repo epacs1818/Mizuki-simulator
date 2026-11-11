@@ -63,102 +63,155 @@ def get_base64_image(image_path):
 # Get the base64 string (change to "assets/wallpaper.png" or "webp" if your file format differs)
 img_base64 = get_base64_image("assets/wallpaper.jpg")
 
-st.markdown(
-    f"""
-    <style>
-    .stApp {{
-        background-image: url("data:image/jpeg;base64,{img_base64}");
+# Wallpaper + SOLID dark blocks.
+#
+# The look: every block of content sits on a solid, opaque dark panel with white text,
+# and the wallpaper shows in the gaps BETWEEN those panels (page margins, the space
+# between the title plate and the tabs card). Nothing is translucent - no glass, no
+# blur - so text contrast is the same over any part of the wallpaper.
+#
+# PAGE_CSS is a PLAIN string with a __WALLPAPER__ placeholder (not an f-string): CSS is
+# full of braces, and inside an f-string every single one of them has to be doubled -
+# one missed brace silently breaks the whole style block.
+PAGE_CSS = """
+<style>
+    :root {
+        --page-ink: #0e1117;                       /* solid background behind text */
+        --page-panel: #1a2130;                     /* grouped blocks: cards on top of it */
+        --page-edge: rgba(255, 255, 255, 0.08);    /* 1px block outline */
+        --page-radius: 16px;
+        --page-scrim: rgba(5, 7, 11, 0.55);        /* dims the wallpaper only */
+    }
+
+    /* 1. The wallpaper, pinned to the viewport. */
+    .stApp {
+        background-image: url("data:image/jpeg;base64,__WALLPAPER__");
         background-size: cover;
         background-position: center;
         background-repeat: no-repeat;
         background-attachment: fixed;
-    }}
-    
-    /* Dark overlay to contrast the wallpaper */
-    .stApp::before {{
+    }
+
+    /* 2. Scrim: keeps the wallpaper visible but calm enough to sit behind the gaps. */
+    .stApp::before {
         content: "";
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background-color: rgba(14, 17, 23, 0.4); 
+        position: fixed;
+        inset: 0;
         z-index: 0;
         pointer-events: none;
-    }}
-    
-    /* Main application container */
-    .main .block-container {{
+        background: var(--page-scrim);
+    }
+
+    [data-testid="stMain"] {
         position: relative;
         z-index: 1;
-        background-color: rgba(15, 23, 42, 0.88) !important;
-        color: #ffffff !important;
-        padding: 2.5rem 3rem !important;
-        border-radius: 20px !important;
-        box-shadow: 0 10px 35px rgba(0, 0, 0, 0.5) !important;
-        margin-top: 2rem !important;
-        margin-bottom: 2rem !important;
-    }}
+    }
 
-    /* --- ADD TEXT SHADOW TO INTERFACE TEXT --- */
-    .main .block-container h1, 
-    .main .block-container h2, 
-    .main .block-container h3, 
-    .main .block-container h4, 
-    .main .block-container h5, 
-    .main .block-container h6, 
-    .main .block-container p, 
-    .main .block-container span, 
-    .main .block-container label,
-    .main .block-container .stMarkdown,
-    .main .block-container .stAlert {{
-        color: #ffffff !important;
-        text-shadow: 0 2px 4px rgba(0, 0, 0, 0.6) !important;
-    }}
+    /* 3. No sheet across the page: the container stays transparent so the wallpaper
+          shows in the gaps between the blocks. */
+    [data-testid="stMainBlockContainer"] {
+        background: transparent !important;
+        border: 0 !important;
+        box-shadow: none !important;
+        padding-top: 2rem !important;
+    }
 
-    /* --- TAB CLOUD / CURVED RECTANGLE STYLING --- */
-    div[data-baseweb="tab-list"] {{
-        background-color: rgba(30, 41, 59, 0.95) !important;
-        padding: 10px 15px !important;
-        border-radius: 16px !important;
-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3) !important;
-        gap: 8px !important;
-        margin-bottom: 20px !important;
-    }}
+    /* 4. Everything OUTSIDE the tabs (the title) gets its own solid plate. */
+    [data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"]
+        > [data-testid="stElementContainer"]:not(:has([data-baseweb="tab-list"])) {
+        background: var(--page-ink);
+        border: 1px solid var(--page-edge);
+        border-radius: var(--page-radius);
+        padding: 0.4rem 1.1rem;
+        margin-bottom: 0.9rem;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+    }
 
-    div[data-baseweb="tab"] {{
-        border-radius: 10px !important;
-        color: #cbd5e1 !important;
+    /* ...except the injected <style> and the "---" separators, which are not blocks. */
+    [data-testid="stElementContainer"]:has(style),
+    [data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"]
+        > [data-testid="stElementContainer"]:has(> [data-testid="stMarkdownContainer"] hr) {
+        background: transparent;
+        border: 0;
+        box-shadow: none;
+        padding: 0;
+        margin: 0;
+    }
+
+    /* 5. Tabs: a solid bar, and the tab panel is the main solid surface. */
+    div[data-baseweb="tab-list"] {
+        background: var(--page-panel) !important;
+        border: 1px solid var(--page-edge) !important;
+        padding: 8px 12px !important;
+        border-radius: 14px !important;
+        gap: 6px !important;
+        margin-bottom: 12px !important;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45) !important;
+    }
+
+    div[data-baseweb="tab"] {
+        border-radius: 9px !important;
+        color: var(--text-color) !important;
+        opacity: 0.72;
         font-weight: 600 !important;
         padding: 8px 16px !important;
-        transition: all 0.3s ease !important;
-        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5) !important;
-    }}
+        transition: all 0.25s ease !important;
+    }
 
-    div[data-baseweb="tab"]:hover {{
-        background-color: rgba(255, 255, 255, 0.1) !important;
-        color: #ffffff !important;
-    }}
+    div[data-baseweb="tab"]:hover {
+        background: rgba(255, 255, 255, 0.07) !important;
+        opacity: 1;
+    }
 
-    button[data-baseweb="tab"][aria-selected="true"] {{
-        background-color: #3b82f6 !important;
+    button[data-baseweb="tab"][aria-selected="true"] {
+        background: var(--primary-color) !important;
         color: #ffffff !important;
-        border-radius: 10px !important;
-    }}
+        opacity: 1;
+    }
 
-    /* Tab Panel Content Box */
-    div[data-baseweb="tab-panel"] {{
-        background-color: rgba(30, 41, 59, 0.6) !important;
-        padding: 20px 25px !important;
-        border-radius: 16px !important;
-        border: 1px solid rgba(255, 255, 255, 0.1) !important;
-        margin-top: 10px !important;
-        color: #ffffff !important;
-    }}
-    </style>
-    """,
-    unsafe_allow_html=True
-)
+    div[data-baseweb="tab-panel"] {
+        background: var(--page-ink) !important;
+        border: 1px solid var(--page-edge) !important;
+        border-radius: var(--page-radius) !important;
+        padding: 22px 26px !important;
+        box-shadow: 0 14px 38px rgba(0, 0, 0, 0.5) !important;
+    }
+
+    /* 6. Grouped blocks inside a tab: a lighter solid card, so the blocks read as
+          separate boxes on the dark surface (expanders, metrics, tables, alerts). */
+    [data-testid="stExpander"],
+    [data-testid="stMetric"],
+    [data-testid="stDataFrame"],
+    [data-testid="stAlert"] {
+        background: var(--page-panel) !important;
+        border: 1px solid var(--page-edge) !important;
+        border-radius: 12px !important;
+        padding: 0.55rem 0.85rem !important;
+    }
+
+    /* 7. White text everywhere (the theme is pinned to dark, so --text-color is white);
+          captions stay one step dimmer so the hierarchy survives. */
+    .stApp,
+    .stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp h5, .stApp h6,
+    .stApp p, .stApp li, .stApp label {
+        color: var(--text-color);
+    }
+
+    [data-testid="stCaptionContainer"] {
+        opacity: 0.85;
+    }
+
+    /* 8. The top bar floats over the wallpaper too: give it a solid strip. */
+    [data-testid="stHeader"] {
+        background: var(--page-ink);
+        border-bottom: 1px solid var(--page-edge);
+    }
+</style>
+"""
+
+st.markdown(PAGE_CSS.replace("__WALLPAPER__", img_base64), unsafe_allow_html=True)
+
+
 
 st.title("Yumemizuki Mizuki's Rotation Damage Calculator")
 st.markdown("---")
@@ -467,6 +520,31 @@ def _column_block(column):
         if column in columns:
             return block
     return "buff"
+
+
+def blend_chart(fig):
+    """Make a Plotly figure sit on the dark glass panels instead of a white rectangle.
+
+    px.pie / px.bar draw Plotly's plain white canvas by default, which looked like a
+    bright block on the wallpaper UI (and its dark tick/label colours were unreadable
+    once the card behind it is translucent). Transparent paper/plot + light text keeps
+    the series colours untouched.
+    """
+    fig.update_layout(
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(color="#e6e8ef"),
+        title_font=dict(color="#e6e8ef"),
+        legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(color="#e6e8ef")),
+        margin=dict(l=12, r=12, t=52, b=12),
+    )
+    fig.update_xaxes(gridcolor="rgba(255,255,255,0.12)",
+                     zerolinecolor="rgba(255,255,255,0.20)",
+                     linecolor="rgba(255,255,255,0.25)")
+    fig.update_yaxes(gridcolor="rgba(255,255,255,0.12)",
+                     zerolinecolor="rgba(255,255,255,0.20)",
+                     linecolor="rgba(255,255,255,0.25)")
+    return fig
 
 
 def style_timeline_dataframe(df):
@@ -1620,7 +1698,7 @@ with tab4:
                                 title="Damage by Element",
                                 hole=0.3
                             )
-                            st.plotly_chart(fig_elem, use_container_width=True)
+                            st.plotly_chart(blend_chart(fig_elem), use_container_width=True)
                             
                     with chart_col2:
                         hit_data = analytics.get("hit_type_breakdown", {})
@@ -1631,7 +1709,7 @@ with tab4:
                                 title="Damage by Hit Type",
                                 hole=0.3
                             )
-                            st.plotly_chart(fig_hit, use_container_width=True)
+                            st.plotly_chart(blend_chart(fig_hit), use_container_width=True)
                             
                     with chart_col3:
                         owner_data = analytics.get("owner_damage_share", {})
@@ -1642,7 +1720,7 @@ with tab4:
                                 title="Damage Share by Character (Excl. Reactions)",
                                 hole=0.3
                             )
-                            st.plotly_chart(fig_owner, use_container_width=True)
+                            st.plotly_chart(blend_chart(fig_owner), use_container_width=True)
 
                     st.markdown("---")
 
@@ -1658,7 +1736,7 @@ with tab4:
                             labels={"Second": "Timeline Second (s)", "DPS": "Damage Per Second (DMG/s)"},
                             color_discrete_sequence=["#3b82f6"]
                         )
-                        st.plotly_chart(fig_dps, use_container_width=True)
+                        st.plotly_chart(blend_chart(fig_dps), use_container_width=True)
 
                 st.markdown("<br>", unsafe_allow_html=True)
 
