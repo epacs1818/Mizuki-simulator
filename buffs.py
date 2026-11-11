@@ -57,15 +57,19 @@ CONDITIONAL_CONSTANT_BUFFS = {
     },
 
     #Odette
+    # C2: while the shadow is on field the party loses 20% Cryo/Anemo RES.
     "Odette C2": {
         "cryo_shred": 0.20,
         "anemo_shred": 0.20,
     },
-    # NOTE: Odette's "Snow Swan's Dream" has no fixed-value entries. It is the
-    # talent-scaled "Odette Burst" descriptor in CONDITIONAL_NON_CONSTANT_BUFFS
-    # (path into skill_scalings), self-only, 20s from her burst cast hit.
+    # NOTE: Odette's "Snow Swan's Dream" (SSD) has no fixed-value entry. It is the
+    # talent-scaled "Odette SSD" descriptor in CONDITIONAL_NON_CONSTANT_BUFFS
+    # (path into skill_scalings), self-only below C4, 20s from her burst cast hit.
+    # C6: while the shadow is on field the OTHERS get +25% elevation_mult and she
+    # gets +45% total (0.25 party + 0.20 personal). Elevation only applies to
+    # STELLAR damage (never stellar reactions).
     "Odette C6 self":{
-        "elevation_mult": 0.20,
+        "elevation_mult": 0.45,
     },
     "Odette C6 party":{
         "elevation_mult": 0.25,
@@ -92,9 +96,72 @@ CONDITIONAL_CONSTANT_BUFFS = {
     },
 
     #Anastasya
-    # A1: after her skill cast hits, OTHER party members gain 16% crit DMG for 19s.
-    "Anastasya A1":{
+    # "Accolades" (her A1): her skill Cast hit gives EVERYONE 12% crit DMG for 20s.
+    # While she is SEALED (burst cast + swap-out) the buff is SHARED: the OTHERS get
+    # her share (x4/3 => +4% at C0) and from C1 on everyone's value is 300% (x3)
+    # stronger, 430% (x4.3) from C4. C1 also adds ATK% for Cryo recipients / EM for
+    # everybody else. Two dispatch flags split the variants (see stats_calc).
+    # --- unsealed: everyone ---
+    "Anastasya Accolades":{
+        "crit_dmg": 0.12,
+    },
+    "Anastasya Accolades ATK":{          # C1+, unsealed, Cryo recipients
+        "atk_percent": 0.15,
+    },
+    "Anastasya Accolades EM":{           # C1+, unsealed, non-Cryo recipients
+        "em": 60.0,
+    },
+    # --- shared (sealed): the OTHERS, x4/3 ---
+    "Anastasya Accolades (Shared C0)":{
         "crit_dmg": 0.16,
+    },
+    "Anastasya Accolades (Shared C1)":{
+        "crit_dmg": 0.48,
+    },
+    "Anastasya Accolades (Shared C4)":{
+        "crit_dmg": 0.688,
+    },
+    "Anastasya Accolades ATK (Shared C1)":{
+        "atk_percent": 0.60,
+    },
+    "Anastasya Accolades ATK (Shared C4)":{
+        "atk_percent": 0.86,
+    },
+    "Anastasya Accolades EM (Shared C1)":{
+        "em": 240.0,
+    },
+    "Anastasya Accolades EM (Shared C4)":{
+        "em": 344.0,
+    },
+    # --- shared (sealed): HERSELF (C1+ keeps a NON-shared share; 0 at C0) ---
+    "Anastasya Accolades (Sealed C1)":{
+        "crit_dmg": 0.36,
+    },
+    "Anastasya Accolades (Sealed C4)":{
+        "crit_dmg": 0.516,
+    },
+    "Anastasya Accolades ATK (Sealed C1)":{
+        "atk_percent": 0.45,
+    },
+    "Anastasya Accolades ATK (Sealed C4)":{
+        "atk_percent": 0.645,
+    },
+    "Anastasya Accolades EM (Sealed C1)":{
+        "em": 180.0,
+    },
+    "Anastasya Accolades EM (Sealed C4)":{
+        "em": 258.0,
+    },
+    # C2 "Love": party stellar crit DMG for 30s, cast with the skill (independent of
+    # Accolades). Its elevation part is permanent and has no window.
+    "Anastasya Love":{
+        "stellar_crit_dmg": 0.60,
+    },
+    "Anastasya Love Elevation":{         # C2: always on, party-wide
+        "elevation_mult": 0.05,
+    },
+    "Anastasya Love Elevation C6":{      # C6: stacks on top of the C2 part
+        "elevation_mult": 0.10,
     },
     # A4: while she is in the party, STELLAR SWIRL REACTION damage gains +0.15
     # jubilee (a separate key: stellar DMG is unaffected).
@@ -279,11 +346,18 @@ CONDITIONAL_NON_CONSTANT_BUFFS = {
         "caster": "Odette", "target_stat": "jubilee_mult",
         "basis": "atk", "ratio": 0.00007, "cap": 0.14,
     },
-    # Burst: 6s SELF stellar_bonus, talent-scaled (Snow Swan's Dream).
-    "Odette Burst": {
+    # SSD: 20s SELF stellar_bonus, talent-scaled (Snow Swan's Dream).
+    "Odette SSD": {
         "caster": "Odette", "target_stat": "stellar_bonus",
         "basis": "talent",
         "path": ("Odette", "Burst", "Snow Swan's Dream Stellar Glimmer Reaction DMG Bonus"),
+    },
+    # C4: the OTHERS receive 50% of the SSD value (same talent, halved).
+    "Odette SSD (Others)": {
+        "caster": "Odette", "target_stat": "stellar_bonus",
+        "basis": "talent",
+        "path": ("Odette", "Burst", "Snow Swan's Dream Stellar Glimmer Reaction DMG Bonus"),
+        "multiplier": 0.5,
     },
     # A4: mv_increase on her stellar attacks = 1 + 0.015% of ATK past 1000,
     # capped at 1.30 (3000 ATK).
@@ -354,11 +428,7 @@ CONDITIONAL_NON_CONSTANT_BUFFS = {
 # text/Implementation_Backlog.md tracks what still has to be implemented.
 # smoke_test.py asserts that every OTHER catalogue entry IS reachable, so a dead
 # entry can never hide again.
-DORMANT = {
-    # Characters
-    "Odette C6 self",
-    "Odette C6 party",
-}
+DORMANT = set()   # (empty) Odette's C6 elevation is live since the constellation round
 
 # Team-share effects (Sucrose A4, Mizuki VBTD2) are ordinary declarative
 # non-constant buffs now (see CONDITIONAL_NON_CONSTANT_BUFFS), so there is no
@@ -389,6 +459,8 @@ PERMANENT_BUFFS = {
 
 STACK_BUFFS = {
     #Characters
+    # Odette A1: every Marvelous stack gives the holder +15% stellar_bonus. At C6 she
+    # keeps her own stacks off-field while the party receives its own copies.
     "Odette A1":{
         "stellar_bonus": 0.15   #per stack
     },
@@ -397,7 +469,8 @@ STACK_BUFFS = {
     "Aether C6": {
         "stellar_bonus": 0.05    #per stack
     },
-    "Odette C2": {
+    # Odette C2: every Marvelous stack ALSO gives +7% ATK to its holder (C2+ only).
+    "Odette C2 ATK": {
         "atk_percent": 0.07    #per stack of marvelous splendor
     },
 

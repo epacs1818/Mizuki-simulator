@@ -397,22 +397,28 @@ FLAG_TO_BUFFS = {
         # Anastasya: jubilee passive (party) + A4 reaction-only jubilee (party).
         {"type": "non_constant", "key": "Anastasya_jubilee",             "target": "Party",  "caster": "Anastasya", "require_party": True},
         {"type": "constant",     "key": "Anastasya A4",                  "target": "Party",  "caster": "Anastasya", "require_party": True},
+        # C2 Love's elevation half is permanent (no window, no cast): 0.05 party-wide,
+        # +0.10 more at C6 (they add up like every other elevation source).
+        {"type": "constant",     "key": "Anastasya Love Elevation",       "target": "Party",  "caster": "Anastasya", "min_constellation": 2, "require_party": True},
+        {"type": "constant",     "key": "Anastasya Love Elevation C6",    "target": "Party",  "caster": "Anastasya", "min_constellation": 6, "require_party": True},
         # Mizuki C6 part 2: crit rate/dmg from her FLAT EM above 500, C6+ only.
         # Always recomputed (never "permanent"), because the EM basis changes per event.
         {"type": "non_constant", "key": "Mizuki C6 EM CR",               "target": "Self",   "caster": "Mizuki", "min_constellation": 6},
         {"type": "non_constant", "key": "Mizuki C6 EM CD",               "target": "Self",   "caster": "Mizuki", "min_constellation": 6},
     ],
 
-    # Odette Burst: 6s self stellar_bonus buff (target Self so it only helps her).
-    "odette_burst_state": [
-        {"type": "non_constant", "key": "Odette Burst",                  "target": "Self",   "caster": "Odette"},
+    # Odette SSD: talent-scaled self stellar_bonus for the 20s window; C4 shares half
+    # of it with the OTHERS (the flag is party-wide so the column shows ON for all).
+    "odette_ssd_state": [
+        {"type": "non_constant", "key": "Odette SSD",                    "target": "Self",   "caster": "Odette"},
+        {"type": "non_constant", "key": "Odette SSD (Others)",           "target": "Others", "caster": "Odette", "min_constellation": 4},
     ],
 
     # ---- Odette Marvelous Stacks -------------------------------------------
     "marvelous_stacks": [
         {"type": "stack",        "key": "Odette A1",                     "target": "Party",  "caster": "Odette", "stack_flag": "marvelous_stacks"},
         # C2: the holder's ATK also scales +7% per stack (only if Odette is C2).
-        {"type": "stack",        "key": "Odette C2",                     "target": "Party",  "caster": "Odette", "stack_flag": "marvelous_stacks", "min_constellation": 2},
+        {"type": "stack",        "key": "Odette C2 ATK",                 "target": "Party",  "caster": "Odette", "stack_flag": "marvelous_stacks", "min_constellation": 2},
     ],
 
     # ---- Mizuki Dreamdrifter active (skill on-field) -----------------------
@@ -529,9 +535,34 @@ FLAG_TO_BUFFS = {
     "anastasya_burst_state": [
         {"type": "non_constant", "key": "Anastasya Burst",                   "target": "Party",  "caster": "Anastasya"},
     ],
-    # A1: her skill cast gives the OTHERS 16% crit DMG for 19s.
-    "anastasya_a1_state": [
-        {"type": "constant",     "key": "Anastasya A1",                      "target": "Others", "caster": "Anastasya"},
+    # Accolades: 20s from her skill Cast hit. The two variants are mutually
+    # exclusive per event, so they can never double-count:
+    #   unsealed -> everyone gets the base 12% (+ C1 ATK%/EM)
+    #   shared   -> the OTHERS get her share (x4/3) and C1+ scales everything x3
+    #               (x4.3 at C4); at C1+ she keeps a NON-shared copy, at C0 nothing.
+    "anastasya_accolades_unsealed_state": [
+        {"type": "constant",     "key": "Anastasya Accolades",               "target": "Party",  "caster": "Anastasya"},
+        {"type": "constant",     "key": "Anastasya Accolades ATK",           "target": "Party",  "caster": "Anastasya", "include_elements": ["Cryo"], "min_constellation": 1},
+        {"type": "constant",     "key": "Anastasya Accolades EM",            "target": "Party",  "caster": "Anastasya", "exclude_elements": ["Cryo"], "min_constellation": 1},
+    ],
+    "anastasya_accolades_shared_state": [
+        {"type": "constant",     "key": "Anastasya Accolades (Shared C0)",   "target": "Others", "caster": "Anastasya", "max_constellation": 0},
+        {"type": "constant",     "key": "Anastasya Accolades (Shared C1)",   "target": "Others", "caster": "Anastasya", "min_constellation": 1, "max_constellation": 3},
+        {"type": "constant",     "key": "Anastasya Accolades (Shared C4)",   "target": "Others", "caster": "Anastasya", "min_constellation": 4},
+        {"type": "constant",     "key": "Anastasya Accolades (Sealed C1)",   "target": "Self",   "caster": "Anastasya", "min_constellation": 1, "max_constellation": 3},
+        {"type": "constant",     "key": "Anastasya Accolades (Sealed C4)",   "target": "Self",   "caster": "Anastasya", "min_constellation": 4},
+        {"type": "constant",     "key": "Anastasya Accolades ATK (Shared C1)", "target": "Others", "caster": "Anastasya", "include_elements": ["Cryo"], "min_constellation": 1, "max_constellation": 3},
+        {"type": "constant",     "key": "Anastasya Accolades ATK (Shared C4)", "target": "Others", "caster": "Anastasya", "include_elements": ["Cryo"], "min_constellation": 4},
+        {"type": "constant",     "key": "Anastasya Accolades EM (Shared C1)",  "target": "Others", "caster": "Anastasya", "exclude_elements": ["Cryo"], "min_constellation": 1, "max_constellation": 3},
+        {"type": "constant",     "key": "Anastasya Accolades EM (Shared C4)",  "target": "Others", "caster": "Anastasya", "exclude_elements": ["Cryo"], "min_constellation": 4},
+        {"type": "constant",     "key": "Anastasya Accolades ATK (Sealed C1)", "target": "Self",   "caster": "Anastasya", "include_elements": ["Cryo"], "min_constellation": 1, "max_constellation": 3},
+        {"type": "constant",     "key": "Anastasya Accolades ATK (Sealed C4)", "target": "Self",   "caster": "Anastasya", "include_elements": ["Cryo"], "min_constellation": 4},
+        {"type": "constant",     "key": "Anastasya Accolades EM (Sealed C1)",  "target": "Self",   "caster": "Anastasya", "exclude_elements": ["Cryo"], "min_constellation": 1, "max_constellation": 3},
+        {"type": "constant",     "key": "Anastasya Accolades EM (Sealed C4)",  "target": "Self",   "caster": "Anastasya", "exclude_elements": ["Cryo"], "min_constellation": 4},
+    ],
+    # C2 Love window (30s from the skill cast): party stellar crit DMG.
+    "anastasya_love_state": [
+        {"type": "constant",     "key": "Anastasya Love",                    "target": "Party",  "caster": "Anastasya", "min_constellation": 2},
     ],
     # --- Artifact set buffs (phase 1) --------------------------------------
     # Instructor / VV already exist above; the rest are holder-gated with the same
@@ -578,9 +609,13 @@ FLAG_TO_BUFFS = {
     "aether_c6_state": [
         {"type": "stack",        "key": "Aether C6",                        "target": "Party",  "caster": "Aether", "stack_flag": "aether_c6_stacks"},
     ],
-    "odette_c2_state": [
-        # C2 party shred (20s window set on her skill/burst cast), gated to C2+.
+    # ---- Odette shadow (single source of truth for the shadow-gated effects) --
+    # C2 shred and C6 elevation share the exact same "shadow on field" condition,
+    # so one timeline flag drives both (the C2 column keeps its own audit key).
+    "odette_shadow_state": [
         {"type": "constant",     "key": "Odette C2",                        "target": "Party",  "caster": "Odette", "min_constellation": 2},
+        {"type": "constant",     "key": "Odette C6 party",                  "target": "Others", "caster": "Odette", "min_constellation": 6},
+        {"type": "constant",     "key": "Odette C6 self",                   "target": "Self",   "caster": "Odette", "min_constellation": 6},
     ],
 }
 
@@ -705,6 +740,8 @@ def get_talent_value(party, path, divisor=100.0):
 #
 # `ratio` may be a refinement list ([R1..R5]); `ratio_from_talent` derives the
 # ratio from a talent scaling instead (e.g. Mizuki's swirl bonus = talent/1000).
+# `multiplier` (default 1.0) scales the resolved value for every basis; it is how
+# a shared effect is expressed (Odette C4: the OTHERS get 50% of her SSD).
 BASIS_NAMES = ("em", "flat_em", "atk", "talent", "allies_same_element", "allies_diff_element")
 
 
@@ -735,9 +772,10 @@ def evaluate_dynamic_buff(
             pass
 
     # basis = "talent": the buff value itself is a talent scaling.
+    multiplier = descriptor.get("multiplier", 1.0)
     if basis == "talent":
-        return get_talent_value(party, descriptor["path"],
-                                descriptor.get("divisor", 100.0))
+        return multiplier * get_talent_value(
+            party, descriptor["path"], descriptor.get("divisor", 100.0))
 
     if basis == "flat_em":
         basis_value = compute_flat_em(
@@ -765,7 +803,9 @@ def evaluate_dynamic_buff(
     value = descriptor.get("floor", 0.0) + ratio * max(
         basis_value - descriptor.get("offset", 0.0), 0.0)
     cap = descriptor.get("cap")
-    return min(value, cap) if cap is not None else value
+    if cap is not None:
+        value = min(value, cap)
+    return value * multiplier
 
 
 # ---------------------------------------------------------------------------
@@ -901,13 +941,16 @@ def resolve_active_buffs(
             caster = resolve_caster(desc.get("caster"))
 
             # Systematic Constellation Gatekeeping
-            # Generic gate: buff only applies if its CASTER is at the required
-            # constellation (e.g. Odette C2 must be C2+). Future characters can
-            # declare "min_constellation" on any descriptor.
+            # Generic gates: a buff can require a MINimum and/or a MAXimum
+            # constellation on its CASTER (e.g. Odette C2 needs C2+, while
+            # Anastasya's Accolades tiers replace each other: C1..C3 then C4+).
             min_c = desc.get("min_constellation")
-            if min_c is not None:
+            max_c = desc.get("max_constellation")
+            if min_c is not None or max_c is not None:
                 gate_const = (party or {}).get(caster, {}).get("constellation", 0) if caster else 0
-                if gate_const < int(min_c):
+                if min_c is not None and gate_const < int(min_c):
+                    continue
+                if max_c is not None and gate_const > int(max_c):
                     continue
 
             # Optional gate: the buff's caster must actually be in the party.
@@ -915,11 +958,16 @@ def resolve_active_buffs(
             if desc.get("require_party") and caster not in (party or {}):
                 continue
 
-            # Element-exclusion filter (e.g. Sucrose A1 -> non-Anemo allies only).
+            # Element filters, evaluated on the RECIPIENT's element:
+            #   exclude_elements -> skip these elements (Sucrose A1: non-Anemo only)
+            #   include_elements -> only these elements (Anastasya C1: Cryo get ATK%)
             excluded = desc.get("exclude_elements")
-            if excluded:
+            included = desc.get("include_elements")
+            if excluded or included:
                 char_elem = CHARACTER_BASE_STATS.get(char_name, {}).get("element", "")
-                if char_elem in excluded:
+                if excluded and char_elem in excluded:
+                    continue
+                if included and char_elem not in included:
                     continue
 
             # Check if this buff applies to char_name

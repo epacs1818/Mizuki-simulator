@@ -192,7 +192,7 @@ odette_cast = Ability(
 odette_recast = Ability(
     name="Skill Recast",
     character="Odette",
-    cooldown=0.0,
+    cooldown=15.0,
     talent_level=10,
     talent_type="skill_talent",
     hits=[
@@ -200,21 +200,6 @@ odette_recast = Ability(
         Hit("Skill_Recast2", 0.180, element="Cryo",                     category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Coda at Dawn's Tolling DoT", 10), attack_type=AttackType.SKILL, scaling_key=("Odette", "Skill", "Coda at Dawn's Tolling DoT")),
         Hit("Skill_Recast3", 0.300, element="Cryo",                     category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Coda at Dawn's Tolling DoT", 10), attack_type=AttackType.SKILL, scaling_key=("Odette", "Skill", "Coda at Dawn's Tolling DoT")),
         Hit("Skill_Stellar", 0.871, element="Cryo",                     category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Coda at Dawn's Tolling Stellar Swirl DMG", 10), scaling_key=("Odette", "Skill", "Coda at Dawn's Tolling Stellar Swirl DMG")),
-    ]
-)
-
-odette_recast_c1 = Ability(
-    name="Skill Recast",
-    character="Odette",
-    cooldown=0.0,
-    talent_level=10,
-    talent_type="skill_talent",
-    hits=[
-        Hit("Skill_Recast1", 0.000, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Coda at Dawn's Tolling DoT", 10), attack_type=AttackType.SKILL, scaling_key=("Odette", "Skill", "Coda at Dawn's Tolling DoT")),
-        Hit("Skill_Recast2", 0.180, element="Cryo",                     category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Coda at Dawn's Tolling DoT", 10), attack_type=AttackType.SKILL, scaling_key=("Odette", "Skill", "Coda at Dawn's Tolling DoT")),
-        Hit("Skill_Recast3", 0.300, element="Cryo",                     category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Coda at Dawn's Tolling DoT", 10), attack_type=AttackType.SKILL, scaling_key=("Odette", "Skill", "Coda at Dawn's Tolling DoT")),
-        Hit("Skill_Stellar", 0.871, element="Cryo",                     category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Coda at Dawn's Tolling Stellar Swirl DMG", 10), scaling_key=("Odette", "Skill", "Coda at Dawn's Tolling Stellar Swirl DMG")),
-        Hit("Skill_Stellar_c1", 0.875, element="Cryo",                     category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.ATK, motion_value=4.500)
     ]
 )
 
@@ -226,29 +211,29 @@ odette_burst = Ability(
     talent_type="burst_talent",
     hits=[
         Hit("Burst_tick1", 0.000, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Burst", "Slash DMG (Per Hit)", 10), attack_type=AttackType.BURST, scaling_key=("Odette", "Burst", "Slash DMG (Per Hit)")),
-        Hit("Burst_tick2", 0.301, element="Cryo",                     category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Burst", "Slash DMG (Per Hit)", 10), attack_type=AttackType.BURST, scaling_key=("Odette", "Burst", "Slash DMG (Per Hit)")),
-        Hit("Burst_tick3", 0.421, element="Cryo",                     category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Burst", "Slash DMG (Per Hit)", 10), attack_type=AttackType.BURST, scaling_key=("Odette", "Burst", "Slash DMG (Per Hit)")),
-        Hit("Burst_final_hit", 0.51, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Burst", "Final Slash DMG", 10), attack_type=AttackType.BURST, scaling_key=("Odette", "Burst", "Final Slash DMG")),
-        Hit("Plume_1",         2.220, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Plume Dance Move DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Odette", "Skill", "Plume Dance Move DMG")),
-        Hit("Plume_Stellar_1", 2.220, element="Cryo",                     category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Plume Dance Move Stellar Swirl DMG", 10), scaling_key=("Odette", "Skill", "Plume Dance Move Stellar Swirl DMG")),
-        Hit("Wing_1",          4.080, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Wing Dance Move DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Odette", "Skill", "Wing Dance Move DMG")),
-        Hit("Wing_Stellar_1",  4.080, element="Cryo",                     category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Wing Dance Move Stellar Swirl DMG", 10), scaling_key=("Odette", "Skill", "Wing Dance Move Stellar Swirl DMG")),
-        Hit("Plume_2",         6.180, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Plume Dance Move DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Odette", "Skill", "Plume Dance Move DMG")),
-        Hit("Plume_Stellar_2", 6.180, element="Cryo",                     category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Plume Dance Move Stellar Swirl DMG", 10), scaling_key=("Odette", "Skill", "Plume Dance Move Stellar Swirl DMG")),
-        Hit("Wing_2",          8.010, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Wing Dance Move DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Odette", "Skill", "Wing Dance Move DMG")),
-        Hit("Wing_Stellar_2",  8.010, element="Cryo",                     category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Wing Dance Move Stellar Swirl DMG", 10), scaling_key=("Odette", "Skill", "Wing Dance Move Stellar Swirl DMG")),
-        Hit("Plume_3",        10.110, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Plume Dance Move DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Odette", "Skill", "Plume Dance Move DMG")),
-        Hit("Plume_Stellar_3",10.110, element="Cryo",                     category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Plume Dance Move Stellar Swirl DMG", 10), scaling_key=("Odette", "Skill", "Plume Dance Move Stellar Swirl DMG")),
-        Hit("Wing_3",         11.940, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Wing Dance Move DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Odette", "Skill", "Wing Dance Move DMG")),
-        Hit("Wing_Stellar_3", 11.940, element="Cryo",                     category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Wing Dance Move Stellar Swirl DMG", 10), scaling_key=("Odette", "Skill", "Wing Dance Move Stellar Swirl DMG")),
-        Hit("Plume_4",        14.040, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Plume Dance Move DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Odette", "Skill", "Plume Dance Move DMG")),
-        Hit("Plume_Stellar_4",14.040, element="Cryo",                     category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Plume Dance Move Stellar Swirl DMG", 10), scaling_key=("Odette", "Skill", "Plume Dance Move Stellar Swirl DMG")),
-        Hit("Wing_4",         15.901, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Wing Dance Move DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Odette", "Skill", "Wing Dance Move DMG")),
-        Hit("Wing_Stellar_4", 15.901, element="Cryo",                     category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Wing Dance Move Stellar Swirl DMG", 10), scaling_key=("Odette", "Skill", "Wing Dance Move Stellar Swirl DMG")),
-        Hit("Plume_5",        17.940, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Plume Dance Move DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Odette", "Skill", "Plume Dance Move DMG")),
-        Hit("Plume_Stellar_5",17.940, element="Cryo",                     category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Plume Dance Move Stellar Swirl DMG", 10), scaling_key=("Odette", "Skill", "Plume Dance Move Stellar Swirl DMG")),
-        Hit("Wing_5",         19.800, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Wing Dance Move DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Odette", "Skill", "Wing Dance Move DMG")),
-        Hit("Wing_Stellar_5", 19.800, element="Cryo",                     category=ActionCategory.STELLAR_DMG,  stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Wing Dance Move Stellar Swirl DMG", 10), scaling_key=("Odette", "Skill", "Wing Dance Move Stellar Swirl DMG")),
+        Hit("Burst_tick2", 0.391, element="Cryo",                     category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Burst", "Slash DMG (Per Hit)", 10), attack_type=AttackType.BURST, scaling_key=("Odette", "Burst", "Slash DMG (Per Hit)")),
+        Hit("Burst_tick3", 0.51, element="Cryo",                     category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Burst", "Slash DMG (Per Hit)", 10), attack_type=AttackType.BURST, scaling_key=("Odette", "Burst", "Slash DMG (Per Hit)")),
+        Hit("Burst_final_hit", 0.631, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Burst", "Final Slash DMG", 10), attack_type=AttackType.BURST, scaling_key=("Odette", "Burst", "Final Slash DMG")),
+        Hit("Plume_1",         1.441, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Plume Dance Move DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Odette", "Skill", "Plume Dance Move DMG")),
+        Hit("Plume_Stellar_1", 1.441, element="Cryo",                     category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Plume Dance Move Stellar Swirl DMG", 10), scaling_key=("Odette", "Skill", "Plume Dance Move Stellar Swirl DMG")),
+        Hit("Wing_1",          2.790, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Wing Dance Move DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Odette", "Skill", "Wing Dance Move DMG")),
+        Hit("Wing_Stellar_1",  2.790, element="Cryo",                     category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Wing Dance Move Stellar Swirl DMG", 10), scaling_key=("Odette", "Skill", "Wing Dance Move Stellar Swirl DMG")),
+        Hit("Plume_2",         4.560, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Plume Dance Move DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Odette", "Skill", "Plume Dance Move DMG")),
+        Hit("Plume_Stellar_2", 4.560, element="Cryo",                     category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Plume Dance Move Stellar Swirl DMG", 10), scaling_key=("Odette", "Skill", "Plume Dance Move Stellar Swirl DMG")),
+        Hit("Wing_2",          6.120, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Wing Dance Move DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Odette", "Skill", "Wing Dance Move DMG")),
+        Hit("Wing_Stellar_2",  6.120, element="Cryo",                     category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Wing Dance Move Stellar Swirl DMG", 10), scaling_key=("Odette", "Skill", "Wing Dance Move Stellar Swirl DMG")),
+        Hit("Plume_3",        8.161, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Plume Dance Move DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Odette", "Skill", "Plume Dance Move DMG")),
+        Hit("Plume_Stellar_3",8.161, element="Cryo",                     category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Plume Dance Move Stellar Swirl DMG", 10), scaling_key=("Odette", "Skill", "Plume Dance Move Stellar Swirl DMG")),
+        Hit("Wing_3",         9.99, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Wing Dance Move DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Odette", "Skill", "Wing Dance Move DMG")),
+        Hit("Wing_Stellar_3", 9.99, element="Cryo",                     category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Wing Dance Move Stellar Swirl DMG", 10), scaling_key=("Odette", "Skill", "Wing Dance Move Stellar Swirl DMG")),
+        Hit("Plume_4",        12.06, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Plume Dance Move DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Odette", "Skill", "Plume Dance Move DMG")),
+        Hit("Plume_Stellar_4",12.06, element="Cryo",                     category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Plume Dance Move Stellar Swirl DMG", 10), scaling_key=("Odette", "Skill", "Plume Dance Move Stellar Swirl DMG")),
+        Hit("Wing_4",         13.89, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Wing Dance Move DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Odette", "Skill", "Wing Dance Move DMG")),
+        Hit("Wing_Stellar_4", 13.89, element="Cryo",                     category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Wing Dance Move Stellar Swirl DMG", 10), scaling_key=("Odette", "Skill", "Wing Dance Move Stellar Swirl DMG")),
+        Hit("Plume_5",        15.96, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Plume Dance Move DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Odette", "Skill", "Plume Dance Move DMG")),
+        Hit("Plume_Stellar_5",15.96, element="Cryo",                     category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Plume Dance Move Stellar Swirl DMG", 10), scaling_key=("Odette", "Skill", "Plume Dance Move Stellar Swirl DMG")),
+        Hit("Wing_5",         17.821, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Wing Dance Move DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Odette", "Skill", "Wing Dance Move DMG")),
+        Hit("Wing_Stellar_5", 17.821, element="Cryo",                     category=ActionCategory.STELLAR_DMG,  stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Odette", "Skill", "Wing Dance Move Stellar Swirl DMG", 10), scaling_key=("Odette", "Skill", "Wing Dance Move Stellar Swirl DMG")),
     ]
 )
 
@@ -438,6 +423,13 @@ mizuki_burst = Ability(
 # schedules them at trigger_time + relative_delay, so the value can be tuned here only.
 mizuki_nuke_hit = Hit("Mizuki Nuke Hit", 0.500, element="Anemo", category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.EM, motion_value=10.00)
 mizuki_c1_mini_nuke_hit = Hit("Mizuki C1 Mini Nuke", 0.0, element="Anemo", category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.EM, motion_value=4.00)
+# Odette's constellation procs. Both carry a CONSTANT motion value (never a talent
+# scaling), so they are bare Hits like the two above.
+#   C1: fires right after the recast's "Skill_Stellar" hit (once per recast).
+#   C4: fired by ANY party stellar hit while Snow Swan's Dream is up, 3.5s trigger CD
+#       (the CD lives in timeline.ODETTE_C4_PROC_CD, not here).
+odette_c1_stellar_hit = Hit("Odette C1 Extra Stellar", 0.010, element="Cryo", category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.ATK, motion_value=4.500)
+odette_c4_stellar_hit = Hit("Odette C4 Extra Stellar", 0.010, element="Cryo", category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.ATK, motion_value=0.990)
 
 #Sucrose
 
@@ -586,54 +578,39 @@ def configure_field_sequence_talents(field_sequence: FieldSequence, talents: Uni
     return new_field_sequence
 
 #--- Anastasya -------------------------------------------------------------
-# Her skill mirrors Odette's "dance" timing pattern: one cast hit, then ten beats
-# (2.220 / 4.080 / 6.180 / 8.010 / 10.110 / 11.940 / 14.040 / 15.901 / 17.940 /
-# 19.800). Each beat pairs a Palestar Crown cryo hit with its stellar swirl hit;
-# the enhanced variant adds the burst's "extra stellar swirl" hit on every beat.
-_ANASTASYA_BEATS = ((1, 2.220), (2, 4.080), (3, 6.180), (4, 8.010), (5, 10.110),
-                    (6, 11.940), (7, 14.040), (8, 15.901), (9, 17.940), (10, 19.800))
-
-_SKILL_TAP = ("Anastasya", "Skill", "Instantaneous Tap DMG")
-_PALESTAR = ("Anastasya", "Skill", "Palestar Crown Cryo DMG")
-_PALESTAR_STELLAR = ("Anastasya", "Skill", "Palestar Crown Stellar Swirl DMG")
-_PALESTAR_EXTRA = ("Anastasya", "Burst", "Palestar Crown Extra Stellar Swirl DMG")
-_NEW_WORLD = ("Anastasya", "Burst", "To the New World Instantaneous DMG")
-
-
-def _anastasya_cast_hit() -> Hit:
-    return Hit("Cast", 0.000, element="Cryo", elemental_app="1U",
-               category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK,
-               motion_value=get_ability_motion_value(*_SKILL_TAP, 10),
-               attack_type=AttackType.SKILL, scaling_key=_SKILL_TAP)
-
-
-def _anastasya_palestar_hits():
-    """Palestar Crown beats on Odette's skill timings (cryo + stellar per beat).
-
-    The "extra" stellar hit is NOT part of the ability: the timeline injects it on
-    every stellar beat while her burst buff is up (see anastasya_extra_stellar).
-    """
-    hits = []
-    for index, offset in _ANASTASYA_BEATS:
-        hits.append(Hit(f"Palestar Crown {index}", offset, element="Cryo",
-                        elemental_app="1U", category=ActionCategory.STANDARD_DMG,
-                        stat_ref=StatRef.ATK,
-                        motion_value=get_ability_motion_value(*_PALESTAR, 10),
-                        attack_type=AttackType.SKILL, scaling_key=_PALESTAR))
-        hits.append(Hit(f"Palestar Crown Stellar {index}", offset, element="Cryo",
-                        category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.ATK,
-                        motion_value=get_ability_motion_value(*_PALESTAR_STELLAR, 10),
-                        scaling_key=_PALESTAR_STELLAR))
-    return hits
-
-
+# One cast hit, then ten Palestar Crown beats; every beat pairs a Cryo hit with its
+# Stellar Swirl hit at the same timestamp. The beat timings are still the "dance"
+# pattern borrowed from Odette (she is unreleased and hard to test), but the hit list
+# is plain literal data like every other character: no generator, no path tuples.
 anastasya_tap = Ability(
     name="Skill Tap",
     character="Anastasya",
     cooldown=15.0,
     talent_level=10,
     talent_type="skill_talent",
-    hits=[_anastasya_cast_hit(), *_anastasya_palestar_hits()],
+    hits=[
+        Hit("Cast", 0.000, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Anastasya", "Skill", "Instantaneous Tap DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Anastasya", "Skill", "Instantaneous Tap DMG")),
+        Hit("Palestar Crown 1", 2.220, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Anastasya", "Skill", "Palestar Crown Cryo DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Anastasya", "Skill", "Palestar Crown Cryo DMG")),
+        Hit("Palestar Crown Stellar 1", 2.220, element="Cryo", category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Anastasya", "Skill", "Palestar Crown Stellar Swirl DMG", 10), scaling_key=("Anastasya", "Skill", "Palestar Crown Stellar Swirl DMG")),
+        Hit("Palestar Crown 2", 4.080, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Anastasya", "Skill", "Palestar Crown Cryo DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Anastasya", "Skill", "Palestar Crown Cryo DMG")),
+        Hit("Palestar Crown Stellar 2", 4.080, element="Cryo", category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Anastasya", "Skill", "Palestar Crown Stellar Swirl DMG", 10), scaling_key=("Anastasya", "Skill", "Palestar Crown Stellar Swirl DMG")),
+        Hit("Palestar Crown 3", 6.180, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Anastasya", "Skill", "Palestar Crown Cryo DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Anastasya", "Skill", "Palestar Crown Cryo DMG")),
+        Hit("Palestar Crown Stellar 3", 6.180, element="Cryo", category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Anastasya", "Skill", "Palestar Crown Stellar Swirl DMG", 10), scaling_key=("Anastasya", "Skill", "Palestar Crown Stellar Swirl DMG")),
+        Hit("Palestar Crown 4", 8.010, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Anastasya", "Skill", "Palestar Crown Cryo DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Anastasya", "Skill", "Palestar Crown Cryo DMG")),
+        Hit("Palestar Crown Stellar 4", 8.010, element="Cryo", category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Anastasya", "Skill", "Palestar Crown Stellar Swirl DMG", 10), scaling_key=("Anastasya", "Skill", "Palestar Crown Stellar Swirl DMG")),
+        Hit("Palestar Crown 5", 10.110, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Anastasya", "Skill", "Palestar Crown Cryo DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Anastasya", "Skill", "Palestar Crown Cryo DMG")),
+        Hit("Palestar Crown Stellar 5", 10.110, element="Cryo", category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Anastasya", "Skill", "Palestar Crown Stellar Swirl DMG", 10), scaling_key=("Anastasya", "Skill", "Palestar Crown Stellar Swirl DMG")),
+        Hit("Palestar Crown 6", 11.940, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Anastasya", "Skill", "Palestar Crown Cryo DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Anastasya", "Skill", "Palestar Crown Cryo DMG")),
+        Hit("Palestar Crown Stellar 6", 11.940, element="Cryo", category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Anastasya", "Skill", "Palestar Crown Stellar Swirl DMG", 10), scaling_key=("Anastasya", "Skill", "Palestar Crown Stellar Swirl DMG")),
+        Hit("Palestar Crown 7", 14.040, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Anastasya", "Skill", "Palestar Crown Cryo DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Anastasya", "Skill", "Palestar Crown Cryo DMG")),
+        Hit("Palestar Crown Stellar 7", 14.040, element="Cryo", category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Anastasya", "Skill", "Palestar Crown Stellar Swirl DMG", 10), scaling_key=("Anastasya", "Skill", "Palestar Crown Stellar Swirl DMG")),
+        Hit("Palestar Crown 8", 15.901, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Anastasya", "Skill", "Palestar Crown Cryo DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Anastasya", "Skill", "Palestar Crown Cryo DMG")),
+        Hit("Palestar Crown Stellar 8", 15.901, element="Cryo", category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Anastasya", "Skill", "Palestar Crown Stellar Swirl DMG", 10), scaling_key=("Anastasya", "Skill", "Palestar Crown Stellar Swirl DMG")),
+        Hit("Palestar Crown 9", 17.940, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Anastasya", "Skill", "Palestar Crown Cryo DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Anastasya", "Skill", "Palestar Crown Cryo DMG")),
+        Hit("Palestar Crown Stellar 9", 17.940, element="Cryo", category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Anastasya", "Skill", "Palestar Crown Stellar Swirl DMG", 10), scaling_key=("Anastasya", "Skill", "Palestar Crown Stellar Swirl DMG")),
+        Hit("Palestar Crown 10", 19.800, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Anastasya", "Skill", "Palestar Crown Cryo DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Anastasya", "Skill", "Palestar Crown Cryo DMG")),
+        Hit("Palestar Crown Stellar 10", 19.800, element="Cryo", category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Anastasya", "Skill", "Palestar Crown Stellar Swirl DMG", 10), scaling_key=("Anastasya", "Skill", "Palestar Crown Stellar Swirl DMG")),
+    ],
 )
 
 anastasya_burst = Ability(
@@ -643,41 +620,44 @@ anastasya_burst = Ability(
     talent_level=13,
     talent_type="burst_talent",
     hits=[
-        Hit("Burst_Cast", 0.000, element="Cryo", elemental_app="1U",
-            category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK,
-            motion_value=get_ability_motion_value(*_NEW_WORLD, 13),
-            attack_type=AttackType.BURST, scaling_key=_NEW_WORLD),
+        Hit("Burst_Cast", 0.000, element="Cryo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Anastasya", "Burst", "To the New World Instantaneous DMG", 13), attack_type=AttackType.BURST, scaling_key=("Anastasya", "Burst", "To the New World Instantaneous DMG")),
     ],
 )
 
-_TRUMPH = ("Anastasya", "Burst", "Triumph Stellar Swirl DMG")
+# TRIGGERED ABILITY (never cast by hand). Armed by her burst cast; her next swap-in
+# fires it 0.010s later. The minimum gap between that cast and the swap-in is
+# ANASTASYA_TRIUMPH_DELAY in timeline.py; the 0.010 is the hit's own delay.
 anastasya_triumph = Ability(
     name="Triumph",
     character="Anastasya",
-    cooldown=15.0,
     talent_level=13,
     talent_type="burst_talent",
     hits=[
-        Hit("Triumph", 0.000, element="Cryo",
-            category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.ATK,
-            motion_value=get_ability_motion_value(*_TRUMPH, 13),
-            attack_type=AttackType.BURST, scaling_key=_TRUMPH),
+        Hit("Triumph", 0.010, element="Cryo", category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Anastasya", "Burst", "Triumph Stellar Swirl DMG", 13), attack_type=AttackType.BURST, scaling_key=("Anastasya", "Burst", "Triumph Stellar Swirl DMG")),
     ],
 )
 
-# Conditional hit: injected by the timeline on every stellar beat of her skill
-# while her burst buff is active. Kept as a one-hit ability so the motion value
-# stays data-driven. TRIGGERED: its relative_delay is the delay after the beat.
+# TRIGGERED ABILITY (never cast by hand). Injected on every stellar beat of her skill
+# while her burst buff is up; the hit's relative_delay is measured from that beat.
 anastasya_extra_stellar = Ability(
     name="Palestar Crown Extra Stellar",
     character="Anastasya",
     talent_level=10,
     talent_type="burst_talent",
     hits=[
-        Hit("Palestar Crown Extra Stellar", 0.000, element="Cryo",
-            category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.ATK,
-            motion_value=get_ability_motion_value(*_PALESTAR_EXTRA, 10),
-            scaling_key=_PALESTAR_EXTRA),
+        Hit("Palestar Crown Extra Stellar", 0.010, element="Cryo", category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Anastasya", "Burst", "Palestar Crown Extra Stellar Swirl DMG", 10), scaling_key=("Anastasya", "Burst", "Palestar Crown Extra Stellar Swirl DMG")),
+    ],
+)
+
+# TRIGGERED ABILITY (C6). While her Love is up, EVERY other character's swap-in
+# fires this stronger Triumph (2.5x the talent-scaled value); 15s per-character CD.
+anastasya_c6_triumph = Ability(
+    name="C6 Triumph",
+    character="Anastasya",
+    talent_level=13,
+    talent_type="burst_talent",
+    hits=[
+        Hit("Triumph_C6", 0.010, element="Cryo", category=ActionCategory.STELLAR_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Anastasya", "Burst", "C6 Triumph Stellar Swirl DMG", 13), attack_type=AttackType.BURST, scaling_key=("Anastasya", "Burst", "C6 Triumph Stellar Swirl DMG")),
     ],
 )
 
@@ -690,9 +670,8 @@ LEGACY_ABILITY_NAMES = {
 }
 
 # Pairs that share a display name on purpose: the engine substitutes the right variant
-# (Aether's burst by Frostglow stacks, Odette's recast by her constellation), so a shared
-# name is not a mistake there.
-VARIANT_ABILITY_NAMES = {"Elemental Burst", "Skill Recast"}
+# (Aether's burst by Frostglow stacks), so a shared name is not a mistake there.
+VARIANT_ABILITY_NAMES = {"Elemental Burst"}
 
 # The UI offers exactly what exists in this module: every Ability is collected
 # programmatically, so a new ability never has to be registered anywhere else.
@@ -727,6 +706,7 @@ ABILITY_REGISTRY = _collect_ability_registry()
 ENGINE_INTERNAL_ABILITIES = {
     "Palestar Crown Extra Stellar",   # injected while Anastasya's burst buff is up
     "Triumph",                        # injected on her next swap-in after the burst
+    "C6 Triumph",                     # injected on allies' swap-ins while Love is up
     "Pressurized Collapse",           # Faruzan: burst cast / her C6 window, 3.0s CD
     "Diona Choice Treasures",         # Diona: any Stellar Swirl in her 20s state, 3.5s CD
 }

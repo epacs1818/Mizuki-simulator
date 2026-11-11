@@ -28,13 +28,14 @@ Checks:
      for the whole burst field, cast hit included.
  11. Triggered hits: every engine-injected proc takes its delay from abilities.py
      (Mizuki nuke 0.500, C1 mini nuke 0.0, Faruzan collapse 0.720, Diona paws
-     0.270/0.360/0.360, Anastasya extra stellar 0.0), lands at trigger + that delay,
-     and respects its trigger-based cooldown.
+     0.270/0.360/0.360, Anastasya extra stellar/Triumph/C6 Triumph 0.010), lands at
+     trigger + that delay, and respects its trigger-based cooldown.
  12. The Anastasya "Tsaritsa Nerfs" values (50.4% stellar swirl base, 0.354 burst
      bonus at B13) are pinned as literals, so a revert cannot pass silently.
 """
 from timeline import (
-    RotationTimeline, SUCROSE_BURST_WINDOW, ANASTASYA_TRIUMPH_DELAY,
+    RotationTimeline, SUCROSE_BURST_WINDOW, ANASTASYA_UNSEAL_DELAY,
+    ANASTASYA_ACCOLADES_WINDOW, ANASTASYA_C6_TRIUMPH_CD,
     FARUZAN_COLLAPSE_CD, DIONA_CHOICE_TREASURES_WINDOW, DIONA_CHOICE_TREASURES_CD,
     DIONA_C6_WINDOW,
 )
@@ -178,14 +179,14 @@ def _run_mizuki_c6_check() -> dict:
 
 
 def _run_odette_burst_check() -> bool:
-    """Builds an Odette QE run (burst+recast) and checks her 6s burst buff fires."""
+    """Builds an Odette QE run (burst+recast) and checks her SSD buff fires."""
     t = RotationTimeline(party=presets.DEFAULT_PARTY)
     t.add_trial(Trial(
         name="odette_qe", end_mode="time", end_time=8.0,
         rotations=[Rotation(name="r", sequences=[odette_qe], repetitions=1)],
     ))
     t.evaluate_timeline()
-    return any(e.get("odette_burst_state") == "ON"
+    return any(e.get("odette_ssd_state") == "ON"
                for e in t.global_events if e.get("event_type") == "HIT")
 
 
@@ -974,7 +975,7 @@ def _run_artifact_phase1_check() -> dict:
 
 
 def _run_odette_burst_check() -> dict:
-    """Odette's "Snow Swan's Dream": self-only stellar_bonus, talent-scaled, 20s
+    """Odette's "Snow Swan's Dream" (SSD): self-only below C4, talent-scaled, 20s
     from her BURST CAST hit and refreshed by a new cast."""
     from abilities import odette_burst
     out = {}
@@ -995,18 +996,157 @@ def _run_odette_burst_check() -> dict:
                                           repetitions=1)]))
     t.evaluate_timeline()
     hits = [e for e in t.global_events if e.get("event_type") == "HIT"]
-    on = [e for e in hits if e.get("odette_burst_state") == "ON"]
+    on = [e for e in hits if e.get("odette_ssd_state") == "ON"]
     out["on"] = bool(on)
     out["alive_at_15s"] = any(e["global_time"] > 15.0 for e in on)
-    out["off_after_20s"] = all(e.get("odette_burst_state") != "ON"
+    out["off_after_20s"] = all(e.get("odette_ssd_state") != "ON"
                                for e in hits if e["global_time"] > 21.0)
     if on:
-        out["stellar"] = round(_flag_delta(t, on[0], "Odette", "odette_burst_state",
+        out["stellar"] = round(_flag_delta(t, on[0], "Odette", "odette_ssd_state",
                                            "Stellar Bonus"), 4)
-        out["not_party"] = round(_flag_delta(t, on[0], "Aether", "odette_burst_state",
+        out["not_party"] = round(_flag_delta(t, on[0], "Aether", "odette_ssd_state",
                                              "Stellar Bonus"), 4)
     else:
         out["stellar"] = out["not_party"] = None
+    return out
+
+
+def _run_odette_constellation_check() -> dict:
+    """Odette C1/C2/C4/C6 mechanics, each isolated by constellation level.
+
+    Layout (her QE preset, then a watcher so off-field time exists):
+        burst cast @2.16  -> shadow + SSD start (both end @22.16)
+        recast cast @2.25 -> recast stellar @3.121 (C1/C4 triggers) -> swap-out @3.451
+        watcher hits @4.751 / 6.451 / 19.451 / 22.451
+
+    C1  extra 4.500 MV stellar hit 0.010s after the recast's stellar hit; max stacks
+        6 and a 2/s transfer (C0: 4 stacks, 1/s).
+    C2  +7% ATK per Marvelous stack (party) on top of A1's +15% stellar_bonus.
+    C4  SSD shares half its value with the OTHERS; ANY party stellar hit triggers her
+        0.990 MV hit, 3.5s CD measured from the trigger.
+    C6  she keeps 6 stacks off-field while the party still ramps at 2/s, and the shadow
+        grants +0.25 elevation to the OTHERS / +0.45 to her.
+    """
+    out = {}
+
+    def build(cons):
+        party = {
+            "Odette": {"constellation": cons, "level": 90, "refinement": 1,
+                       "weapon": "New Bough", "artifact_set": "2p/2p ATK",
+                       "talents": "1/13/13"},
+            "Aether": {"constellation": 0, "level": 90, "refinement": 1,
+                       "weapon": "New Bough", "artifact_set": "2p/2p ATK",
+                       "talents": "1/13/13"},
+        }
+        watcher = FieldSequence("Watcher", "Aether", swap_out_time=24.0)
+        watcher.add_ability(1.3, aether_n1)      # 4.751: 1.3s off-field -> 2 stacks
+        watcher.add_ability(3.0, aether_n1)      # 6.451: 3.0s off-field -> 6 stacks
+        watcher.add_ability(16.0, aether_n1)     # 19.451: still inside the shadow
+        watcher.add_ability(19.0, aether_n1)     # 22.451: past it
+        t = RotationTimeline(party=party)
+        t.add_trial(Trial(name=f"odette_c{cons}", end_mode="time", end_time=30.0,
+                          rotations=[Rotation(name="r", sequences=[odette_qe, watcher],
+                                              repetitions=1)]))
+        t.evaluate_timeline()
+        return t
+
+    def hits(t):
+        return [e for e in t.global_events if e.get("event_type") == "HIT"]
+
+    def closest(t, char, when):
+        return min((e for e in hits(t) if e.get("character") == char),
+                   key=lambda e: abs(e["global_time"] - when))
+
+    def stack_delta(t, event, char, stat):
+        on = _buffed_stats(t, event, char)[stat]
+        stripped = dict(event)
+        stripped["marvelous_stacks"] = 0
+        return round(on - _buffed_stats(t, stripped, char)[stat], 6)
+
+    tl = {cons: build(cons) for cons in (0, 1, 2, 3, 4, 6)}
+
+    # ---- C1: triggered extra stellar hit on the recast's stellar hit ----------
+    out["c1"] = {}
+    for cons in (0, 1):
+        c1 = [e for e in hits(tl[cons]) if e.get("ability_name") == "C1 Extra Stellar"]
+        out["c1"][cons] = {
+            "count": len(c1),
+            "delay": round(c1[0]["global_time"] - 3.121, 3) if c1 else None,
+            "mv": c1[0].get("multiplier") if c1 else None,
+            "stellar": bool(c1) and c1[0].get("category") == ActionCategory.STELLAR_DMG,
+            "owner": c1[0].get("character") if c1 else None,
+        }
+
+    # ---- C4: extra 0.990 MV stellar hit driven by ANY party stellar hit -------
+    out["c4"] = {}
+    for cons in (3, 4):
+        evs = hits(tl[cons])
+        c4 = [e for e in evs if e.get("ability_name") == "C4 Extra Stellar"]
+        stellar = [e["global_time"] for e in evs
+                   if e.get("category") == ActionCategory.STELLAR_DMG
+                   and e.get("ability_name") not in ("C1 Extra Stellar",
+                                                     "C4 Extra Stellar")]
+        delays = []
+        for e in c4:
+            trigger = max((s for s in stellar if s < e["global_time"] - 1e-9),
+                          default=None)
+            if trigger is not None:
+                delays.append(round(e["global_time"] - trigger, 6))
+        gaps = [round(b["global_time"] - a["global_time"], 6)
+                for a, b in zip(c4, c4[1:])]
+        out["c4"][cons] = {
+            "count": len(c4),
+            "delays": delays,
+            "gaps": gaps,
+            "mv": c4[0].get("multiplier") if c4 else None,
+            "owner": c4[0].get("character") if c4 else None,
+        }
+
+    # ---- Marvelous stacks: pool size and transfer behaviour ------------------
+    out["stacks"] = {}
+    for cons, t in tl.items():
+        evs = hits(t)
+        out["stacks"][cons] = {
+            "own_max": max(int(e.get("marvelous_stacks", 0) or 0)
+                           for e in evs if e.get("character") == "Odette"),
+            "party_max": max(int(e.get("marvelous_stacks", 0) or 0)
+                             for e in evs if e.get("character") != "Odette"),
+            "own_after_swap": [int(e.get("marvelous_stacks", 0) or 0)
+                               for e in evs
+                               if e.get("character") == "Odette"
+                               and e.get("odette_shadow_state") == "ON"
+                               and e["global_time"] > 3.451],
+            "party_at_6_451": int(closest(t, "Aether", 6.451).get("marvelous_stacks", 0) or 0),
+            "party_after_window": int(closest(t, "Aether", 22.451).get("marvelous_stacks", 0) or 0),
+        }
+
+    # ---- C2: ATK% and stellar_bonus per stack --------------------------------
+    t2 = tl[2]
+    hit6 = closest(t2, "Aether", 6.451)
+    out["c2_atk_per_stack"] = stack_delta(t2, hit6, "Aether", "atk_percent")
+    out["c2_stellar_per_stack"] = stack_delta(t2, hit6, "Aether", "Stellar Bonus")
+
+    # ---- SSD sharing at C4 vs C3 --------------------------------------------
+    t3, t4 = tl[3], tl[4]
+    out["ssd_others_c4"] = round(_flag_delta(
+        t4, closest(t4, "Aether", 6.451), "Aether", "odette_ssd_state", "Stellar Bonus"), 4)
+    out["ssd_self_c4"] = round(_flag_delta(
+        t4, closest(t4, "Odette", 6.720), "Odette", "odette_ssd_state", "Stellar Bonus"), 4)
+    out["ssd_others_c3"] = round(_flag_delta(
+        t3, closest(t3, "Aether", 6.451), "Aether", "odette_ssd_state", "Stellar Bonus"), 4)
+    out["ssd_self_c3"] = round(_flag_delta(
+        t3, closest(t3, "Odette", 6.720), "Odette", "odette_ssd_state", "Stellar Bonus"), 4)
+
+    # ---- C6: elevation to the party and to herself --------------------------
+    t6 = tl[6]
+    out["elev_others_c6"] = round(_buffed_stats(
+        t6, closest(t6, "Aether", 6.451), "Aether")["Elevation Mult"], 4)
+    out["elev_self_c6"] = round(_buffed_stats(
+        t6, closest(t6, "Odette", 6.720), "Odette")["Elevation Mult"], 4)
+    out["elev_others_after"] = round(_buffed_stats(
+        t6, closest(t6, "Aether", 22.451), "Aether")["Elevation Mult"], 4)
+    out["elev_others_c2"] = round(_buffed_stats(
+        t2, closest(t2, "Aether", 6.451), "Aether")["Elevation Mult"], 4)
     return out
 
 
@@ -1215,7 +1355,7 @@ def _run_hit_catalogue_check() -> dict:
     out["talent_crash"] = talent_crash
 
     # The registries keep the first definition of a name, so a duplicate is invisible.
-    # Intentional variants (Aether burst / Odette recast) share a name by design, and an
+    # Intentional variants (Aether's burst) share a name by design, and an
     # object imported into the other module is the SAME object, not a duplicate.
     seen, duplicates, seen_ids = {}, [], set()
     for module in (ab, presets):
@@ -1391,10 +1531,11 @@ def _vortex_swirl_counts(events) -> list:
 def _run_anastasya_check() -> dict:
     """Anastasya kit semantics (rotation A + isolated windows/mechanics).
 
-    Covers: party-wide talent-scaled burst stellar_bonus (20s), A1 crit DMG for the
-    OTHERS only (19s), her Jubilee passive, the A4 reaction-only jubilee, the A4
+    Covers: party-wide talent-scaled burst stellar_bonus (20s), Accolades (12% crit DMG
+    for the whole party, 20s, inclusive on the skill Cast hit; shared/sealed once she
+    bursts and swaps out), her Jubilee passive, the A4 reaction-only jubilee, the A4
     vortex lifecycle (spawn at Lv2, 3 further swirls to detonate), the conditional
-    extra stellar beat while the burst is up, and Triumph's 18s arming rule.
+    extra stellar beat while the burst is up, and Triumph's 15s seal -> unseal rule.
     """
     from abilities import anastasya_burst
     from damage_calc import calculate_damage
@@ -1441,23 +1582,44 @@ def _run_anastasya_check() -> dict:
         out["burst_bonus_ally"] = out["burst_bonus_self"] = None
         out["burst_offenders"] = -1
 
-    # ---- 2. A1: +16% crit DMG to the OTHERS, 19s refreshed window ----
+    # ---- 2. Accolades (A1): 20s window, inclusive Cast hit, sealed/shared ----
     skill_casts = [e["global_time"] for e in hits
                    if e.get("ability_name") == "Skill Tap" and e.get("hit_name") == "Cast"]
-    a1_hits = [e for e in hits if e.get("anastasya_a1_state") == "ON"]
-    out["a1_on"] = bool(a1_hits)
-    if a1_hits:
-        out["a1_cd_ally"] = round(
-            _flag_delta(timeline, a1_hits[0], "Mizuki", "anastasya_a1_state", "CD"), 4)
-        out["a1_cd_self"] = round(
-            _flag_delta(timeline, a1_hits[0], "Anastasya", "anastasya_a1_state", "CD"), 4)
-        out["a1_offenders"] = sum(
-            1 for e in a1_hits
+    acc_hits = [e for e in hits if e.get("anastasya_accolades_state") == "ON"]
+    out["acc_on"] = bool(acc_hits)
+    if acc_hits:
+        first = acc_hits[0]
+        out["acc_first_is_cast"] = bool(skill_casts) and abs(
+            first["global_time"] - min(skill_casts)) <= 1e-9
+        out["acc_unsealed_ally"] = round(_flag_delta(
+            timeline, first, "Mizuki", "anastasya_accolades_unsealed_state", "CD"), 4)
+        out["acc_unsealed_self"] = round(_flag_delta(
+            timeline, first, "Anastasya", "anastasya_accolades_unsealed_state", "CD"), 4)
+        shared_hits = [e for e in hits
+                       if e.get("anastasya_accolades_shared_state") == "ON"]
+        out["acc_shared_on"] = bool(shared_hits)
+        if shared_hits:
+            ev = shared_hits[0]
+            out["acc_shared_ally"] = round(_flag_delta(
+                timeline, ev, "Mizuki", "anastasya_accolades_shared_state", "CD"), 4)
+            out["acc_shared_self"] = round(_flag_delta(
+                timeline, ev, "Anastasya", "anastasya_accolades_shared_state", "CD"), 4)
+        else:
+            out["acc_shared_ally"] = out["acc_shared_self"] = None
+        out["acc_offenders"] = sum(
+            1 for e in acc_hits
             if e["global_time"] > max([c for c in skill_casts if c <= e["global_time"]],
-                                      default=-1e9) + 19.0 + 1e-6)
+                                      default=-1e9) + ANASTASYA_ACCOLADES_WINDOW + 1e-6)
+        out["acc_variants_exclusive"] = not any(
+            e.get("anastasya_accolades_unsealed_state") == "ON"
+            and e.get("anastasya_accolades_shared_state") == "ON" for e in hits)
     else:
-        out["a1_cd_ally"] = out["a1_cd_self"] = None
-        out["a1_offenders"] = -1
+        out["acc_first_is_cast"] = False
+        out["acc_unsealed_ally"] = out["acc_unsealed_self"] = None
+        out["acc_shared_on"] = False
+        out["acc_shared_ally"] = out["acc_shared_self"] = None
+        out["acc_offenders"] = -1
+        out["acc_variants_exclusive"] = False
 
     # ---- 3. A4: reaction-only jubilee exists with her, absent without her ----
     swirl_ev = next((e for e in hits if e.get("hit_name") == "Stellar_Swirl_Hit"), None)
@@ -1529,6 +1691,20 @@ def _run_anastasya_check() -> dict:
     early = [(t, n) for t, a, n in seq if "Early" in str(a)]
     out["early_count"] = len(early)
     out["early_swirls"] = sorted({n for _t, n in early})
+
+    # The preset's swirl spacing depends on the rotation (Odette's retimed QE moved
+    # her Cryo applications out of the 3s vortex life, so THIS preset no longer
+    # detonates early), so the "spawn at Lv2 + 3 further swirls" rule is also
+    # asserted directly on the lifecycle object, independent of any timing.
+    from mechanics import StellarVortex
+    probe = StellarVortex({"anemo_contributor": "Mizuki",
+                           "cryo_contributors": ["Odette"]},
+                          0.0, start_level=2, detonation_swirls=4)
+    inherits = [probe.inherit_swirl({"anemo_contributor": "Faruzan",
+                                     "cryo_contributors": ["Odette"]})
+                for _ in range(3)]
+    out["probe_early_on_third"] = bool(inherits[-1][0]) and "Early" in inherits[-1][1]
+    out["probe_not_early_before"] = not any(exploded for exploded, _r in inherits[:2])
     # Baseline (no A4): 6 swirls from spawn to an early detonation.
     t_base = RotationTimeline(party=presets.DEFAULT_PARTY)
     t_base.add_trial(presets.STANDARD_TRIALS["Mizuki Sac Frag Pull out 6x rotations"])
@@ -1547,13 +1723,13 @@ def _run_anastasya_check() -> dict:
     out["extras_never_exceed_beats"] = len(extra) <= len(beats)
     out["no_extra_before_first_burst"] = bool(beats) and bool(casts) and not any(
         e["global_time"] < min(casts) for e in extra)
-    # Triggered-delay convention: the extra hit's delay is 0.0, so it must land on the
-    # stellar beat itself (one extra per beat, at the very same timestamp).
+    # Triggered-delay convention: the extra hit lands 0.010s after the stellar beat.
     beat_times = {round(e["global_time"], 6) for e in beats}
     out["extra_delay_ok"] = bool(extra) and all(
-        round(e["global_time"], 6) in beat_times for e in extra)
+        round(e["global_time"] - 0.010, 6) in beat_times for e in extra)
 
-    # ---- 7. Triumph: armed by the burst, fires on the next swap-in >= 18s ----
+    # ---- 7. Triumph: armed by the seal (burst + swap-out), fires on her next
+    #         swap-in once ANASTASYA_UNSEAL_DELAY has passed ----
     fill = FieldSequence("Filler", "Aether", swap_out_time=10.0)
     fill.add_ability(0.5, aether_n1)
     burst_seq = FieldSequence("AnaBurst", "Anastasya", swap_out_time=2.941)
@@ -1574,12 +1750,15 @@ def _run_anastasya_check() -> dict:
     tr_hits = [e for e in t_tr.global_events if e.get("hit_name") == "Triumph"]
     tr_casts = [e["global_time"] for e in t_tr.global_events
                 if e.get("hit_name") == "Burst_Cast"]
+    tr_seals = [e["global_time"] for e in t_tr.global_events
+                if e.get("event_type") == "SWAP_OUT" and e.get("character") == "Anastasya"]
     out["triumph_count"] = len(tr_hits)
     out["triumph_times"] = [round(e["global_time"], 3) for e in tr_hits]
     out["triumph_casts"] = [round(c, 3) for c in tr_casts]
+    out["triumph_seals"] = [round(c, 3) for c in tr_seals]
     out["triumph_gap_ok"] = all(
-        e["global_time"] >= max([c for c in tr_casts if c <= e["global_time"]],
-                                default=1e9) + ANASTASYA_TRIUMPH_DELAY - 1e-6
+        e["global_time"] >= max([s for s in tr_seals if s <= e["global_time"]],
+                                default=1e9) + ANASTASYA_UNSEAL_DELAY - 1e-6
         for e in tr_hits)
 
     # ---- 8. Triumph inside the preset: every loop from the 2nd one onwards ----
@@ -1591,12 +1770,142 @@ def _run_anastasya_check() -> dict:
     out["rotation_triumph_expected"] = max(0, len(ana_swap_ins) - 1)
     out["rotation_triumph_times"] = [round(e["global_time"], 3) for e in rot_triumphs]
     out["triumph_on_her_swap_in"] = all(
-        any(abs(e["global_time"] - s["global_time"]) <= 1e-9 for s in ana_swap_ins)
+        any(abs(e["global_time"] - (s["global_time"] + 0.010)) <= 1e-9
+            for s in ana_swap_ins)
         for e in rot_triumphs)
     out["no_triumph_on_first_loop"] = (
         bool(ana_swap_ins)
         and all(e["global_time"] > ana_swap_ins[0]["global_time"] + 1e-9 for e in rot_triumphs))
     return out
+
+def _run_anastasya_constellation_check() -> dict:
+    """Anastasya C1/C2/C4/C6, each isolated by constellation level.
+
+    Everything runs on the preset Anastasya loop so the real cycle happens:
+        skill Cast @0.601 (Accolades + Love, UNSEALED) -> burst @2.371 ->
+        swap-out @2.851 (SEALED) -> the 8s linger keeps it shared after the unseal.
+    """
+    from abilities import anastasya_tap, anastasya_burst, anastasya_triumph
+    out = {}
+
+    def build(cons):
+        party = _anastasya_party()
+        party["Anastasya"]["constellation"] = cons
+        t = RotationTimeline(party=party)
+        t.add_trial(presets.STANDARD_TRIALS[
+            "Mizuki Sac Frag Pull out 6x rotations (Anastasya)"])
+        t.evaluate_timeline()
+        return t
+
+    def hits(t):
+        return [e for e in t.global_events if e.get("event_type") == "HIT"]
+
+    def closest(t, char, when):
+        return min((e for e in hits(t) if e.get("character") == char),
+                   key=lambda e: abs(e["global_time"] - when))
+
+    def delta(t, ev, char, flag, stat):
+        on = _buffed_stats(t, ev, char)[stat]
+        stripped = dict(ev)
+        stripped[flag] = "OFF"
+        return round(on - _buffed_stats(t, stripped, char)[stat], 6)
+
+    tl = {cons: build(cons) for cons in (0, 1, 2, 4, 5, 6)}
+    out["totals"] = {
+        cons: round(sum((e.get("average_damage", 0.0) or 0.0) for e in hits(t)), 1)
+        for cons, t in tl.items()
+    }
+
+    # ---- Accolades: unsealed (inclusive cast hit) and shared/sealed --------
+    out["acc"] = {}
+    for cons in (0, 1, 4):
+        t = tl[cons]
+        cast = next(e for e in hits(t)
+                    if e.get("ability_name") == "Skill Tap" and e.get("hit_name") == "Cast")
+        shared = next(e for e in hits(t)
+                      if e.get("anastasya_accolades_shared_state") == "ON")
+        out["acc"][cons] = {
+            "cast_cd_self": delta(t, cast, "Anastasya", "anastasya_accolades_unsealed_state", "CD"),
+            "cast_cd_ally": delta(t, cast, "Mizuki", "anastasya_accolades_unsealed_state", "CD"),
+            "cast_atk_cryo": delta(t, cast, "Odette", "anastasya_accolades_unsealed_state", "atk_percent"),
+            "cast_em_anemo": delta(t, cast, "Mizuki", "anastasya_accolades_unsealed_state", "em"),
+            "shared_cd_self": delta(t, shared, "Anastasya", "anastasya_accolades_shared_state", "CD"),
+            "shared_cd_ally": delta(t, shared, "Mizuki", "anastasya_accolades_shared_state", "CD"),
+            "shared_atk_cryo": delta(t, shared, "Odette", "anastasya_accolades_shared_state", "atk_percent"),
+            "shared_em_anemo": delta(t, shared, "Mizuki", "anastasya_accolades_shared_state", "em"),
+            "shared_atk_self": delta(t, shared, "Anastasya", "anastasya_accolades_shared_state", "atk_percent"),
+            "shared_em_self": delta(t, shared, "Anastasya", "anastasya_accolades_shared_state", "em"),
+        }
+
+    # ---- Love (C2): 30s window + permanent elevation ----------------------
+    out["love"] = {}
+    for cons in (1, 2, 6):
+        t = tl[cons]
+        mid = closest(t, "Mizuki", 8.0)
+        out["love"][cons] = {
+            "flag": any(e.get("anastasya_love_state") == "ON" for e in hits(t)),
+            "stellar_cd": delta(t, mid, "Mizuki", "anastasya_love_state", "Stellar CD"),
+            "elevation": round(_buffed_stats(t, mid, "Mizuki")["Elevation Mult"], 6),
+        }
+
+    # ---- C6 Triumph: every ally swap-in while Love is up -------------------
+    out["c6"] = {}
+    for cons in (5, 6):
+        t = tl[cons]
+        procs = [e for e in hits(t) if e.get("ability_name") == "C6 Triumph"]
+        ally_ins = [(e["global_time"], e.get("character"))
+                    for e in t.global_events
+                    if e.get("event_type") == "SWAP_IN" and e.get("character") != "Anastasya"]
+        delay_ok, per_char = True, {}
+        for e in procs:
+            trig = max((s for s in ally_ins if s[0] <= e["global_time"] - 1e-9),
+                       default=(None, None), key=lambda s: s[0])
+            if trig[0] is None or abs(e["global_time"] - (trig[0] + 0.010)) > 1e-9:
+                delay_ok = False
+            per_char.setdefault(trig[1], []).append(e["global_time"])
+        out["c6"][cons] = {
+            "count": len(procs),
+            "delay_ok": delay_ok,
+            "cd_ok": all(all(b - a >= ANASTASYA_C6_TRIUMPH_CD - 1e-9
+                             for a, b in zip(ts, ts[1:]))
+                         for ts in per_char.values()),
+            "max_per_char": max((len(ts) for ts in per_char.values()), default=0),
+            "mv": procs[0].get("multiplier") if procs else None,
+            "expected_mv": 2.5 * anastasya_triumph.hits[0].multiplier,
+            "owner": procs[0].get("character") if procs else None,
+        }
+
+    # ---- seal / unseal / 8s linger (dedicated timeline) --------------------
+    setup = FieldSequence("AnaSetup", "Anastasya", swap_out_time=3.0)
+    setup.add_ability(0.5, anastasya_tap)       # Cast @0.5, burst @2.0, seal @3.0
+    setup.add_ability(2.0, anastasya_burst)
+    filler = FieldSequence("Filler", "Aether", swap_out_time=17.0)
+    filler.add_ability(5.0, aether_n1)          # 8.0s: still sealed
+    second = FieldSequence("AnaSecond", "Anastasya", swap_out_time=3.0)
+    second.add_ability(0.5, anastasya_tap)      # swap-in @20.0 (unseal), Cast @20.5
+    tail = FieldSequence("Tail", "Aether", swap_out_time=8.0)
+    tail.add_ability(5.1, aether_n1)            # 28.1s: the 8s linger (ended 28.0) is over
+    probe_party = _anastasya_party()
+    probe_party["Anastasya"]["constellation"] = 1
+    tp = RotationTimeline(party=probe_party)
+    tp.add_trial(Trial(name="unseal", end_mode="time", end_time=35.0,
+                       rotations=[Rotation(name="r",
+                                           sequences=[setup, filler, second, tail],
+                                           repetitions=1)]))
+    tp.evaluate_timeline()
+    before = closest(tp, "Aether", 8.0)
+    during = closest(tp, "Anastasya", 20.5)
+    after = closest(tp, "Aether", 28.1)
+    out["linger"] = {
+        "sealed_before_unseal": before.get("anastasya_sealed_state") == "ON",
+        "shared_during_linger": (during.get("anastasya_accolades_shared_state") == "ON"
+                                 and during.get("anastasya_sealed_state") == "ON"),
+        "unsealed_after_linger": (after.get("anastasya_accolades_unsealed_state") == "ON"
+                                  and after.get("anastasya_sealed_state") == "OFF"),
+        "no_reseal_without_burst": after.get("anastasya_sealed_state") == "OFF",
+    }
+    return out
+
 
 def _diona_party(constellation: int = 6) -> dict:
     """Diona + Mizuki: her skill opens the state, Mizuki's skill supplies the swirls."""
@@ -1780,8 +2089,11 @@ def _run_triggered_ability_check(ana=None) -> dict:
         Mizuki C1 mini nuke .... mizuki_c1_mini_nuke_hit        (0.000)
         Faruzan collapse ....... faruzan_pressurized_collapse   (0.720)
         Diona Icy Paws ......... diona_choice_treasures         (0.270/0.360/0.360)
-        Anastasya extra stellar  anastasya_extra_stellar        (0.000)
-        Anastasya Triumph ...... anastasya_triumph (trigger = her swap-in)
+        Anastasya extra stellar  anastasya_extra_stellar        (0.010)
+        Anastasya Triumph ...... anastasya_triumph              (0.010, trigger = her swap-in)
+        Anastasya C6 Triumph ... anastasya_c6_triumph           (0.010, trigger = an ally's swap-in)
+        Odette C1 extra stellar  odette_c1_stellar_hit          (0.010)
+        Odette C4 extra stellar  odette_c4_stellar_hit          (0.010)
     """
     import abilities as ab
 
@@ -1793,7 +2105,11 @@ def _run_triggered_ability_check(ana=None) -> dict:
         "Diona Icy Paws tick 1": (ab.diona_choice_treasures.hits[0], 0.270),
         "Diona Icy Paws tick 2": (ab.diona_choice_treasures.hits[1], 0.360),
         "Diona Icy Paws tick 3": (ab.diona_choice_treasures.hits[2], 0.360),
-        "Anastasya extra stellar": (ab.anastasya_extra_stellar.hits[0], 0.000),
+        "Anastasya extra stellar": (ab.anastasya_extra_stellar.hits[0], 0.010),
+        "Anastasya Triumph": (ab.anastasya_triumph.hits[0], 0.010),
+        "Anastasya C6 Triumph": (ab.anastasya_c6_triumph.hits[0], 0.010),
+        "Odette C1 extra stellar": (ab.odette_c1_stellar_hit, 0.010),
+        "Odette C4 extra stellar": (ab.odette_c4_stellar_hit, 0.010),
     }
     out["delays"] = {label: hit.relative_delay for label, (hit, _exp) in templates.items()}
     out["expected"] = {label: exp for label, (_hit, exp) in templates.items()}
@@ -1890,9 +2206,9 @@ def _run_editor_catalogue_check() -> dict:
     # character now, so it can no longer be used as the "absent" probe).
     out["abilities_for_absent"] = abilities.abilities_for("Nobody")
     # Engine-injected procs stay registered but are never offered by the editor.
-    out["internal_hidden"] = ({"Triumph", "Palestar Crown Extra Stellar"}
+    out["internal_hidden"] = ({"Triumph", "C6 Triumph", "Palestar Crown Extra Stellar"}
                               <= set(abilities.ABILITY_REGISTRY.get("Anastasya", {}))
-                              and not ({"Triumph", "Palestar Crown Extra Stellar"}
+                              and not ({"Triumph", "C6 Triumph", "Palestar Crown Extra Stellar"}
                                        & set(abilities.abilities_for("Anastasya"))))
     # Triggered abilities: registered, never castable, never inside a field sequence.
     out["triggered_registered"] = {
@@ -2145,13 +2461,16 @@ def run(verbose: bool = True) -> None:
     if c2e_on and verbose:
         print(f"[OK] Aether C2 enhanced activated")
 
-    # 3b. Odette kit auditors (Marvelous + C2 shred) on the standard run.
+    # 3b. Odette kit auditors (shadow, Marvelous, C2 shred) on the standard run.
     odette_marvel_on = "Odette" in party and any(int(e.get("marvelous_stacks", 0) or 0) > 0 for e in hit_events)
+    odette_shadow_on = "Odette" in party and any(e.get("odette_shadow_state") == "ON" for e in hit_events)
     odette_c2_on = "Odette" in party and any(e.get("odette_c2_state") == "ON" for e in hit_events)
     if odette_marvel_on and verbose:
         print("[OK] Odette Marvelous activated")
     if not odette_marvel_on:
         failures.append("Odette Marvelous never activated")
+    if not odette_shadow_on:
+        failures.append("Odette shadow state never activated")
     if odette_c2_on and verbose:
         print("[OK] Odette C2 shred activated")
     if "Odette" in party and not odette_c2_on:
@@ -2175,6 +2494,72 @@ def run(verbose: bool = True) -> None:
             failures.append(f"Odette's Snow Swan leaked onto the party ({ob['not_party']})")
         if verbose and not (ob["alive_at_15s"] and ob["off_after_20s"]):
             print("[INFO] Odette Snow Swan window check failed")
+
+    # 3c-ter. Odette's constellations (C1 trigger, C2 stacks, C4 share/proc, C6).
+    oc = _run_odette_constellation_check()
+    oc_checks = [
+        (oc["c1"][0]["count"] == 0, "Odette's C1 extra stellar hit fired below C1"),
+        (oc["c1"][1]["count"] == 1,
+         f"Odette C1 extra hits: {oc['c1'][1]['count']} (expected 1 per recast)"),
+        (abs((oc["c1"][1]["delay"] or -1) - 0.010) <= 1e-9,
+         f"Odette C1 extra hit delay is {oc['c1'][1]['delay']}, expected 0.010"),
+        (abs((oc["c1"][1]["mv"] or 0) - 4.5) <= 1e-12,
+         f"Odette C1 extra hit MV is {oc['c1'][1]['mv']}, expected 4.500"),
+        (oc["c1"][1]["stellar"] and oc["c1"][1]["owner"] == "Odette",
+         "Odette C1 extra hit is not an Odette stellar hit"),
+        (oc["stacks"][0]["own_max"] == 4 and oc["stacks"][0]["party_max"] == 4,
+         f"C0 Marvelous pool is {oc['stacks'][0]} (expected 4)"),
+        (oc["stacks"][1]["own_max"] == 6 and oc["stacks"][1]["party_max"] == 6,
+         f"C1 Marvelous pool is {oc['stacks'][1]} (expected 6)"),
+        (oc["stacks"][6]["party_at_6_451"] == 6,
+         f"C6 party stacks after 3s off-field are "
+         f"{oc['stacks'][6]['party_at_6_451']}, expected 6"),
+        (bool(oc["stacks"][6]["own_after_swap"])
+         and all(s == 6 for s in oc["stacks"][6]["own_after_swap"]),
+         f"C6 Odette lost her own stacks off-field: {oc['stacks'][6]['own_after_swap']}"),
+        (any(s < 6 for s in oc["stacks"][2]["own_after_swap"]),
+         "C2 Odette did not transfer her stacks off-field"),
+        (oc["stacks"][6]["party_after_window"] == 0
+         and oc["stacks"][0]["party_after_window"] == 0,
+         "Marvelous stacks outlived the shadow window"),
+        (abs(oc["c2_atk_per_stack"] - 0.42) <= 1e-9,
+         f"C2 ATK% at 6 stacks is {oc['c2_atk_per_stack']}, expected 0.42"),
+        (abs(oc["c2_stellar_per_stack"] - 0.90) <= 1e-9,
+         f"A1 stellar_bonus at 6 stacks is {oc['c2_stellar_per_stack']}, expected 0.90"),
+        (oc["c4"][3]["count"] == 0,
+         f"Odette's C4 extra hit fired below C4 ({oc['c4'][3]['count']})"),
+        (oc["c4"][4]["count"] >= 4, f"only {oc['c4'][4]['count']} C4 extra hits fired"),
+        (all(abs(d - 0.010) <= 1e-9 for d in oc["c4"][4]["delays"]),
+         f"C4 extra hit delays are {oc['c4'][4]['delays']}, expected 0.010"),
+        (all(g >= 3.5 - 1e-9 for g in oc["c4"][4]["gaps"]),
+         f"C4 extra hits are closer than its 3.5s trigger CD ({oc['c4'][4]['gaps']})"),
+        (abs((oc["c4"][4]["mv"] or 0) - 0.99) <= 1e-12,
+         f"C4 extra hit MV is {oc['c4'][4]['mv']}, expected 0.990"),
+        (oc["c4"][4]["owner"] == "Odette", "C4 extra hit is not credited to Odette"),
+        (abs(oc["ssd_others_c4"] - 0.31) <= 1e-6,
+         f"C4 shared SSD for the party is {oc['ssd_others_c4']}, expected 0.31"),
+        (abs(oc["ssd_others_c3"] or 0.0) <= 1e-12,
+         f"SSD leaked to the party below C4 ({oc['ssd_others_c3']})"),
+        (abs(oc["ssd_self_c4"] - 0.62) <= 1e-6
+         and abs(oc["ssd_self_c3"] - 0.62) <= 1e-6,
+         f"Odette's own SSD is {oc['ssd_self_c4']} (C4) / {oc['ssd_self_c3']} (C3), "
+         f"expected 0.62"),
+        (abs(oc["elev_others_c6"] - 0.25) <= 1e-9,
+         f"C6 elevation for the party is {oc['elev_others_c6']}, expected 0.25"),
+        (abs(oc["elev_self_c6"] - 0.45) <= 1e-9,
+         f"C6 elevation for Odette is {oc['elev_self_c6']}, expected 0.45"),
+        (abs(oc["elev_others_after"] or 0.0) <= 1e-12,
+         f"C6 elevation outlived the shadow ({oc['elev_others_after']})"),
+        (abs(oc["elev_others_c2"] or 0.0) <= 1e-12,
+         f"C6 elevation activated below C6 ({oc['elev_others_c2']})"),
+    ]
+    oc_failures = [msg for ok, msg in oc_checks if not ok]
+    failures.extend(oc_failures)
+    if not oc_failures and verbose:
+        print(f"[OK] Odette constellations: C1 +{oc['c1'][1]['delay']}s {oc['c1'][1]['mv']} MV, "
+              f"C4 {oc['c4'][4]['count']} procs (gaps {oc['c4'][4]['gaps']}), "
+              f"SSD shared {oc['ssd_others_c4']}, "
+              f"C6 elevation {oc['elev_self_c6']}/{oc['elev_others_c6']}")
 
     # 3d. Faruzan auditors (buff on anemo hits, debuff window, quill on anemo).
     faruzan_buff_on = "Faruzan" in party and any(e.get("faruzan_buff_state") == "ON" for e in hit_events)
@@ -2729,13 +3114,21 @@ def run(verbose: bool = True) -> None:
          f"expected 0.354 (burst lv13, nerfed)"),
         (ana["burst_offenders"] == 0,
          f"{ana['burst_offenders']} hits kept the burst buff past its 20s window"),
-        (ana["a1_on"], "Anastasya A1 window never activated"),
-        (abs((ana["a1_cd_ally"] or 0.0) - 0.16) <= 1e-9,
-         f"Anastasya A1 crit DMG on allies is {ana['a1_cd_ally']}, expected 0.16"),
-        (abs(ana["a1_cd_self"] or 0.0) <= 1e-12,
-         f"Anastasya A1 applied to herself ({ana['a1_cd_self']})"),
-        (ana["a1_offenders"] == 0,
-         f"{ana['a1_offenders']} hits kept A1 past its 19s window"),
+        (ana["acc_on"] and ana["acc_first_is_cast"],
+         "Accolades does not start on (and include) her skill Cast hit"),
+        (abs((ana["acc_unsealed_ally"] or 0.0) - 0.12) <= 1e-9
+         and abs((ana["acc_unsealed_self"] or 0.0) - 0.12) <= 1e-9,
+         f"unsealed Accolades is {ana['acc_unsealed_ally']} (ally) / "
+         f"{ana['acc_unsealed_self']} (self), expected 0.12 for both"),
+        (ana["acc_shared_on"], "Accolades never became the shared/sealed version"),
+        (abs((ana["acc_shared_ally"] or 0.0) - 0.16) <= 1e-9
+         and abs(ana["acc_shared_self"] or 0.0) <= 1e-12,
+         f"shared Accolades at C0 is {ana['acc_shared_ally']} (ally) / "
+         f"{ana['acc_shared_self']} (self), expected 0.16 / 0"),
+        (ana["acc_variants_exclusive"],
+         "both Accolades variants were active on the same event"),
+        (ana["acc_offenders"] == 0,
+         f"{ana['acc_offenders']} hits kept Accolades past its 20s window"),
         (ana["swirl_found"], "no Stellar Swirl event found in rotation A"),
         (abs((ana["reaction_jubilee"] or 0.0) - 0.15) <= 1e-9,
          f"Anastasya A4 reaction jubilee is {ana['reaction_jubilee']}, expected 0.15"),
@@ -2753,9 +3146,9 @@ def run(verbose: bool = True) -> None:
          f"{ana['jubilee_expected']} (0.007% of her ATK)"),
         (ana["vortex_all_lv2"],
          "A4 did not spawn Stellar Vortices at level 2"),
-        (ana["early_count"] > 0,
-         "no early vortex detonation occurred with A4"),
-        (ana["early_swirls"] == [4],
+        (ana["probe_early_on_third"] and ana["probe_not_early_before"],
+         "A4's level-2 vortex must detonate on its 3rd inherited swirl (and not before)"),
+        (all(n == 4 for n in ana["early_swirls"]),
          f"A4 early detonation happens after {ana['early_swirls']} swirls, "
          f"expected [4] (spawn + 3)"),
         (all(n >= 6 for n in ana["baseline_early_swirls"]),
@@ -2772,8 +3165,8 @@ def run(verbose: bool = True) -> None:
          f"Triumph fired {ana['triumph_count']} times, expected 1 "
          f"(at {ana['triumph_times']})"),
         (ana["triumph_gap_ok"],
-         f"Triumph fired before its delay ({ANASTASYA_TRIUMPH_DELAY}s) after the burst "
-         f"cast (casts {ana['triumph_casts']}, hits {ana['triumph_times']})"),
+         f"Triumph fired before {ANASTASYA_UNSEAL_DELAY}s after the seal "
+         f"(seals {ana['triumph_seals']}, hits {ana['triumph_times']})"),
         (ana["rotation_triumphs"] == ana["rotation_triumph_expected"],
          f"preset rotation has {ana['rotation_triumphs']} Triumph procs "
          f"({ana['rotation_triumph_times']}), expected {ana['rotation_triumph_expected']} "
@@ -2786,9 +3179,89 @@ def run(verbose: bool = True) -> None:
     ana_failures = [msg for ok, msg in ana_checks if not ok]
     failures.extend(ana_failures)
     if not ana_failures and verbose:
-        print(f"[OK] Anastasya: burst buff (0.354/20s, nerfed), A1 (+16% CD others/19s), "
-              f"A4 reaction jubilee + Lv2 vortices, extra beat, Triumph")
+        print(f"[OK] Anastasya: burst buff (0.354/20s, nerfed), Accolades (12%/20s, "
+              f"shared/sealed tiers), A4 reaction jubilee + Lv2 vortices, extra beat, Triumph")
         print(f"     Anastasya preset total_avg_dmg={ana['total']:,.1f}")
+
+    # 2n-ter. Anastasya constellations: Accolades tiers, Love, C6 Triumph.
+    anc = _run_anastasya_constellation_check()
+    acc0, acc1, acc4 = anc["acc"][0], anc["acc"][1], anc["acc"][4]
+    anc_checks = [
+        (abs(acc0["cast_cd_self"] - 0.12) <= 1e-9
+         and abs(acc0["cast_cd_ally"] - 0.12) <= 1e-9,
+         f"C0 unsealed Accolades is {acc0['cast_cd_self']}/{acc0['cast_cd_ally']}, "
+         f"expected 0.12 for both"),
+        (abs(acc0["shared_cd_ally"] - 0.16) <= 1e-9 and abs(acc0["shared_cd_self"]) <= 1e-12,
+         f"C0 shared Accolades is {acc0['shared_cd_ally']}/{acc0['shared_cd_self']}, "
+         f"expected 0.16 (others) / 0 (her)"),
+        (abs(acc1["cast_atk_cryo"] - 0.15) <= 1e-9
+         and abs(acc1["cast_em_anemo"] - 60.0) <= 1e-9,
+         f"C1 unsealed Accolades is {acc1['cast_atk_cryo']} ATK (Cryo) / "
+         f"{acc1['cast_em_anemo']} EM (non-Cryo), expected 0.15 / 60"),
+        (abs(acc1["shared_cd_ally"] - 0.48) <= 1e-9
+         and abs(acc1["shared_cd_self"] - 0.36) <= 1e-9,
+         f"C1 shared crit is {acc1['shared_cd_ally']}/{acc1['shared_cd_self']}, "
+         f"expected 0.48 / 0.36"),
+        (abs(acc1["shared_atk_cryo"] - 0.60) <= 1e-9
+         and abs(acc1["shared_em_anemo"] - 240.0) <= 1e-9,
+         f"C1 shared ATK/EM is {acc1['shared_atk_cryo']}/{acc1['shared_em_anemo']}, "
+         f"expected 0.60 / 240"),
+        (abs(acc1["shared_atk_self"] - 0.45) <= 1e-9
+         and abs(acc1["shared_em_self"]) <= 1e-12,
+         f"C1 sealed own ATK is {acc1['shared_atk_self']} (EM {acc1['shared_em_self']}), "
+         f"expected 0.45 / 0 (she is Cryo, so she gets the ATK branch)"),
+        (abs(acc4["shared_cd_ally"] - 0.688) <= 1e-9
+         and abs(acc4["shared_cd_self"] - 0.516) <= 1e-9,
+         f"C4 shared crit is {acc4['shared_cd_ally']}/{acc4['shared_cd_self']}, "
+         f"expected 0.688 / 0.516"),
+        (abs(acc4["shared_atk_cryo"] - 0.86) <= 1e-9
+         and abs(acc4["shared_em_anemo"] - 344.0) <= 1e-9,
+         f"C4 shared ATK/EM is {acc4['shared_atk_cryo']}/{acc4['shared_em_anemo']}, "
+         f"expected 0.86 / 344"),
+        (abs(acc4["shared_atk_self"] - 0.645) <= 1e-9
+         and abs(acc4["shared_em_self"]) <= 1e-12,
+         f"C4 sealed own ATK is {acc4['shared_atk_self']} (EM {acc4['shared_em_self']}), "
+         f"expected 0.645 / 0"),
+        (not anc["love"][1]["flag"] and abs(anc["love"][1]["stellar_cd"] or 0.0) <= 1e-12,
+         f"Love activated below C2 ({anc['love'][1]})"),
+        (anc["love"][2]["flag"] and abs(anc["love"][2]["stellar_cd"] - 0.60) <= 1e-9,
+         f"C2 Love stellar_crit_dmg is {anc['love'][2]['stellar_cd']}, expected 0.60"),
+        (abs(anc["love"][1]["elevation"]) <= 1e-12
+         and abs(anc["love"][2]["elevation"] - 0.05) <= 1e-9
+         and abs(anc["love"][6]["elevation"] - 0.15) <= 1e-9,
+         f"Love elevation is {anc['love'][1]['elevation']}/"
+         f"{anc['love'][2]['elevation']}/{anc['love'][6]['elevation']} at C1/C2/C6, "
+         f"expected 0 / 0.05 / 0.15"),
+        (anc["c6"][5]["count"] == 0, f"C6 Triumph fired below C6 ({anc['c6'][5]['count']})"),
+        (anc["c6"][6]["count"] > 6, f"only {anc['c6'][6]['count']} C6 Triumphs fired"),
+        (anc["c6"][6]["delay_ok"],
+         "a C6 Triumph did not land 0.010s after an ally swap-in"),
+        (anc["c6"][6]["cd_ok"],
+         f"C6 Triumphs are closer than the {ANASTASYA_C6_TRIUMPH_CD}s per-character CD"),
+        (abs((anc["c6"][6]["mv"] or 0) - anc["c6"][6]["expected_mv"]) <= 1e-9,
+         f"C6 Triumph MV is {anc['c6'][6]['mv']}, expected "
+         f"{anc['c6'][6]['expected_mv']} (2.5x the talent-scaled Triumph)"),
+        (anc["c6"][6]["owner"] == "Anastasya", "C6 Triumph is not credited to Anastasya"),
+        (anc["linger"]["sealed_before_unseal"],
+         "she was not sealed before the unseal"),
+        (anc["linger"]["shared_during_linger"],
+         "the shared state did not survive the 8s linger"),
+        (anc["linger"]["unsealed_after_linger"],
+         "the shared state outlived its 8s linger"),
+        (anc["linger"]["no_reseal_without_burst"],
+         "a visit without a burst cast sealed her again"),
+    ]
+    anc_failures = [msg for ok, msg in anc_checks if not ok]
+    failures.extend(anc_failures)
+    if not anc_failures and verbose:
+        print(f"[OK] Anastasya constellations: C1 {acc1['shared_cd_ally']}/"
+              f"{acc1['shared_cd_self']} crit +{acc1['shared_atk_cryo']} ATK / "
+              f"{acc1['shared_em_anemo']} EM, C4 {acc4['shared_cd_ally']}/"
+              f"{acc4['shared_cd_self']}, C2 Love {anc['love'][2]['stellar_cd']}, "
+              f"C6 elev {anc['love'][6]['elevation']}, "
+              f"{anc['c6'][6]['count']} C6 Triumphs")
+        print("     preset totals by constellation: "
+              + ", ".join(f"C{c}={v:,.1f}" for c, v in anc["totals"].items()))
 
     # 2o-bis. Diona: Choice Treasures state, Icy Paw volleys and the C6 burst buff.
     diona = _run_diona_check()

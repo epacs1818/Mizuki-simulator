@@ -9,9 +9,11 @@ from abilities import (
     mizuki_c1_mini_nuke_hit,
     aether_burst_enhanced,
     aether_burst_standard,
-    odette_recast_c1,
+    odette_c1_stellar_hit,
+    odette_c4_stellar_hit,
     anastasya_extra_stellar,
     anastasya_triumph,
+    anastasya_c6_triumph,
     faruzan_pressurized_collapse,
     diona_choice_treasures,
     sucrose_burst,
@@ -43,13 +45,19 @@ SUCROSE_BURST_WINDOW = max(hit.relative_delay for hit in sucrose_burst.hits)
 _WINDOW_EPS = 1e-9
 
 
-# Anastasya "Triumph": armed by her burst cast and fired by her NEXT swap-in (once
-# per cast). The delay is the minimum time that must pass between the cast and that
-# swap-in.
-#   PROVISIONAL: 0.0 while the real rule is still unknown (unreleased content).
-#   With the current rotations this makes it proc on every loop from the 2nd one
-#   onwards. Raise it (18.0 was the earlier guess) once the kit rule is confirmed.
-ANASTASYA_TRIUMPH_DELAY = 0.0
+# --- Anastasya -------------------------------------------------------------
+# Accolades (her A1): 20s window opened by her skill Cast hit (inclusive).
+ANASTASYA_ACCOLADES_WINDOW = 20.0
+# She SEALS herself by using her burst and then swapping out. The next swap-in that
+# happens at least this long after the SEAL unseals her and fires Triumph.
+ANASTASYA_UNSEAL_DELAY = 15.0
+# The SHARED (sealed, stronger) Accolades state lingers this long after she unseals.
+ANASTASYA_SHARED_LINGER = 8.0
+# C2 "Love": 30s party stellar_crit_dmg window, cast with the skill.
+ANASTASYA_LOVE_WINDOW = 30.0
+# C6: while Love is up, EVERY other character's swap-in triggers the stronger
+# Triumph, with this per-character internal cooldown (from that trigger).
+ANASTASYA_C6_TRIUMPH_CD = 15.0
 
 
 # ---------------------------------------------------------------------------
@@ -78,6 +86,17 @@ DIONA_CHOICE_TREASURES_CD = 3.5          # between two Icy Paw volleys, from the
 DIONA_SKILL_ABILITIES = ("Diona Skill [Tap]", "Diona Skill [Hold]")
 # Diona C6: the burst cast hit buffs the ACTIVE character for the whole burst field.
 DIONA_C6_WINDOW = 11.750
+
+# Odette: the shadow ("Marvelous" source) is spawned by her skill OR burst cast and is
+# stipulated to live 20s (the in-game despawn is not observable; the skill's dance ends
+# at 19.800s and the burst's at 17.821s, so 20s is the agreed stand-in).
+ODETTE_SHADOW_WINDOW = 20.0
+# Snow Swan's Dream (SSD) is cast by her BURST only and is independent of the shadow:
+# its own 20s window from the burst cast hit.
+ODETTE_SSD_WINDOW = 20.0
+# C4: while SSD is up, ANY party stellar hit triggers her extra stellar hit; the CD is
+# measured FROM THE TRIGGER (3.5s), exactly like Diona's Icy Paw volley.
+ODETTE_C4_PROC_CD = 3.5
 
 
 # ==========================================
@@ -169,22 +188,7 @@ class RotationTimeline:
         })
 
         for call in field_sequence.calls:
-            # Odette C1+: her Recast is a distinct ability (adds Skill_Stellar_c1),
-            # chosen build-time by her constellation – mirroring the Aether burst split.
             c_ability = call.ability
-            if (field_sequence.character == "Odette" and c_ability.name == "Skill Recast"
-                    and self.party.get("Odette", {}).get("constellation", 0) >= 1):
-                c_ability = copy.deepcopy(odette_recast_c1)
-                od_tal = self.party.get("Odette", {}).get("talents", "10/10/10")
-                if isinstance(od_tal, str):
-                    _p = od_tal.split("/")
-                    skill_lvl = int(_p[1]) if len(_p) > 1 else 10
-                elif isinstance(od_tal, (list, tuple)) and len(od_tal) > 1:
-                    skill_lvl = int(od_tal[1])
-                else:
-                    skill_lvl = 10
-                update_ability_talent_level(c_ability, skill_lvl)
-
             ability_start_global = swap_in_time + call.start_time
             ability_key = (field_sequence.character, c_ability.name)
 
@@ -356,6 +360,23 @@ class RotationTimeline:
             event.update(extra)
         return event
 
+    def _insert_triggered_hit_chrono(self, hit, trigger_event: Dict, trigger_time: float,
+                                     ability_name: str, *, start_index: int, **kwargs) -> Dict:
+        """Insert a triggered hit at the first slot that keeps chronological order.
+
+        `_insert_triggered_hit(index=...)` lets the caller own the slot; that is fine
+        when nothing else can share the trigger's timestamp. Odette's C1 and C4 procs
+        can both land at trigger + 0.010s (and a swirl row may already sit there), so
+        they scan forward from `start_index` instead of assuming `i + 1`.
+        """
+        when = trigger_time + hit.relative_delay
+        index = start_index
+        while (index < len(self.global_events)
+               and self.global_events[index]["global_time"] <= when + _WINDOW_EPS):
+            index += 1
+        return self._insert_triggered_hit(hit, trigger_event, trigger_time,
+                                          ability_name, index=index, **kwargs)
+
     def _insert_triggered_hit(self, hit, trigger_event: Dict, trigger_time: float,
                               ability_name: str, *, index: int, **kwargs) -> Dict:
         """Build and INSERT one triggered hit. The caller owns the slot (`index`):
@@ -400,16 +421,21 @@ class RotationTimeline:
 
         active_character = "None"
         aether_c2_active = False
-        marvelous_active = False
-        marvelous_activation_time = 0.0
         odette_swap_time: Optional[float] = None
-        odette_burst_expiration: Optional[float] = None      # self stellar_bonus buff (6s)
-        odette_c2_shred_expiration: Optional[float] = None   # party cryo/anemo shred (20s)
+        odette_shadow_expiration: Optional[float] = None     # shadow on field (Marvelous source)
+        odette_ssd_expiration: Optional[float] = None        # Snow Swan's Dream, self only (+C4 share)
+        odette_c4_cd_ready: float = 0.0                      # next C4 proc, from the trigger
         # Anastasya trackers
         anastasya_burst_expiration: Optional[float] = None   # party stellar_bonus + extra stellar beats (20s)
-        anastasya_a1_expiration: Optional[float] = None      # others crit_dmg (19s)
-        anastasya_triumph_ready_at: Optional[float] = None   # earliest swap-in that fires Triumph
-        anastasya_triumph_armed: bool = False                # one Triumph per burst cast
+        anastasya_accolades_expiration: Optional[float] = None  # Accolades window (20s, inclusive cast)
+        anastasya_love_expiration: Optional[float] = None       # C2 Love window (30s)
+        anastasya_sealed: bool = False                          # burst + swap-out => sealed
+        anastasya_seal_time: Optional[float] = None             # when the seal happened
+        anastasya_unseal_time: Optional[float] = None           # when she unsealed (8s linger)
+        anastasya_burst_this_visit: bool = False                # burst cast since her swap-in?
+        anastasya_triumph_ready_at: Optional[float] = None   # earliest swap-in that unseals + fires Triumph
+        anastasya_triumph_armed: bool = False                # one Triumph per seal
+        anastasya_c6_triumph_ready: Dict[str, float] = {}    # C6: per-character trigger CD
         # Sucrose State Trackers
         sucrose_a1_expiration: Optional[float] = None  # +50 EM (non-anemo) after her swirl (8s)
         sucrose_a4_expiration: Optional[float] = None  # 20% flat-EM share to others (8s)
@@ -1304,103 +1330,148 @@ class RotationTimeline:
                 event["silverdawn_state"] = "OFF"
                 event["silverdawn_extensions"] = 0
 
-            # 7. Odette Marvelous Stacks + Burst buff + C2 shred logic
+            # 7. Odette: shadow window (Marvelous/A1, C2 shred, C6 elevation) and
+            #    Snow Swan's Dream (SSD, shared at 50% with the party at C4).
             if "Odette" in self.party:
                 odette_cons7 = self.party["Odette"].get("constellation", 0)
                 # C1+: max stacks 6 and transfer rate doubles to 2/s.
                 marvelous_max = 6 if odette_cons7 >= 1 else 4
                 marvelous_rate = 2 if odette_cons7 >= 1 else 1
 
+                # The FIRST hit of either cast (skill or burst) spawns the shadow.
+                # hit_offset == 0 identifies it without pinning hit names/timings.
                 is_cast = (e_type == "HIT" and char == "Odette"
-                           and ((ability_name == "Skill Cast" and hit_name == "Cast")
-                                or (ability_name == "Odette Burst" and hit_name == "Burst_tick1")))
+                           and event.get("hit_offset", 1.0) == 0.0
+                           and ability_name in ("Skill Cast", "Odette Burst"))
 
-                # Burst / C2 windows are read BEFORE this event arms them, so the cast
-                # itself does not gain the buffs it starts.
-                ob_on = odette_burst_expiration is not None and t <= odette_burst_expiration
-                oc2_on = (odette_cons7 >= 2
-                          and odette_c2_shred_expiration is not None
-                          and t <= odette_c2_shred_expiration)
-
+                # The shadow is INCLUSIVE on its own cast hit (that hit already has
+                # the shred / elevation), unlike most windows in this engine.
+                shadow_on = (odette_shadow_expiration is not None
+                             and t <= odette_shadow_expiration + _WINDOW_EPS)
+                ssd_on = (odette_ssd_expiration is not None
+                          and t <= odette_ssd_expiration + _WINDOW_EPS)
                 if is_cast:
-                    # Skill cast OR burst cast (NOT recast) opens/refreshes the window.
-                    marvelous_active = True
-                    marvelous_activation_time = t
+                    # Skill cast OR burst cast (NOT recast) spawns/refreshes it.
+                    odette_shadow_expiration = t + ODETTE_SHADOW_WINDOW
                     odette_swap_time = None
-                    # C2: casts a party cryo/anemo shred alongside Marvelous.
-                    if odette_cons7 >= 2:
-                        odette_c2_shred_expiration = t + 20.0
+                    # SSD is cast by the BURST only; its window is independent.
+                    if ability_name == "Odette Burst":
+                        odette_ssd_expiration = t + ODETTE_SSD_WINDOW
+                shadow_active = shadow_on or is_cast
+                ssd_active = ssd_on or (is_cast and ability_name == "Odette Burst")
 
-                # Burst buff ("Snow Swan's Dream", HERS only): 20s from the cast hit,
-                # refreshed by every new burst cast. Value is talent-scaled.
-                if (e_type == "HIT" and char == "Odette" and ability_name == "Odette Burst"
-                        and hit_name == "Burst_tick1"):
-                    odette_burst_expiration = t + 20.0
-
-                if marvelous_active and (t - marvelous_activation_time >= 20.0):
-                    marvelous_active = False
-
-                if e_type == "SWAP_OUT" and char == "Odette" and marvelous_active:
+                if e_type == "SWAP_OUT" and char == "Odette" and shadow_active:
                     odette_swap_time = t
 
                 odette_stacks = 0
                 party_stacks = 0
-                if marvelous_active:
+                if shadow_active:
                     if odette_swap_time is None or t < odette_swap_time:
                         odette_stacks = marvelous_max
-                        party_stacks = 0
+                    elif odette_cons7 >= 6:
+                        # C6: she KEEPS the full pool; the party ramps at the C1 rate.
+                        odette_stacks = marvelous_max
+                        party_stacks = min(marvelous_max,
+                                           int((t - odette_swap_time) * marvelous_rate))
                     else:
                         # Off-field, her stacks decay at `rate`/s and transfer to party.
-                        time_off_field = t - odette_swap_time
-                        stacks_transferred = min(marvelous_max, int(time_off_field * marvelous_rate))
+                        stacks_transferred = min(marvelous_max,
+                                                 int((t - odette_swap_time) * marvelous_rate))
                         odette_stacks = marvelous_max - stacks_transferred
                         party_stacks = stacks_transferred
 
-                if char == "Odette":
-                    event["marvelous_stacks"] = odette_stacks
-                else:
-                    event["marvelous_stacks"] = party_stacks
+                event["marvelous_stacks"] = (odette_stacks if char == "Odette"
+                                             else party_stacks)
+                event["odette_shadow_state"] = "ON" if shadow_active else "OFF"
+                event["odette_ssd_state"] = "ON" if ssd_active else "OFF"
+                # C2 audit column: the shred shares the shadow window (C2+ only).
+                event["odette_c2_state"] = ("ON" if shadow_active and odette_cons7 >= 2
+                                            else "OFF")
 
-                # Audit columns for Odette's burst buff and C2 shred windows.
-                event["odette_burst_state"] = "ON" if ob_on else "OFF"
-                event["odette_c2_state"] = "ON" if oc2_on else "OFF"
+                # ---- C1: extra stellar hit right after the recast's stellar hit ----
+                if (odette_cons7 >= 1 and e_type == "HIT" and char == "Odette"
+                        and ability_name == "Skill Recast"
+                        and hit_name == "Skill_Stellar"):
+                    self._insert_triggered_hit_chrono(
+                        odette_c1_stellar_hit, event, t,
+                        "C1 Extra Stellar", start_index=i + 1, owner="Odette")
+
+                # ---- C4: while SSD is up, ANY party stellar hit triggers it;
+                #          3.5s CD measured from the TRIGGER (like Diona's paws) ----
+                if (odette_cons7 >= 4 and ssd_active and e_type == "HIT"
+                        and cat == ActionCategory.STELLAR_DMG
+                        and t >= odette_c4_cd_ready - _WINDOW_EPS):
+                    odette_c4_cd_ready = t + ODETTE_C4_PROC_CD
+                    self._insert_triggered_hit_chrono(
+                        odette_c4_stellar_hit, event, t,
+                        "C4 Extra Stellar", start_index=i + 1, owner="Odette")
 
             else:
                 event["marvelous_stacks"] = 0
-                event["odette_burst_state"] = "OFF"
+                event["odette_shadow_state"] = "OFF"
+                event["odette_ssd_state"] = "OFF"
                 event["odette_c2_state"] = "OFF"
 
-            # 7b. Anastasya: burst buff, A1 window, conditional extra stellar beat
-            #     and the Triumph stellar swirl.
+            # 7b. Anastasya: Accolades (unsealed/shared), Love, the conditional extra
+            #     stellar beat and both Triumph procs.
             if "Anastasya" in self.party:
+                ana_cons = self.party["Anastasya"].get("constellation", 0)
                 is_ana_skill_cast = (e_type == "HIT" and char == "Anastasya"
                                      and ability_name == "Skill Tap" and hit_name == "Cast")
                 is_ana_burst_cast = (e_type == "HIT" and char == "Anastasya"
                                      and ability_name == "To the New World"
                                      and hit_name == "Burst_Cast")
 
-                # Windows are read BEFORE this event arms them: her own cast does not
-                # gain the buff it starts (the game resolves damage first).
+                # Her burst window is read BEFORE this event arms it (the burst cast
+                # hit does not gain its own buff).
                 ana_burst_open = (anastasya_burst_expiration is not None
                                   and t <= anastasya_burst_expiration + _WINDOW_EPS)
-                ana_a1_open = (anastasya_a1_expiration is not None
-                               and t <= anastasya_a1_expiration + _WINDOW_EPS)
 
-                # A1: the OTHER party members gain 16% crit DMG for 19s (refreshed
-                # by every new skill cast).
+                # Accolades and Love are INCLUSIVE on the skill Cast hit.
                 if is_ana_skill_cast:
-                    anastasya_a1_expiration = t + 19.0
+                    anastasya_accolades_expiration = t + ANASTASYA_ACCOLADES_WINDOW
+                    if ana_cons >= 2:
+                        anastasya_love_expiration = t + ANASTASYA_LOVE_WINDOW
+                ana_accolades_open = (anastasya_accolades_expiration is not None
+                                      and t <= anastasya_accolades_expiration + _WINDOW_EPS)
+                ana_love_open = (anastasya_love_expiration is not None
+                                 and t <= anastasya_love_expiration + _WINDOW_EPS)
 
-                # Burst cast: party stellar_bonus for 20s (value is talent-scaled)
-                # plus the extra stellar beat window, and Triumph is armed.
+                # Burst cast: party stellar_bonus for 20s (talent-scaled) plus the
+                # extra stellar beat window; it also arms the SEAL for this visit.
                 if is_ana_burst_cast:
                     anastasya_burst_expiration = t + 20.0
-                    anastasya_triumph_armed = True
-                    anastasya_triumph_ready_at = t + ANASTASYA_TRIUMPH_DELAY
+                    anastasya_burst_this_visit = True
+
+                # Seal: she used her burst and then swapped out. Unseal: her next
+                # swap-in, once ANASTASYA_UNSEAL_DELAY has passed SINCE THE SEAL; that
+                # swap-in also fires Triumph. The SHARED state lingers afterwards.
+                if e_type == "SWAP_OUT" and char == "Anastasya":
+                    if anastasya_burst_this_visit:
+                        anastasya_sealed = True
+                        anastasya_seal_time = t
+                        anastasya_triumph_armed = True
+                        anastasya_triumph_ready_at = t + ANASTASYA_UNSEAL_DELAY
+                    anastasya_burst_this_visit = False
+                if e_type == "SWAP_IN" and char == "Anastasya":
+                    anastasya_burst_this_visit = False
+                    if (anastasya_triumph_armed
+                            and anastasya_triumph_ready_at is not None
+                            and t >= anastasya_triumph_ready_at - _WINDOW_EPS):
+                        anastasya_triumph_armed = False
+                        anastasya_sealed = False
+                        anastasya_unseal_time = t
+                        self._insert_triggered_hit_chrono(
+                            anastasya_triumph.hits[0], event, t,
+                            anastasya_triumph.name, start_index=i + 1,
+                            owner="Anastasya")
+
+                ana_shared = (anastasya_sealed
+                              or (anastasya_unseal_time is not None
+                                  and t <= anastasya_unseal_time + ANASTASYA_SHARED_LINGER + _WINDOW_EPS))
 
                 # Conditional hit: while her burst buff is up, every stellar beat of
                 # her skill additionally fires an extra Stellar Swirl DMG hit.
-                # Triggered hit: it lands at trigger + anastasya_extra_stellar's delay.
                 if (e_type == "HIT" and char == "Anastasya"
                         and hit_name.startswith("Palestar Crown Stellar")
                         and ana_burst_open):
@@ -1409,31 +1480,41 @@ class RotationTimeline:
                         anastasya_extra_stellar.name, index=i + 1,
                         owner="Anastasya", extra={"burst_call_id": None})
 
-                # Triumph: fired by her next swap-in once 18s have elapsed since the
-                # burst cast; one trigger per burst cast.
-                if (e_type == "SWAP_IN" and char == "Anastasya"
-                        and anastasya_triumph_armed
-                        and anastasya_triumph_ready_at is not None
-                        and t >= anastasya_triumph_ready_at - _WINDOW_EPS):
-                    th = anastasya_triumph.hits[0]
-                    triumph_event = {
-                        "global_time": t,
-                        "active_character": active_character,
-                        "character": "Anastasya",
-                        "action": th.name,
-                        "category": th.category,
-                        "elem_app": th.elemental_app if th.elemental_app else "-",
-                        "element": th.element,
-                        "event_type": "HIT",
-                        "hit_name": th.name,
-                        "ability_name": anastasya_triumph.name,
-                        "stat_ref": th.stat_ref,
-                        "multiplier": th.multiplier,
-                        "attack_type": th.attack_type,
-                        "hit_offset": 0.0,
-                    }
-                    self.global_events.insert(i + 1, triumph_event)
-                    anastasya_triumph_armed = False
+                # C6: while Love is up, EVERY other character's swap-in fires the
+                # stronger Triumph (her ability), 15s per-character CD.
+                if (ana_cons >= 6 and ana_love_open and e_type == "SWAP_IN"
+                        and char not in (None, "Anastasya")
+                        and t >= anastasya_c6_triumph_ready.get(char, 0.0) - _WINDOW_EPS):
+                    anastasya_c6_triumph_ready[char] = t + ANASTASYA_C6_TRIUMPH_CD
+                    self._insert_triggered_hit_chrono(
+                        anastasya_c6_triumph.hits[0], event, t,
+                        anastasya_c6_triumph.name, start_index=i + 1,
+                        owner="Anastasya")
+
+                # Audit flags. The two Accolades variants are mutually exclusive.
+                event["anastasya_burst_state"] = "ON" if ana_burst_open else "OFF"
+                event["anastasya_accolades_state"] = "ON" if ana_accolades_open else "OFF"
+                event["anastasya_accolades_unsealed_state"] = (
+                    "ON" if ana_accolades_open and not ana_shared else "OFF")
+                event["anastasya_accolades_shared_state"] = (
+                    "ON" if ana_accolades_open and ana_shared else "OFF")
+                event["anastasya_sealed_state"] = "ON" if ana_shared else "OFF"
+                event["anastasya_love_state"] = "ON" if ana_love_open else "OFF"
+                event["anastasya_triumph_ready"] = (
+                    "ON" if (anastasya_triumph_armed
+                             and anastasya_triumph_ready_at is not None
+                             and t >= anastasya_triumph_ready_at - _WINDOW_EPS) else "OFF")
+                # A4 is a permanent passive while she is in the party.
+                event["anastasya_a4_state"] = "ON"
+            else:
+                event["anastasya_burst_state"] = "OFF"
+                event["anastasya_accolades_state"] = "OFF"
+                event["anastasya_accolades_unsealed_state"] = "OFF"
+                event["anastasya_accolades_shared_state"] = "OFF"
+                event["anastasya_sealed_state"] = "OFF"
+                event["anastasya_love_state"] = "OFF"
+                event["anastasya_triumph_ready"] = "OFF"
+                event["anastasya_a4_state"] = "OFF"
 
             # 7c. Diona: the "Choice Treasures" state (20s, refreshed by her tap/hold
             #     skill hits), the Icy Paw volley she fires on any Stellar Swirl while
@@ -1604,22 +1685,8 @@ class RotationTimeline:
                 event["tsaritsa_state"] = "OFF"
                 event["tsaritsa_stellar_state"] = "OFF"
 
-            # 11. Anastasya audit flags (these drive her FLAG_TO_BUFFS entries).
-            #     burst / A1 reuse the PRE-arm windows computed in 7b.
-            if "Anastasya" in self.party:
-                triumph_ready = (anastasya_triumph_armed
-                                 and anastasya_triumph_ready_at is not None
-                                 and t >= anastasya_triumph_ready_at - _WINDOW_EPS)
-                event["anastasya_burst_state"] = "ON" if ana_burst_open else "OFF"
-                event["anastasya_a1_state"] = "ON" if ana_a1_open else "OFF"
-                event["anastasya_triumph_ready"] = "ON" if triumph_ready else "OFF"
-                # A4 is a permanent passive while she is in the party.
-                event["anastasya_a4_state"] = "ON"
-            else:
-                event["anastasya_burst_state"] = "OFF"
-                event["anastasya_a1_state"] = "OFF"
-                event["anastasya_triumph_ready"] = "OFF"
-                event["anastasya_a4_state"] = "OFF"
+            # 11. Anastasya's audit flags are emitted in 7b (they depend on the
+            #     Accolades window and the sealed/shared state computed there).
 
             i += 1
 
@@ -1860,7 +1927,7 @@ class RotationTimeline:
         has_aether = "Aether" in self.party
         has_frostglow = has_aether or any(ev.get("frostglow_stacks", 0) > 0 for ev in self.global_events)
         has_odette = "Odette" in self.party
-        has_odette_burst = any(ev.get("odette_burst_state") == "ON" for ev in self.global_events)
+        has_odette_ssd = any(ev.get("odette_ssd_state") == "ON" for ev in self.global_events)
         has_odette_c2 = any(ev.get("odette_c2_state") == "ON" for ev in self.global_events)
         has_sucrose_a1 = any(ev.get("sucrose_a1_state") == "ON" for ev in self.global_events)
         has_sucrose_a4 = any(ev.get("sucrose_a4_state") == "ON" for ev in self.global_events)

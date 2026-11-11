@@ -14,8 +14,8 @@ Legend: ✔ = verified (the `New test` set or an automated invariant in
 | --- | --- | --- | --- | --- |
 | Mizuki | Anemo | C0-C6 | ✔ | C2 verified (shred + flat-EM PHEC bonus); C6 verified (party stellar crit + flat-EM crit) |
 | Aether | Cryo | C4-C6 | ✔ | C6 verified (Frostglow / Aether C6 stellar) |
-| Odette | Cryo | C0 | ✔ | C2 verified (Marvelous stacks); Snow Swan's Dream = 20s self stellar_bonus |
-| Anastasya | Cryo | C0 | ✔ | Burst party stellar_bonus (**0.354 @ B13**, 20s — nerfed from 0.575), A1 (+16% CD others/19s), A4 reaction-only jubilee (+0.15) + Lv2 vortices (3 swirls to detonate), Jubilee passive, Triumph (next swap-in, provisional delay 0.0 → every loop from the 2nd), conditional extra stellar beat |
+| Odette | Cryo | C0-C6 | ✔ | C1 extra stellar proc (+4.500 MV @0.010s) and 6-stack/2-per-second Marvelous; C2 shred + 7% ATK per stack; C4 SSD shares 50% with the OTHERS and adds a 0.990 MV stellar proc (3.5s trigger CD); C6 party elevation 0.25 / self 0.45 and she keeps her stacks off-field. C3/C5 only change talent levels (user-entered) |
+| Anastasya | Cryo | C0-C6 | ✔ | Burst party stellar_bonus (**0.354 @ B13**, 20s — nerfed from 0.575), **Accolades** (12% crit DMG for the whole party, 20s, inclusive on the skill Cast hit; once sealed the OTHERS get her share → 16% and she gets 0 at C0; C1 → 48%/36% + 60%/240 ATK/EM, C4 → 68.8%/51.6% + 86%/344), A4 reaction-only jubilee (+0.15) + Lv2 vortices, Jubilee passive, **Triumph** (15s after the seal, on her next swap-in, hit delay 0.010), conditional extra stellar beat, **C2 Love** (0.60 stellar CD for 30s + permanent 0.05 elevation), **C6** (Love +0.10 elevation, C6 Triumph 2.5x MV on every ally swap-in, 15s per-character CD) |
 | Faruzan | Anemo | C6 | ✔ | C6 CD buff + Anemo shred verified; her Skill Cast and the triggered Pressurized Collapse are separate abilities (collapse delay + 3.0s CD live in abilities.py) |
 | Sucrose | Anemo | C0-C6 | ✔ | A1/A4/C6 verified (scope, magnitude and window) |
 | Diona | Cryo | C6 | ✔ | Choice Treasures (20s state from either skill hit) → Icy Paw volley 0.270s after ANY Stellar Swirl (3.5s CD from the trigger); C6 burst-cast buff (+200 EM / +0.40 stellar) on the ACTIVE character for the whole burst (11.75s) |
@@ -82,13 +82,16 @@ present in the party.
 | Aether Frostglow | Character | Aether | always | ✔ |
 | Aether C6 Stellar | Character | Aether | C6 | ✔ |
 | Odette Marvelous | Character | Odette | always | ✔ |
-| Odette Burst Stellar | Character | Odette | always | ◻ |
-| Odette C2 ATK | Character | Odette | C2+ | ◻ |
+| Odette Shadow | Character | Odette | always | ✔ |
+| Odette SSD | Character | Odette | always | ✔ (shared at 50% with the OTHERS from C4) |
+| Odette C2 Shred | Character | Odette | C2+ | ✔ |
 | Sucrose A1 EM | Character | Sucrose | always | ✔ |
 | Sucrose A4 EM | Character | Sucrose | always | ✔ |
 | Sucrose C6 Cryo DMG | Character | Sucrose | C6 | ✔ |
 | Anastasya Burst Stellar | Character | Anastasya | always | ✔ |
-| Anastasya A1 CD | Character | Anastasya | always | ✔ |
+| Anastasya Accolades | Character | Anastasya | always | ✔ |
+| Anastasya Sealed | Character | Anastasya | always | ✔ (also ON for the 8s linger after an unseal) |
+| Anastasya Love | Character | Anastasya | C2+ | ✔ |
 | Anastasya A4 Jubilee | Character | Anastasya | always | ✔ |
 | Anastasya Triumph | Character | Anastasya | always | ✔ |
 | Exaiphanes ATK% | Weapon | Exaiphanes Blade | equipped | ✔ |
@@ -234,24 +237,27 @@ removing it from `buffs.DORMANT`.
 
 | Effect | Kind | Trigger that is still missing |
 | --- | --- | --- |
-| Odette C6 (self/party) | Character | elevation_mult on her stellar hits |
+| *(none)* | - | - |
 
-(Diona C6 left this list: its timeline flag `diona_c6_state` + `FLAG_TO_BUFFS`
-descriptor are in place since the Diona round.)
+(Diona C6 left this list in the Diona round, and Odette C6 (self/party) left it in the
+Odette constellation round: `odette_shadow_state` + its `FLAG_TO_BUFFS` descriptors are
+in place, and `buffs.DORMANT` is empty again.)
 
 ## Next verification targets
 
-Weapons (phases 1-3), artifacts (phase 1), Mizuki C2/C6, Sucrose, Cryo Resonance
-and Odette's Snow Swan's Dream are all implemented and covered by `smoke_test.py`.
-Remaining work:
+Weapons (phases 1-3), artifacts (phase 1), Mizuki C2/C6, Sucrose, Cryo Resonance,
+Odette's Snow Swan's Dream and her C1/C2/C4/C6 effects are all implemented and covered
+by `smoke_test.py`. Remaining work:
 
-1. Odette's constellations (C1 recast / C2 stacks / C3) end-to-end verification.
+1. Odette C3/C5 are talent-level-only by design (the user types the levels); nothing
+   else to implement. C1/C2/C4/C6 are asserted end-to-end in
+   `_run_odette_constellation_check()`.
 2. Sucrose's burst absorption stays hardcoded to `Cryo` **by design** for the
    foreseeable future (no work planned).
-3. Anastasya: Triumph's rule is **provisional on purpose**
-   (`ANASTASYA_TRIUMPH_DELAY = 0.0` in `timeline.py`, i.e. it fires on her next
-   swap-in, so every loop from the 2nd one). Replace that constant with the real
-   rule once the content is released — nothing else in the engine needs to change.
+3. Anastasya: C3/C5 are talent-level-only (user-entered). Accolades, the sealed/shared
+   state, Love and both Triumph procs are asserted end-to-end in
+   `_run_anastasya_constellation_check()`; the seal→unseal rule is
+   `ANASTASYA_UNSEAL_DELAY = 15.0` in `timeline.py`.
 
 ## Anastasya round (rotation with Odette QE)
 
@@ -286,12 +292,12 @@ Not used by the presets; kept for future loops.
 The Anastasya trial totals ~~4,904,232.3~~ → **4,460,586.2** average damage over its
 6 passes (see the triggered-hit round: -3.6 % from the nerf + the Faruzan CD rule).
 
-**Triumph is on a provisional rule** (unreleased content): it is armed by her burst
-cast and fires on her next swap-in, with `ANASTASYA_TRIUMPH_DELAY = 0.0` in
-`timeline.py` as the minimum gap. That makes it proc on every loop from the second
-one onwards — 5 procs in the 6-loop preset, at 19.082 / 38.164 / 57.246 / 76.328 /
-95.410 s, all on her own swap-ins. Only the one constant needs editing once the
-real rule is known.
+* **Historical note (superseded):** at that time Triumph was armed by the burst cast
+  with `ANASTASYA_TRIUMPH_DELAY = 0.0` as a provisional minimum gap, so it procced on
+  every loop from the second one. The real rule is now implemented: the burst cast +
+  swap-out **seals** her, and her next swap-in that is ≥
+  `ANASTASYA_UNSEAL_DELAY` (15s) **after the seal** unseals her and fires Triumph at
+  +0.010s. See "Anastasya Accolades & constellation round".
 
 Side fixes from these rounds:
 * `Aether_jubilee` / `Odette_jubilee` (and Anastasya's jubilee + A4) are gated with
@@ -306,15 +312,110 @@ Side fixes from these rounds:
 * Custom config export/import round-trips abilities through the registry
   (`ability_name` + `ability_character`) instead of a hardcoded name map.
 
-## Calibration baseline (after the C2 / resonance / Odette round)
+## Odette constellation round
+
+Her whole constellation set hangs off two timeline states:
+
+* **`odette_shadow_state`** — the shadow, spawned by the skill OR burst cast and
+  stipulated to live `ODETTE_SHADOW_WINDOW = 20s`. It drives the C2 shred, the C6
+  elevation and (through `marvelous_stacks`) A1/C2's per-stack values.
+* **`odette_ssd_state`** — Snow Swan's Dream, cast by the BURST only, its own 20s
+  `ODETTE_SSD_WINDOW` (independent of the shadow).
+
+Both are **inclusive on the cast hit** (unlike most windows in this engine): the first
+hit already has the shred / elevation / SSD it started.
+
+| Cons | Effect | Where |
+| --- | --- | --- |
+| C1 | `odette_c1_stellar_hit` (bare Hit, 450% ATK, +0.010s) right after the Recast's `Skill_Stellar`; Marvelous pool 4 -> 6 and transfer 1/s -> 2/s | `abilities.py`, `timeline.py` |
+| C2 | party Cryo/Anemo shred 20% while the shadow is up; every Marvelous stack ALSO gives +7% ATK (`Odette C2 ATK` in `STACK_BUFFS`) | `buffs.py`, `stats_calc.py` |
+| C3 / C5 | talent levels only (`+3` skill/burst) — the user types them, no code | UI |
+| C4 | SSD is shared with the OTHERS at 50% (`"multiplier": 0.5`); ANY party `STELLAR_DMG` hit triggers `odette_c4_stellar_hit` (bare Hit, 99% ATK, +0.010s) with a 3.5s CD from the trigger | `buffs.py`, `stats_calc.py`, `timeline.py` |
+| C6 | she keeps her 6 stacks off-field while the party still ramps at 2/s; the shadow grants +0.25 elevation to the OTHERS and +0.45 to her (0.25 party + 0.20 personal) | `buffs.py`, `stats_calc.py`, `timeline.py` |
+
+Implementation notes:
+
+* The old C1 **ability variant is gone**: `VARIANT_ABILITY_NAMES` is back to
+  `{"Elemental Burst"}`, `odette_recast_c1` was deleted and the recast is identical at
+  every constellation. C1 is now a TRIGGERED hit like Mizuki's nukes (bare `Hit`s, never
+  in `ABILITY_REGISTRY`).
+* `_insert_triggered_hit_chrono()` was added because C1 and C4 can both land at
+  `trigger + 0.010s`: it scans forward for the first slot that keeps the event list
+  chronological instead of assuming `i + 1`.
+* `evaluate_dynamic_buff()` gained a generic `multiplier` (default 1.0) applied to every
+  basis, which is how the C4 50% share is expressed.
+* `buffs.DORMANT` is empty again; `smoke_test._run_odette_constellation_check()` pins
+  every value above (C0/C1/C2/C3/C4/C6 timelines).
+
+**Side effect to be aware of:** the retimed `OdetteQE` (recast 2.250, swap-out 3.451)
+moved her Cryo applications out of the 3s life of Anastasya's level-2 Stellar Vortex, so
+the Anastasya preset no longer detonates one early. The A4 "spawn + 3 further swirls"
+rule is now asserted directly on `StellarVortex` (plus on any early detonation the preset
+still produces), so the invariant no longer depends on rotation spacing.
+
+## Anastasya Accolades & constellation round
+
+**Accolades** (her A1) is one 20s window opened by her skill `Cast` hit and it is
+**inclusive** on that hit. It is a party-wide 12% crit DMG buff with three states:
+
+| State | Crit DMG | ATK% (Cryo recipients, C1+) | EM (non-Cryo recipients, C1+) |
+| --- | --- | --- | --- |
+| Unsealed — everyone | 0.12 | 0.15 | 60 |
+| Shared (sealed) — OTHERS, C0 | 0.16 (her share ×4/3) | – | – |
+| Shared (sealed) — Anastasya, C0 | 0 | – | – |
+| Shared (sealed) — OTHERS, C1–C3 | 0.48 (12 × 3 × 4/3) | 0.60 | 240 |
+| Shared (sealed) — Anastasya, C1–C3 | 0.36 (12 × 3) | 0.45 | 180 |
+| Shared (sealed) — OTHERS, C4+ | 0.688 (12 × 4.3 × 4/3) | 0.86 | 344 |
+| Shared (sealed) — Anastasya, C4+ | 0.516 (12 × 4.3) | 0.645 | 258 |
+
+* **Seal**: she used her **burst** and then swapped out → the OTHERS get her share
+  (×4/3) and from C1 on the value is 300% stronger (430% from C4). At C1+ she keeps a
+  NON-shared copy; at C0 she loses hers entirely.
+* **Unseal**: her next swap-in that is ≥ `ANASTASYA_UNSEAL_DELAY` (15s) after the
+  **seal**; that swap-in also fires **Triumph**. The shared state then **lingers 8s**
+  (`ANASTASYA_SHARED_LINGER`), which is why the re-cast that lands 0.6s later is still
+  shared and she effectively never gets her share back in the preset loop.
+* The two value sets are dispatched from two mutually exclusive flags
+  (`anastasya_accolades_unsealed_state` / `..._shared_state`) so they can never
+  double-count; `anastasya_accolades_state` is the display column.
+
+**Love (C2)**: 30s party `stellar_crit_dmg = 0.60`, cast with the skill (refreshed by
+each cast, independent of Accolades), plus a **permanent** `0.05 elevation_mult` with
+no window (`always_on`, C2+). At C6 Love also gives another `0.10 elevation_mult`
+(total 0.15) and unlocks the **C6 Triumph**: every OTHER character's swap-in while
+Love is up fires `anastasya_c6_triumph` (2.5× the talent-scaled Triumph MV —
+835 vs 334 base — credited to her, 15s per-character CD, so up to 2 per Love window).
+
+Implementation notes:
+
+* New generic gates in `resolve_active_buffs()`: `max_constellation` (mirror of the
+  existing `min_constellation`, so the C1–C3 and C4+ tiers replace each other) and
+  `include_elements` (mirror of `exclude_elements`, so Cryo recipients get ATK% and
+  everyone else gets EM).
+* `buffs.py` keeps the explicit tier entries (Acclades Shared/Sealed C0/C1/C4 + the
+  ATK/EM variants) — chosen over per-constellation value lists so every number can be
+  read straight off the table above.
+* `anastasya_a1_state` → `anastasya_accolades_state`; the registry shows
+  **Anastasya Accolades**, **Anastasya Sealed** (the effective shared state, so it is
+  also ON during the 8s linger) and **Anastasya Love** (C2+). The C3/C5 constellations
+  change nothing (talent levels only).
+
+## Calibration baseline (after the Anastasya Accolades round)
 
 The standard 30s trial (DEFAULT_PARTY, Mizuki C0/C1/C2/C6):
-1064651.5 / 1211525.5 / 1273564.4 / 1476591.7
+1087457.8 / 1212982.7 / 1275225.0 / 1476757.9  (unchanged — that party has no Anastasya)
 
-C0/C1 are unchanged; C2/C6 are ~0.07% higher than the artifact-phase-1 numbers
-because Mizuki's C2 PHEC bonus now scales with her FLAT EM (base + flat buffs)
-instead of her initial EM. The jump from the weapon-phase-3 numbers is the
-Instructor fix (on-field only, 8s).
+Anastasya 6x preset, per constellation:
+**4,350,677.6 (C0) / 6,269,037.8 (C1) / 7,221,345.2 (C2) / 8,675,730.1 (C4) /
+11,415,775.5 (C6)** — C3 = C2 and C5 = C4, because those constellations only change
+talent levels (user-entered).
+
+At C0 the Accolades rewrite is a tiny gain over the old flat A1 (+1,049): the cast hit is
+inclusive and she keeps 12% for the first, still-unsealed window, while the OTHERS keep
+their 16%. From C1 the OTHERS jump 16% → 48% crit DMG (+60% ATK / 240 EM) for the shared
+part of every loop — that is the +44% at C1. C2 adds Love (0.60 stellar CD + 0.05
+elevation), C4 replaces the 300% tier with 430%, and C6 adds the 0.10 elevation plus the
+C6 Triumph procs (18 in the 6-loop preset).
 
 
 ## Save / load round (`build_io.py`, cards, results shortcut)
@@ -710,8 +811,11 @@ Implemented once, in `timeline.RotationTimeline`:
 | Mizuki C1 mini nuke | `mizuki_c1_mini_nuke_hit` (bare Hit, 400% EM) | a Stellar Swirl while her C1 shred is up | **0.000** | - |
 | Faruzan Pressurized Collapse | `faruzan_pressurized_collapse` (Ability, 108% skill) | her burst cast hit, or ANY hit while her C6 buff window is up | **0.720** | 3.0s **from the trigger** |
 | Diona Icy Paws | `diona_choice_treasures` (Ability, 3 x 41.92% skill) | ANY character's Stellar Swirl while her Choice Treasures state (20s) is up | **0.270 / 0.360 / 0.360** | 3.5s **from the trigger** |
-| Anastasya extra stellar | `anastasya_extra_stellar` (Ability, 16.8% burst) | her Palestar Crown Stellar beat while her burst window is up | **0.000** | - |
-| Anastasya Triumph | `anastasya_triumph` (Ability, 334% burst) | her swap-in (trigger = SWAP_IN, not a hit) | `ANASTASYA_TRIUMPH_DELAY` (0.0, provisional) | once per burst |
+| Anastasya extra stellar | `anastasya_extra_stellar` (Ability, 16.8% burst) | her Palestar Crown Stellar beat while her burst window is up | **0.010** | - |
+| Anastasya Triumph | `anastasya_triumph` (Ability, 334% burst) | her swap-in (trigger = SWAP_IN), armed by the SEAL (burst + swap-out) | **0.010**, on the swap-in that is ≥ `ANASTASYA_UNSEAL_DELAY` (15s) after the seal | once per seal |
+| Anastasya C6 Triumph | `anastasya_c6_triumph` (Ability, 2.5x Triumph's talent-scaled MV) | ANY other character's swap-in while Love is up (C6) | **0.010** | 15s **per character**, from the trigger |
+| Odette C1 extra stellar | `odette_c1_stellar_hit` (bare Hit, 450% ATK) | her Recast's `Skill_Stellar` hit (C1+) | **0.010** | - (once per recast) |
+| Odette C4 extra stellar | `odette_c4_stellar_hit` (bare Hit, 99% ATK) | ANY party `STELLAR_DMG` hit while Snow Swan's Dream is up (C4+) | **0.010** | 3.5s **from the trigger** (`ODETTE_C4_PROC_CD`) |
 
 Triggered abilities are listed in `abilities.ENGINE_INTERNAL_ABILITIES`, so they stay in
 `ABILITY_REGISTRY` but are never offered by the editor and never appear in a

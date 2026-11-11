@@ -81,8 +81,9 @@ WHERE THINGS LIVE  (one home per thing - there is never a second copy)
      closes DDS. Do not reuse those names for other abilities.
    * A burst cast should be tagged AttackType.BURST; a skill hit AttackType.SKILL.
    * Two abilities may share a display name only for genuine variants (Aether's
-     "Elemental Burst", Odette's "Skill Recast"); they are listed in
-     VARIANT_ABILITY_NAMES.
+     "Elemental Burst"); they are listed in VARIANT_ABILITY_NAMES. A constellation
+     that adds a hit should be a TRIGGERED hit instead (a bare Hit like
+     odette_c1_stellar_hit), never a second ability variant.
 
 
 4. WRAP IT IN A FIELD SEQUENCE  (the rotation step the UI offers)

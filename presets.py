@@ -63,9 +63,9 @@ odette_ee = FieldSequence("OdetteEE", "Odette", swap_out_time=2.371)
 odette_ee.add_ability(0.660, odette_cast)
 odette_ee.add_ability(1.170, odette_recast)
 
-odette_qe = FieldSequence("OdetteQE", "Odette", swap_out_time=3.071)
-odette_qe.add_ability(2.16, odette_burst)
-odette_qe.add_ability(2.851, odette_recast)
+odette_qe = FieldSequence("OdetteQE", "Odette", swap_out_time=3.451)
+odette_qe.add_ability(2.160, odette_burst)
+odette_qe.add_ability(2.250, odette_recast)
 
 # --- Faruzan ---
 faruzan_q = FieldSequence("FaruzanQSwap", "Faruzan", swap_out_time=1.410)

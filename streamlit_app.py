@@ -214,7 +214,6 @@ st.markdown(PAGE_CSS.replace("__WALLPAPER__", img_base64), unsafe_allow_html=Tru
 
 
 st.title("Yumemizuki Mizuki's Rotation Damage Calculator")
-st.markdown("---")
 
 # Constants & Options defined by your specifications
 CHARACTERS = ["Select Character", "Mizuki", "Aether", "Odette", "Anastasya", "Faruzan", "Sucrose", "Diona"]
@@ -223,65 +222,65 @@ LEVEL_OPTIONS = [60, 70, 80, 90, 95, 100]
 
 CHARACTER_WEAPONS = {
     "Mizuki": [
+        ("Sacrificial Fragments", [4, 5]),        
         ("The Widsith (Average)", [1, 2, 3, 4, 5]),
         ("The Widsith (All EM)", [1, 2, 3, 4, 5]),
-        ("Sacrificial Fragments", [4, 5]),
-        ("Sacrificial Jade", [1, 2, 3, 4, 5]),
         ("Sunny Morning Sleep-In", [1, 2, 3, 4, 5]),
+        ("Sacrificial Jade", [1, 2, 3, 4, 5]),
+        ("Starsealed Edict", [1, 2, 3, 4, 5]),
         ("Starcaller's Watch", [1, 2, 3, 4, 5]),
         ("A Thousand Floating Dreams", [1, 2, 3, 4, 5]),
         ("Wandering Evenstar", [1, 2, 3, 4, 5]),
-        ("Thrilling Tales of Dragon Slayers", [1, 2, 3, 4, 5]),
-        ("Starsealed Edict", [1, 2, 3, 4, 5]),
+        ("Thrilling Tales of Dragon Slayers", [1, 2, 3, 4, 5]),        
     ],
     "Aether": [
-        ("New Bough", [1, 2, 3, 4, 5]),
-        ("Silver Light", [1, 2, 3, 4, 5]),
         ("Exaiphanes Blade", [1, 2, 3, 4, 5]),
+        ("New Bough", [1, 2, 3, 4, 5]),
+        ("Silver Light", [1, 2, 3, 4, 5]),        
         ("Whitelake Frostfeather", [1, 2, 3, 4, 5]),
         ("Finale Of The Deep", [1, 2, 3, 4, 5]),
         ("Azurelight", [1, 2, 3, 4, 5]),
         ("Aquila Favonia", [1, 2, 3, 4, 5]),
     ],
     "Odette": [
-        ("New Bough", [1, 2, 3, 4, 5]),
         ("Silver Light", [1, 2, 3, 4, 5]),
-        ("Exaiphanes Blade", [1, 2, 3, 4, 5]),
+        ("New Bough", [1, 2, 3, 4, 5]),
         ("Whitelake Frostfeather", [1, 2, 3, 4, 5]),
+        ("Exaiphanes Blade", [1, 2, 3, 4, 5]),        
         ("Finale Of The Deep", [1, 2, 3, 4, 5]),
         ("Azurelight", [1, 2, 3, 4, 5]),
         ("Aquila Favonia", [1, 2, 3, 4, 5]),
     ],
     "Anastasya": [
-        ("Favonius Warbow", [1, 2, 3, 4, 5]),
-        ("Sacrificial Bow", [1, 2, 3, 4, 5]),
-        ("Breezeborne Refrain", [1, 2, 3, 4, 5]),
-        ("Elegy for the End", [1, 2, 3, 4, 5]),
         ("Silverdawn", [1, 2, 3, 4, 5]),
+        ("Breezeborne Refrain", [1, 2, 3, 4, 5]),
+        ("Favonius Warbow", [1, 2, 3, 4, 5]),
+        ("Sacrificial Bow", [1, 2, 3, 4, 5]),        
+        ("Elegy for the End", [1, 2, 3, 4, 5]),        
     ],
     "Faruzan": [
         ("Favonius Warbow", [1, 2, 3, 4, 5]),
-        ("Sacrificial Bow", [1, 2, 3, 4, 5]),
         ("Breezeborne Refrain", [1, 2, 3, 4, 5]),
+        ("Sacrificial Bow", [1, 2, 3, 4, 5]),        
         ("Elegy for the End", [1, 2, 3, 4, 5]),
         ("Silverdawn", [1, 2, 3, 4, 5]),
     ],
     "Sucrose": [
-        ("The Widsith (Average)", [1, 2, 3, 4, 5]),
-        ("The Widsith (All EM)", [1, 2, 3, 4, 5]),
         ("Sacrificial Fragments", [1, 2, 3, 4, 5]),
+        ("A Thousand Floating Dreams", [1, 2, 3, 4, 5]),
+        ("Thrilling Tales of Dragon Slayers", [1, 2, 3, 4, 5]),
+        ("The Widsith (Average)", [1, 2, 3, 4, 5]),
+        ("The Widsith (All EM)", [1, 2, 3, 4, 5]),        
         ("Sacrificial Jade", [1, 2, 3, 4, 5]),
         ("Sunny Morning Sleep-In", [1, 2, 3, 4, 5]),
-        ("Starcaller's Watch", [1, 2, 3, 4, 5]),
-        ("A Thousand Floating Dreams", [1, 2, 3, 4, 5]),
-        ("Wandering Evenstar", [1, 2, 3, 4, 5]),
-        ("Thrilling Tales of Dragon Slayers", [1, 2, 3, 4, 5]),
+        ("Starcaller's Watch", [1, 2, 3, 4, 5]),        
+        ("Wandering Evenstar", [1, 2, 3, 4, 5]),        
         ("Starsealed Edict", [1, 2, 3, 4, 5]),
     ],
     "Diona": [
-        ("Favonius Warbow", [1, 2, 3, 4, 5]),
-        ("Sacrificial Bow", [1, 2, 3, 4, 5]),
         ("Breezeborne Refrain", [1, 2, 3, 4, 5]),
+        ("Favonius Warbow", [1, 2, 3, 4, 5]),
+        ("Sacrificial Bow", [1, 2, 3, 4, 5]),        
         ("Elegy for the End", [1, 2, 3, 4, 5]),
         ("Silverdawn", [1, 2, 3, 4, 5]),
     ],
@@ -293,8 +292,8 @@ CHARACTER_CONSTELLATIONS = {
     "Diona": ["C6"],    # Only C6 available
     "Mizuki": ["C0", "C1", "C2", "C3", "C4", "C5", "C6"],
     "Aether": ["C4", "C5", "C6"],
-    "Odette": ["C0"],
-    "Anastasya": ["C0"],
+    "Odette": ["C0", "C1", "C2", "C3", "C4", "C5", "C6"],  # C3/C5 only change talent levels (user-entered)
+    "Anastasya": ["C0", "C1", "C2", "C3", "C4", "C5", "C6"],  # C3/C5 only change talent levels (user-entered)
     "Sucrose": ["C0", "C1", "C2", "C3", "C4", "C5", "C6"],
 }
 
@@ -304,24 +303,26 @@ CHARACTER_ARTIFACT_SETS = {
         "Select Set",
         "2p/2p EM",
         "Gilded Dreams",
+        "Scarlet Proof",
         "Heart Of The Furnace",
         "Instructor",
-        "Scarlet Proof",
         "Viridescent Venerer",
     ],
     "Odette": [
         "Select Set",
-        "2p/2p ATK",
-        "A Day Carved From Rising Winds",
         "Heart Of The Furnace",
-        "Tenacity Of The Millelith",
         "New Tsaritsa set",
+        "Tenacity Of The Millelith",
+        "2p/2p ATK",
+        "A Day Carved From Rising Winds"
     ],
     "Anastasya": [
         "Select Set",
         "Heart Of The Furnace",
-        "2p/2p ATK",
         "New Tsaritsa set",
+        "2p/2p ATK",
+        "A Day Carved From Rising Winds",
+        "Tenacity Of The Millelith"        
     ],
     "Aether": [
         "Select Set",
@@ -329,7 +330,7 @@ CHARACTER_ARTIFACT_SETS = {
         "A Day Carved From Rising Winds",
         "Heart Of The Furnace",
         "Tenacity Of The Millelith",
-        "New Tsaritsa set",
+        "New Tsaritsa set"
     ],
     "Faruzan": [
         "Select Set",
@@ -340,10 +341,10 @@ CHARACTER_ARTIFACT_SETS = {
     ],
     "Sucrose": [
         "Select Set",
+        "Viridescent Venerer",
+        "Instructor",
         "2p/2p EM",
         "Gilded Dreams",
-        "Instructor",
-        "Viridescent Venerer",
     ],
     "Diona": [
         "Select Set",
@@ -693,7 +694,7 @@ def render_build_io_panel() -> None:
         st.markdown("<br>", unsafe_allow_html=True)
         current_doc = collect_build_document(st.session_state)
         st.download_button(
-            "⬇ Export current build (.json)",
+            "Export current build (.json)",
             data=document_to_json(current_doc),
             file_name=suggested_file_name(current_doc),
             mime="application/json",
@@ -1567,7 +1568,7 @@ with tab4:
     st.header("Simulation Results & History")
     
     if "history" not in st.session_state or not st.session_state["history"]:
-        st.info("No simulation history available yet. Run a trial in Tab 3 to review results here.")
+        st.info("No simulation history available yet. Run a trial in **Rotation Setup** to review results here.")
     else:
         if st.button("Clear All History", type="secondary"):
             st.session_state["history"] = []
