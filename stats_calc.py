@@ -659,7 +659,7 @@ def compute_flat_em(char_name, event_flags, active_character, party, char_initia
             bkey = desc.get("key", "")
 
             # Generic caster gate: the buff only applies when its CASTER is at the
-            # required constellation (replaces the old name-matching gates).
+            # required constellation.
             min_c = desc.get("min_constellation")
             if min_c is not None and (party or {}).get(desc.get("caster"), {}).get("constellation", 0) < int(min_c):
                 continue
@@ -821,8 +821,6 @@ def resolve_active_buffs(
     party: dict = None,
     char_initial_stats_map: dict = None,
     refinement: int = 1,
-    # Legacy positional shim: old callers sometimes passed party/refinement positionally
-    **_kwargs,
 ) -> dict:
     """
     Reads event_flags produced by the timeline and resolves every active buff
@@ -890,8 +888,7 @@ def resolve_active_buffs(
         add("stellar_crit_rate", 0.10)
         add("stellar_crit_dmg", 0.20)
 
-    # NOTE: talent levels are no longer parsed per character here. Every
-    # talent-scaled effect declares its path in buffs.py and is resolved by
+    # Every talent-scaled effect declares its path in buffs.py and is resolved by
     # get_talent_value() through evaluate_dynamic_buff().
 
     def basis_source(buff_def, fallback_caster):
@@ -1044,9 +1041,6 @@ def resolve_active_buffs(
                 )
                 add(dynamic_def["target_stat"], per_stack * stack_count)
 
-    # NOTE: team shares (Mizuki VBTD2, Sucrose A4) and Mizuki's C6 part 2 are now
-    # ordinary declarative effects (see CONDITIONAL_NON_CONSTANT_BUFFS + FLAG_TO_BUFFS
-    # "always_on"), so there is no special-case code left here.
     return applied_buffs
 
 
@@ -1123,42 +1117,3 @@ def compute_final_stats(snapshot_stats: dict) -> dict:
         "Stellar CD":     snapshot_stats.get("stellar_crit_dmg",  0.0),
     })
     return res
-
-
-# ---------------------------------------------------------------------------
-# compute_snapshot_card_stats
-# ---------------------------------------------------------------------------
-
-def compute_snapshot_card_stats(snapshot_stats: dict) -> dict:
-    """
-    Resolves snapshot_stats into formatted card strings for buff-aware UI display.
-    """
-    card_hp = (snapshot_stats["base_hp"] * (1.0 + snapshot_stats["hp_percent"])) + snapshot_stats["hp_flat"]
-    card_atk = (snapshot_stats["base_atk"] * (1.0 + snapshot_stats["atk_percent"])) + snapshot_stats["atk_flat"]
-    card_def = (snapshot_stats["base_def"] * (1.0 + snapshot_stats["def_percent"])) + snapshot_stats["def_flat"]
-
-    formatted = {
-        "HP":  round(card_hp,  1),
-        "ATK": round(card_atk, 1),
-        "DEF": round(card_def, 1),
-        "EM":  round(snapshot_stats.get("em", 0.0), 1),
-        "CR":  f"{round(snapshot_stats.get('crit_rate', 0.05) * 100, 1)}%",
-        "CD":  f"{round(snapshot_stats.get('crit_dmg',  0.50) * 100, 1)}%",
-        "ER":  f"{round(snapshot_stats.get('er',        1.0)  * 100, 1)}%",
-    }
-
-    for elem in ["physical", "pyro", "cryo", "geo", "electro", "dendro", "hydro", "anemo"]:
-        val = snapshot_stats.get(f"{elem}_bonus", 0.0)
-        if val > 0.0:
-            formatted[f"{elem.capitalize()} DMG"] = f"{round(val * 100, 1)}%"
-
-    for extra, label in [
-        ("stellar_bonus",  "Stellar Bonus"),
-        ("jubilee_mult",   "Jubilee Mult"),
-        ("elevation_mult", "Elevation Mult"),
-    ]:
-        val = snapshot_stats.get(extra, 0.0)
-        if val > 0.0:
-            formatted[label] = f"{round(val * 100, 1)}%"
-
-    return formatted

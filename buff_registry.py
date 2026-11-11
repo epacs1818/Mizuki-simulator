@@ -14,7 +14,7 @@ the owner that must be present for the effect to exist at all:
 
 Buff columns are ordered characters (party order, then registry order), then
 weapons, then artifacts, then team auras.  visible_buffs() drops every effect
-whose owner is not equipped, so tables never show phantom columns.
+whose owner is not equipped, so a table only shows effects that exist in the party.
 """
 
 from characters import get_character_element, party_element_counts

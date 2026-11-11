@@ -22,12 +22,10 @@ import datetime
 import json
 
 from abilities import ABILITY_REGISTRY
-from abilities import LEGACY_ABILITY_NAMES
 from characters import get_character_element
 from models import FieldSequence, Rotation, Trial
 from presets import (
     FIELD_SEQUENCE_REGISTRY,
-    LEGACY_SEQUENCE_NAMES,
     STANDARD_FIELD_SEQUENCES,
     STANDARD_TRIALS,
 )
@@ -40,9 +38,7 @@ from substats_standards import CARRIES, build_kqm_build, build_recommended_subs
 
 APP_NAME = "Yumemizuki Mizuki's Rotation Damage Calculator"
 
-# 2.0: `party` is a LIST of slots that carries raw gear (mains/substats).
-# 1.0: `party` was a dict of cooked character data with no gear at all.
-SCHEMA_VERSION = "2.0"
+SCHEMA_VERSION = "1.0"
 
 PIECES = ("Flower", "Feather", "Sands", "Goblet", "Circlet")
 LOCKED_MAIN_PIECES = ("Flower", "Feather")
@@ -295,8 +291,7 @@ def assemble_party(slots) -> dict:
 def crit_model_label(char_data) -> str:
     """Short label of the substat standard a party entry uses (Manual / 100% RV / KQM 40).
 
-    Named after the old "crit model" UI wording; the cards now print it as
-    "Substats: <label>".
+    The character cards print it as "Substats: <label>".
     """
     char_data = char_data or {}
     standard = str(char_data.get("standard_mode") or "Manual")
@@ -336,7 +331,6 @@ def _ability_for(ability_name, character=None):
     """
     if not ability_name:
         return None
-    ability_name = LEGACY_ABILITY_NAMES.get(ability_name, ability_name)
     if character and ability_name in ABILITY_REGISTRY.get(character, {}):
         return ABILITY_REGISTRY[character][ability_name]
     for ability_map in ABILITY_REGISTRY.values():
@@ -396,12 +390,7 @@ def rotation_payload(rot) -> dict:
 
 
 def _lookup_sequence(name, custom_sequences=None):
-    """Fallback lookup for files that only stored sequence NAMES (schema 1.0).
-
-    Renamed sequences are translated (`LEGACY_SEQUENCE_NAMES`), so a file saved before
-    a rename keeps loading instead of losing the step with a warning.
-    """
-    name = LEGACY_SEQUENCE_NAMES.get(name, name)
+    """Resolve a sequence NAME against the custom pools and the shipped catalogue."""
     for pool in (custom_sequences or {}, STANDARD_FIELD_SEQUENCES, FIELD_SEQUENCE_REGISTRY):
         if name in pool:
             return pool[name]
@@ -635,84 +624,11 @@ def collect_build_document(state, simulation_name=None) -> dict:
     }
 
 
-def legacy_party_to_slots(party) -> list:
-    """Schema 1.0 party (dict of cooked characters, no gear) -> slot list."""
-    slots = []
-    for index, (name, data) in enumerate(_stats_or_empty(party).items()):
-        if not name or name == "Select Character":
-            continue
-        data = _stats_or_empty(data)
-        slots.append({
-            "slot": index + 1,
-            "character": name,
-            "level": data.get("level", 90),
-            "constellation": constellation_int(data.get("constellation", 0)),
-            "weapon": data.get("weapon"),
-            "refinement": refinement_int(data.get("refinement", 1)),
-            "talents": data.get("talents", ""),
-            "substat_standard": data.get("standard_mode", "Manual"),
-            "artifact_set": data.get("artifact_set", "Select Set"),
-            "pieces": {},
-        })
-    return slots
-
-
-
-def legacy_build_document(entry):
-    """Best-effort document for history runs recorded before schema 2.0."""
-    entry = entry or {}
-    return {
-        "schema_version": SCHEMA_VERSION,
-        "exported_at": "",
-        "simulation_name": entry.get("sim_name", ""),
-        "party": legacy_party_to_slots(entry.get("snapshot_party")),
-        "enemy": entry.get("snapshot_enemy") or {},
-        "selected_trial": None,
-        "custom_field_sequences": [
-            field_sequence_payload(seq)
-            for seq in (entry.get("snapshot_custom_fs") or {}).values()
-        ],
-        "custom_rotations": [
-            rotation_payload(rot)
-            for rot in (entry.get("snapshot_custom_rots") or {}).values()
-        ],
-        "custom_trials": [],
-    }
-
-
 def normalise_document(doc) -> dict:
-    """Accept 2.0 documents as-is and migrate 1.0 files to the new shape."""
+    """Validate a parsed build document."""
     if not isinstance(doc, dict):
         raise ValueError("The file does not contain a JSON object.")
-    if str(doc.get("schema_version", "")).startswith("2"):
-        return doc
-    # Schema 1.0: named party without gear, name-only rotations, no custom trials.
-    return {
-        "schema_version": "1.0 (upgraded)",
-        "exported_at": doc.get("exported_at", ""),
-        "simulation_name": doc.get("simulation_name", ""),
-        "party": legacy_slot_list(doc.get("party")),
-        "enemy": doc.get("enemy") or doc.get("enemy_stats") or {},
-        "selected_trial": doc.get("selected_trial"),
-        "custom_field_sequences": list(_iter_payloads(doc.get("custom_field_sequences_raw"))),
-        "custom_rotations": list(_iter_payloads(doc.get("custom_rotations_raw"))),
-        "custom_trials": list(_iter_payloads(doc.get("custom_trials_raw"))),
-    }
-
-
-def legacy_slot_list(payload) -> list:
-    """`party` is a list in 2.0 and a {name: data} mapping in 1.0."""
-    if isinstance(payload, list):
-        return [slot for slot in payload if isinstance(slot, dict)]
-    return legacy_party_to_slots(payload)
-
-
-def document_lacks_gear(doc) -> bool:
-    """True when no slot carries artifact pieces (i.e. a schema 1.0 file)."""
-    party = (doc or {}).get("party")
-    if not isinstance(party, list):
-        return True
-    return not any((slot or {}).get("pieces") for slot in party if isinstance(slot, dict))
+    return doc
 
 
 
@@ -892,7 +808,7 @@ def apply_build_document(doc, state, catalogue, warnings=None) -> list:
     catalogue = catalogue or {}
 
     _apply_enemy(doc.get("enemy"), state, warnings)
-    party_slots = legacy_slot_list(doc.get("party"))[:4]
+    party_slots = (doc.get("party") or [])[:4]
     for index, slot in enumerate(party_slots):
         _apply_slot(slot, index + 1, state, catalogue, warnings)
     # Slots the file does not fill are emptied instead of keeping stale characters.
@@ -917,7 +833,7 @@ def build_party_from_document(doc) -> dict:
     """Document -> the same `my_party` mapping the confirm button produces."""
     doc = normalise_document(doc)
     slots = []
-    for slot in legacy_slot_list(doc.get("party"))[:4]:
+    for slot in (doc.get("party") or [])[:4]:
         slot = _stats_or_empty(slot)
         character = slot.get("character")
         if not character or character == "Select Character":
@@ -946,7 +862,7 @@ def document_to_json(doc) -> str:
 
 
 def parse_document(text) -> dict:
-    """JSON text -> document (schema 1.0 files are upgraded transparently)."""
+    """JSON text -> build document."""
     if isinstance(text, bytes):
         text = text.decode("utf-8")
     return normalise_document(json.loads(text))

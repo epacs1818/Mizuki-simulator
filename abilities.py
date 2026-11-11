@@ -7,41 +7,38 @@ from models import Hit, Ability, FieldSequence
 from skill_scalings import CHARACTER_SKILLS
 
 
-def get_ability_motion_value(character: str, category: str, sub_ability: str, level: int, stacks: Optional[int] = None) -> float:
-    """
-    Resolves a hit's motion value at a given talent level.
+def get_ability_motion_value(character: str, category: str, sub_ability: str,
+                             level: int, stacks: Optional[int] = None) -> float:
+    """Resolve a hit's motion value at a given talent level (1-13).
 
-    stacks (optional) is used for per-stack mv increases (e.g. Aether's Burst
-    Frostglow scaling). When omitted, per-stack entries fall back to their full
-    stack count so legacy call-sites keep working unchanged.
+    stacks applies to per-stack MVs (Aether's Burst scales with the Frostglow
+    stacks it consumes) and defaults to the ability's full stack count.
     """
     skill_entry = CHARACTER_SKILLS[character][category][sub_ability]
-    
-    # 1. Get the base scaled value for the specific level (Level 10 -> index 9)
-    # Divided by 100 if your calculator expects decimals (e.g., 91.68% -> 0.9168)
+
+    # Percent values are stored whole, so 91.68% becomes 0.9168 here.
     base_value = skill_entry["scaling"][level - 1] / 100.0
-    
-    # 2. Check for an optional mv_increase using .get()
+
+    # 1. Fixed modifier on the MV.
     mv_increase = skill_entry.get("mv_increase")
     if mv_increase is not None:
         if isinstance(mv_increase, (int, float)):
-            # e.g., Aether's Charged Attack (mv_increase = 1.4): the increase is ADDED to the
-            # decimal MV, i.e. final MV = base_value + mv_increase (not base * mv_increase).
+            # Aether's Charged Attack: the value is ADDED to the decimal MV.
             return base_value + mv_increase
-        elif isinstance(mv_increase, list):
-            # e.g., Aether's Burst Frostglow bonus list pre-multiplied by 8
+        if isinstance(mv_increase, list):
+            # Aether's Burst: the list already accounts for the full stack count.
             bonus_value = mv_increase[level - 1] / 100.0
             return base_value * (1.0 + bonus_value)
         return base_value
 
-    # 3. Per-stack mv increase (e.g. Aether's Burst, scales with Frostglow stacks)
+    # 2. Per-stack modifier (full stack count unless the caller passes the
+    #    number of stacks the cast actually consumed).
     mv_per_stack = skill_entry.get("mv_per_stack")
     if mv_per_stack is not None:
-        n = stacks if stacks is not None else 8  # default = full stacks for legacy calls
+        n = stacks if stacks is not None else 8
         bonus_value = mv_per_stack[level - 1] / 100.0 * n
         return base_value * (1.0 + bonus_value)
 
-    # If no mv modifier is present, just return the base scaled value
     return base_value
 
 
@@ -327,7 +324,7 @@ mizuki_charged = Ability(
 mizuki_pullout_13 = Ability(
     name="Mizuki Skill [13 Ticks]",
     character="Mizuki",
-    cooldown=15.0,
+    cooldown=0.0,
     talent_level=10,
     talent_type="skill_talent",
     hits=[
@@ -364,7 +361,7 @@ mizuki_pullout_2 = Ability(
 mizuki_pullout_9 = Ability(
     name="Mizuki Skill [9 Ticks]",
     character="Mizuki",
-    cooldown=15.0,
+    cooldown=0.0,
     talent_level=10,
     talent_type="skill_talent",
     hits=[
@@ -384,7 +381,7 @@ mizuki_pullout_9 = Ability(
 mizuki_pullout_5 = Ability(
     name="Mizuki Skill [5 Ticks]",
     character="Mizuki",
-    cooldown=15.0,
+    cooldown=0.0,
     talent_level=10,
     talent_type="skill_talent",
     hits=[
@@ -458,7 +455,7 @@ sucrose_n2 = Ability(
 sucrose_skill = Ability(
     name="Sucrose Skill",
     character="Sucrose",
-    cooldown=15.0,
+    cooldown=0.0,
     talent_level=10,
     talent_type="skill_talent",
     hits=[
@@ -664,11 +661,6 @@ anastasya_c6_triumph = Ability(
 # ---------------------------------------------------------------------------
 # Ability registry (read by the editors)
 # ---------------------------------------------------------------------------
-# Renames are translated, not dropped: exported builds/trials saved before a rename
-# still reference the old display names, so build_io maps them back on load.
-LEGACY_ABILITY_NAMES = {
-}
-
 # Pairs that share a display name on purpose: the engine substitutes the right variant
 # (Aether's burst by Frostglow stacks), so a shared name is not a mistake there.
 VARIANT_ABILITY_NAMES = {"Elemental Burst"}

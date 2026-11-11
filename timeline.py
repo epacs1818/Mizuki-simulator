@@ -60,6 +60,21 @@ ANASTASYA_LOVE_WINDOW = 30.0
 ANASTASYA_C6_TRIUMPH_CD = 15.0
 
 
+class CooldownError(ValueError):
+    """A field sequence schedules an ability that is still on cooldown.
+
+    A ValueError subclass so any existing caller keeps working; the UI uses the
+    attributes to build a readable message instead of showing a traceback.
+    """
+
+    def __init__(self, character: str, ability_name: str, until: float):
+        self.character = character
+        self.ability_name = ability_name
+        self.until = until
+        super().__init__(
+            f"{character}'s '{ability_name}' is on CD until {until:.3f}s")
+
+
 # ---------------------------------------------------------------------------
 # Triggered-hit convention (shared by every conditional proc)
 # ---------------------------------------------------------------------------
@@ -73,9 +88,10 @@ ANASTASYA_C6_TRIUMPH_CD = 15.0
 #   Mizuki C1 mini nuke .... mizuki_c1_mini_nuke_hit.relative_delay (0.0)
 #   Faruzan collapse ....... faruzan_pressurized_collapse.hits[0]  (0.720)
 #   Diona Icy Paws ......... diona_choice_treasures.hits[i]        (0.270 / 0.360 / 0.360)
-#   Anastasya extra stellar  anastasya_extra_stellar.hits[0]      (0.0)
-#   Anastasya Triumph ...... anastasya_triumph.hits[0] (trigger = her swap-in, the
-#                            minimum gap stays in ANASTASYA_TRIUMPH_DELAY above)
+#   Anastasya extra stellar  anastasya_extra_stellar.hits[0]      (0.010)
+#   Anastasya Triumph ...... anastasya_triumph.hits[0]             (0.010, fired by the
+#                            swap-in that is >= ANASTASYA_UNSEAL_DELAY after her seal)
+#   Anastasya C6 Triumph ... anastasya_c6_triumph.hits[0]          (0.010, ally swap-in)
 
 # Faruzan: Pressurized Collapse internal cooldown, measured FROM THE TRIGGER hit.
 FARUZAN_COLLAPSE_CD = 3.0
@@ -117,14 +133,11 @@ class RotationTimeline:
         self.party: Dict[str, dict] = {}
         if party:
             for char, data in party.items():
-                if isinstance(data, int):  # Backward compatibility if someone passes just an int constellation
-                    self.party[char] = {"constellation": data, "weapon": None, "artifact": None, "artifact_set": None}
-                else:
-                    d = dict(data)
-                    artifact = d.get("artifact") or d.get("artifact_set")
-                    d["artifact"] = artifact
-                    d["artifact_set"] = artifact
-                    self.party[char] = d
+                d = dict(data)
+                artifact = d.get("artifact") or d.get("artifact_set")
+                d["artifact"] = artifact
+                d["artifact_set"] = artifact
+                self.party[char] = d
 
         self._prepare_character_stats()
 
@@ -196,7 +209,8 @@ class RotationTimeline:
                 last_time = self.last_used_timestamps[ability_key]
                 cd_expires_at = last_time + c_ability.cooldown
                 if ability_start_global < cd_expires_at:
-                    raise ValueError(f"[COOLDOWN ERROR] {field_sequence.character}'\''s {c_ability.name} on CD until {cd_expires_at:.3f}s")
+                    raise CooldownError(field_sequence.character, c_ability.name,
+                                        cd_expires_at)
 
             if c_ability.cooldown > 0:
                 self.last_used_timestamps[ability_key] = ability_start_global
@@ -230,7 +244,7 @@ class RotationTimeline:
                     "hit_name": hit.name,
                     "ability_name": c_ability.name,
                     "stat_ref": hit.stat_ref,
-                    "multiplier": hit.multiplier,
+                    "motion_value": hit.motion_value,
                     "attack_type": hit.attack_type,
                     # Offset of this hit inside its own ability cast. Lets the
                     # evaluator back-derive the cast time of any hit (used by
@@ -254,37 +268,30 @@ class RotationTimeline:
         return current_time
 
     def add_trial(self, trial: Trial) -> float:
+        """Add every rotation and return the trial duration in seconds.
+
+        A "time" trial is capped at its configured window; a "last_swap" trial ends
+        where the last scheduled sequence swaps out. The trial's own end_time is
+        never modified, so a preset can be run repeatedly with different parties.
+        """
         current_time = 0.0
         for rotation in trial.rotations:
             current_time = self.add_rotation(rotation, start_time=current_time)
-        
-        # If set to last swap, calculate it and write it back to trial.end_time
+
         if trial.end_mode == "last_swap":
             swap_out_times = [
                 ev["global_time"] for ev in self.global_events
                 if ev.get("event_type") == "SWAP_OUT"
             ]
-            if swap_out_times:
-                trial.end_time = max(swap_out_times)
-        
-        # Enforce cutoff using the finalized trial.end_time
-        self.global_events = [
-            ev for ev in self.global_events
-            if ev["global_time"] <= trial.end_time
-        ]
-        return trial.end_time
+            duration = max(swap_out_times) if swap_out_times else current_time
+        else:
+            duration = trial.end_time
 
-    def _cancel_pending_ability_hits(self, character: str, ability_name: str, current_time: float):
-        """Internal helper method to scrub overlapping future hits."""
         self.global_events = [
             ev for ev in self.global_events
-            if not (
-                ev.get("event_type") == "HIT" and
-                ev.get("character") == character and
-                ev.get("ability_name") == ability_name and
-                ev["global_time"] >= current_time
-            )
+            if ev["global_time"] <= duration
         ]
+        return duration
 
     # -----------------------------------------------------------------------
     # Triggered hits (engine-injected procs)
@@ -348,7 +355,7 @@ class RotationTimeline:
             "elem_app": hit.elemental_app if hit.elemental_app else "-",
             "event_type": "HIT",
             "stat_ref": hit.stat_ref,
-            "multiplier": hit.multiplier,
+            "motion_value": hit.motion_value,
             "attack_type": hit.attack_type,
             # Offset inside its own (triggered) ability: "hit_offset == 0" keeps
             # meaning "first hit of this cast" for the set/burst-once rules.
@@ -628,7 +635,7 @@ class RotationTimeline:
                         event["element"] = h.element
                         event["stat_ref"] = h.stat_ref
                         event["attack_type"] = h.attack_type
-                        event["multiplier"] = mv
+                        event["motion_value"] = mv
                         event["burst_variant"] = variant_name
                         event["frostglow_consumed"] = consumed
                     else:
@@ -643,7 +650,7 @@ class RotationTimeline:
                             "hit_name": h.name,
                             "ability_name": "Elemental Burst",
                             "stat_ref": h.stat_ref,
-                            "multiplier": mv,
+                            "motion_value": mv,
                             "attack_type": h.attack_type,
                             "burst_variant": variant_name,
                             "burst_call_id": burst_call_id,
@@ -881,7 +888,7 @@ class RotationTimeline:
                         "hit_name": "Stellar_Swirl_Hit",
                         "ability_name": "Stellar Swirl",
                         "stat_ref": stellar_swirl_hit.stat_ref,
-                        "multiplier": stellar_swirl_hit.multiplier,
+                        "motion_value": stellar_swirl_hit.motion_value,
                         "attack_type": stellar_swirl_hit.attack_type,
                         "reaction": "Stellar Swirl",
                         "swirl_metadata": swirl_meta,

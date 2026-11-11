@@ -18,7 +18,7 @@ class HitDamageContext:
         if isinstance(obj, dict):
             self.category = obj.get("category", "standard")
             self.stat_ref = obj.get("stat_ref", "ATK")
-            self.motion_value = float(obj.get("motion_value", obj.get("multiplier", 0.0)) or 0.0)
+            self.motion_value = float(obj.get("motion_value", 0.0) or 0.0)
             self.element = obj.get("element", "Physical")
             self.attack_type = obj.get("attack_type")
             self.character = obj.get("character")
@@ -30,8 +30,7 @@ class HitDamageContext:
         else:
             self.category = getattr(obj, "category", "standard")
             self.stat_ref = getattr(obj, "stat_ref", "ATK")
-            mv = getattr(obj, "motion_value", getattr(obj, "multiplier", 0.0))
-            self.motion_value = float(mv or 0.0)
+            self.motion_value = float(getattr(obj, "motion_value", 0.0) or 0.0)
             self.element = getattr(obj, "element", "Physical")
             self.attack_type = getattr(obj, "attack_type", None)
             self.character = getattr(obj, "character", None)
@@ -416,8 +415,7 @@ def calculate_stellar_reaction_damage(hit, final_stats, enemy_stats, party_dict=
             contrib_crit_mult_absolute[char_name] = 1.0 + c_dmg
 
         # Contributor pre-share metrics. The quill is NOT folded in here: it is applied
-        # once at the AGGREGATE level, after the contribution weighting (see below;
-        # PENDING in-game verification).
+        # once at the AGGREGATE level, after the contribution weighting (see below).
         q_base = b_val * bonus_mult_c
 
         # non_crit: base with 0% crit (crit factor = 1.0)
@@ -487,9 +485,9 @@ def calculate_stellar_reaction_damage(hit, final_stats, enemy_stats, party_dict=
         # Accumulate probability-weighted score into total expected damage
         expected_damage += prob * scenario_score
 
-    # Quill added POST-contribution (PENDING in-game verification): applied once to the
-    # aggregate. It skips bonus_mult but keeps elevation, res and an expected crit
-    # factor (share-weighted average over the contributors).
+    # Quill added POST-contribution: applied once to the aggregate. It skips
+    # bonus_mult but keeps elevation, res and an expected crit factor (share-weighted
+    # average over the contributors).
     w1 = weights[:n]
     wsum = float(w1.sum()) or 1.0
     exp_crit = float(np.dot(np.array([contrib_crit_mult_average[c] for c in contributors]), w1) / wsum)

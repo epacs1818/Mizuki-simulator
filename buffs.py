@@ -1,8 +1,7 @@
 CONDITIONAL_CONSTANT_BUFFS = {
     # Artifact Buffs
-    # NOTE: Gilded Dreams has no constant buff entry. Its 2pc EM is permanent
-    # (artifacts.py) and its 4pc buff is dynamic/party-composition based, so it
-    # lives in CONDITIONAL_NON_CONSTANT_BUFFS ("Gilded Dreams ATK"/"EM").
+    # Gilded Dreams has no constant entry: its 2pc EM is permanent and its 4pc buff
+    # depends on party composition, so it lives in CONDITIONAL_NON_CONSTANT_BUFFS.
     "Instructor": {
         "em": 120.0,
     },
@@ -62,12 +61,11 @@ CONDITIONAL_CONSTANT_BUFFS = {
         "cryo_shred": 0.20,
         "anemo_shred": 0.20,
     },
-    # NOTE: Odette's "Snow Swan's Dream" (SSD) has no fixed-value entry. It is the
-    # talent-scaled "Odette SSD" descriptor in CONDITIONAL_NON_CONSTANT_BUFFS
-    # (path into skill_scalings), self-only below C4, 20s from her burst cast hit.
-    # C6: while the shadow is on field the OTHERS get +25% elevation_mult and she
-    # gets +45% total (0.25 party + 0.20 personal). Elevation only applies to
-    # STELLAR damage (never stellar reactions).
+    # Odette's "Snow Swan's Dream" (SSD) is talent-scaled, so its value lives in
+    # CONDITIONAL_NON_CONSTANT_BUFFS: self-only below C4, 20s from her burst cast.
+    # C6: while the shadow is on field the OTHERS gain +25% elevation_mult and she
+    # gains +45% total (0.25 party + 0.20 personal). Elevation applies to STELLAR
+    # damage only, never to stellar reactions.
     "Odette C6 self":{
         "elevation_mult": 0.45,
     },
@@ -184,11 +182,8 @@ CONDITIONAL_CONSTANT_BUFFS = {
     },
 
     #WEAPONS
-    # NOTE: these weapon/passive values are kept as a reference table only. A
-    # weapon buff is applied by the engine ONLY once timeline.evaluate_timeline()
-    # emits its state flag (see FLAG_TO_BUFFS). Widsith / TTDS / A Thousand
-    # Floating Dreams / Wandering Evenstar / Breezeborne are not triggered yet and
-    # are tracked in text/Implementation_Backlog.md.
+    # Weapon passives apply only when the timeline emits their state flag (see
+    # stats_calc.FLAG_TO_BUFFS); permanent description stats live in weapons.py.
     "Exaiphanes Blade":{
         "atk_percent": [0.16, 0.20, 0.24, 0.32, 0.40],
     },
@@ -227,9 +222,9 @@ CONDITIONAL_CONSTANT_BUFFS = {
     "Sunny Morning Sleep-In Burst": {
         "em": [32.0, 40.0, 48.0, 56.0, 64.0],
     },
-    # NOTE: A Thousand Floating Dreams has no buff entry. Its description effect is
-    # PERMANENT and party-composition dependent, so it lives in weapons.py
-    # ("party_stats") and is applied by stats_calc.apply_weapon_party_stats().
+    # A Thousand Floating Dreams has no buff entry: its permanent, party-composition
+    # dependent effect lives in weapons.py ("party_stats") and is applied by
+    # stats_calc.apply_weapon_party_stats().
     "Thrilling Tales of Dragon Slayers":{
         "atk_percent": [0.24, 0.30, 0.36, 0.42, 0.48],
     },
@@ -282,8 +277,7 @@ CONDITIONAL_NON_CONSTANT_BUFFS = {
     #
     #   value = min(floor + ratio * max(basis - offset, 0), cap)
     #
-    # No lambdas: a buff that is not reachable from FLAG_TO_BUFFS can no longer
-    # hide behind a closure that silently returns 0.
+    # No lambdas: every value is plain data that evaluate_dynamic_buff() resolves.
     # ------------------------------------------------------------------
     ## Mizuki
     # Skill swirl bonus: talent-scaled % of her FLAT EM -> party stellar_bonus
@@ -421,18 +415,13 @@ CONDITIONAL_NON_CONSTANT_BUFFS = {
 }
 
 # ---------------------------------------------------------------------------
-# DORMANT effects  –  values known, TRIGGER not modelled yet
+# DORMANT effects – values known, trigger not modelled yet
 # ---------------------------------------------------------------------------
-# These entries are intentionally unreachable from stats_calc.FLAG_TO_BUFFS.
-# They are kept because they are the reference table of in-game values, and
-# text/Implementation_Backlog.md tracks what still has to be implemented.
-# smoke_test.py asserts that every OTHER catalogue entry IS reachable, so a dead
-# entry can never hide again.
-DORMANT = set()   # (empty) Odette's C6 elevation is live since the constellation round
+# Entries listed here are deliberately unreachable from stats_calc.FLAG_TO_BUFFS;
+# they keep the in-game values for reference while their trigger is missing.
+DORMANT = set()
 
-# Team-share effects (Sucrose A4, Mizuki VBTD2) are ordinary declarative
-# non-constant buffs now (see CONDITIONAL_NON_CONSTANT_BUFFS), so there is no
-# separate team-share table any more.
+# Team-share effects are ordinary declarative non-constant buffs.
 
 PERMANENT_BUFFS = {
     "Aether": {

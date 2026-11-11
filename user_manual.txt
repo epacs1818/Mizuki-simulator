@@ -1,0 +1,253 @@
+======================================================================
+ YUMEMIZUKI MIZUKI'S ROTATION DAMAGE CALCULATOR - USER MANUAL
+ Version 1.0
+======================================================================
+
+CONTENTS
+  1. What this tool does  
+  2. Tab 1 - Team & Gear Setup
+  3. Tab 2 - Enemy Configuration
+  4. Tab 3 - Rotation Setup
+  5. Tab 4 - Simulation Results & History
+  6. Saving and loading a build
+  7. Troubleshooting
+  8. Assumptions and limitations
+
+----------------------------------------------------------------------
+1. WHAT THIS TOOL DOES
+----------------------------------------------------------------------
+The calculator simulates a full party rotation over time and reports what
+each hit deals, the total damage and the overall DPS. It models every
+character, weapon and artifact set shipped with this version, including
+their triggered effects (extra hits, buff windows, stack decay, cooldowns
+and reaction damage).
+
+The simulation is event based: each ability schedules its hits at fixed
+offsets from the cast, the timeline resolves them in order, and the buffs
+of every hit are recomputed from the state at that moment. Because of that,
+changing a rotation's timings can change the damage of every later hit.
+On cast (or on button press) effects are considered before the first hit of the action.
+
+The abilities hit timings are based on my setup's performance including fps and ping.
+All the timeline data is taken from personal tests on the training dummy.
+The available preset trials take into account my personal timinings as well.
+
+All the calculations made are presented as transparently as possible via the timeline table.
+Any mistakes found can be sent to me, I'll gladly try to solve them.
+
+----------------------------------------------------------------------
+1. WHAT THIS TOOL DOES NOT DO
+----------------------------------------------------------------------
+The calculator does not calculate particle generation and energy recharge
+requirements for the party.
+It does not calculate events based on the distance of the enemy.
+It does not consider the frames of the attacks. It's just a simulation of scheduled hits.
+It does not calculate aoe damage.
+It does not simulate a random trial. All damage values are averages (unless everyone has 100% cr).
+
+3. Quick start
+  1.  Fill the four party slots in Tab 1 and press Confirm party configuration.
+      Artifacts are optional. After you confirm your party, you can check their off field stats.
+  2.  Set the enemy level and resistances in Tab 2 and confirm. Check the enemy card
+  3.  Pick a trial in Tab 3 and press Run Trial Simulation.
+  4.  Read the results in Tab 4.
+
+----------------------------------------------------------------------
+2. TAB 1 - TEAM & GEAR SETUP
+----------------------------------------------------------------------
+Four slots are shown. For each slot choose:
+
+  Character       The character for that slot.
+                  Mizuki/Odette/Anastasya/Aether/Faruzan/Sucrose/Diona
+  Level           60 / 70 / 80 / 90 / 95 / 100.
+                  A4/A4/A5/A6/A7/A8 respectively.
+                  A4 minimum to guarantee all characters' passives.
+  Constellation   C0/C1/C2/C3/C4/C5/C6.
+                  C3 and C5 are currently decorative only.
+                  Unavailable constellations are not implemented in the program.
+  Weapon          Only weapons that character can equip are listed.
+  Refinement      R1/R2/R3/R4/R5.
+  Talent Levels   Normal / Skill / Burst, e.g. 1/13/13.
+                  Includes C3 and C5 bonuses.
+
+Artifact set and pieces
+  Choose the set, then set each piece's main stat, rarity and up to four
+  substats. Flower and Feather have fixed main stats.
+
+Substat standard (carries only)
+  Manual                    You enter mains and substats yourself.
+  100% RV (Crit Value)      The best-case crit-value distribution for that
+                            character; mains and substats are generated.
+  KQM Standards (40 rolls)  A more forgiving 40-roll standard. https://compendium.keqingmains.com/
+
+  The two standards lock the main stats AND the substats, and model crit as
+  one Crit Value line. They are only offered for the characters that have a
+  standard defined.
+
+  Currently ER requirements are not taken into consideration in neither 100% RV or KQM Standards mode.
+
+Press CONFIRM PARTY CONFIGURATION when the four slots are ready. The stat
+cards appear under the section header and stay visible while you edit the
+slots and artifacts below.
+
+If you change gear, substats or the substat standard after confirming, the
+app warns you and hides the cards until you confirm again. Running a trial
+always uses the current inputs, confirmed or not.
+
+----------------------------------------------------------------------
+4. TAB 2 - ENEMY CONFIGURATION
+----------------------------------------------------------------------
+Set the enemy level and its resistance for each element (Pyro, Cryo, Hydro,
+Electro, Anemo, Geo, Dendro and Physical), then press CONFIRM ENEMY
+CONFIGURATION. Resistance shred from buffs and artifacts is applied on top
+of these values when damage is calculated.
+
+----------------------------------------------------------------------
+5. TAB 3 - ROTATION SETUP
+----------------------------------------------------------------------
+5.1 Running a trial
+  Pick a trial from the dropdown. Preset trials only appear when the party
+  is exactly the team they were written for; custom trials always appear.
+  The TRIAL BREAKDOWN expander shows the description, the end mode, the
+  trial duration, and every rotation with its field time and steps:
+
+      Rotation #1: Standard Mizuki-Faruzan Loop [19.702s] (Repeated 6x)
+        Step 1: Aether EN1 (Aether - 1.23s field time)
+        Step 2: Faruzan Q (Faruzan - 1.41s field time)
+        ...
+
+  END MODE
+    Time       The trial stops at the duration you set.
+    Last swap  The trial ends when the last scheduled character swaps out.
+               The duration shown is the sum of every field time.
+
+  Press RUN TRIAL SIMULATION. Each run is stored in the history of Tab 4.
+  If a rotation asks for an ability before its cooldown is over, the run is
+  stopped with a Cooldown Error instead of producing results.
+
+5.2 Field sequences
+  A field sequence is one character's visit: which abilities they use, when
+  each one starts (seconds after the swap-in) and how long they stay on
+  field. Build one in "Create Custom Field Sequence":
+    - enter the name, the character and the field (swap-out) time;
+    - pick an ability and its insertion time, then press "Add";
+    - repeat for every ability of the visit, then Save Field Sequence.
+
+  Only abilities of characters in the party are offered. Engine-injected
+  procs (extra hits, triggered abilities) can never be added by hand: they
+  fire on their own conditions.
+
+5.3 Rotations
+  A rotation is an ordered list of field sequences plus a repetition count.
+  In "Create Custom Rotation" add sequences one by one. The same sequence
+  can be added more than once, which is useful for patterns such as "burst
+  every other loop": put both variants in one rotation and repeat it.
+  Use the arrows to reorder and the X to remove an entry, then Save
+  Rotation.
+
+5.4 Trials
+  A trial combines rotations and defines when it ends. In the trial
+  assembly area set the name and description, choose the end mode (Time or
+  Last swap) and, for Time, the duration. Add rotations with their
+  repetitions using "Add Rotation to Trial", then press Create Trial.
+
+  "Load selected trial into editor" copies the selected trial's rotations
+  into the editor so they can be tweaked and re-used, including the shipped
+  presets.
+
+----------------------------------------------------------------------
+6. TAB 4 - SIMULATION RESULTS & HISTORY
+----------------------------------------------------------------------
+Each run is stored with the party, gear, enemy, trial and custom setups it
+used. The newest run is expanded first. An entry can be renamed, deleted
+and exported as a build file.
+
+  Total Damage    Sum of every hit's average damage in the trial.
+  Overall DPS     Total Damage divided by the trial duration.
+  Trial Duration  The duration used for the run: the configured window for
+                  a Time trial, the sum of the field times for Last swap.
+
+  Charts show the damage by element, by hit type and by character
+  (reactions excluded), plus a per-second damage bar chart.
+
+  ROTATION TIMELINE TABLE
+    One row per event: time, active character, owner, action, element
+    application, aura, reaction and damage. Tick "Show detailed columns"
+    for the full audit view (buff states, stacks, multipliers, ...).
+
+----------------------------------------------------------------------
+7. SAVING AND LOADING A BUILD
+----------------------------------------------------------------------
+Team & Gear Setup -> Save / Load Build
+
+  Export current build (.json)
+      Writes the party, gear (mains and substats), enemy, custom field
+      sequences, rotations and trials, and the selected trial.
+
+  Upload a previously saved build JSON file
+      Restores the file and keeps every input editable. A file is applied
+      only once; upload it again to start over from it.
+
+  User manual (.txt)
+      Downloads this file.
+
+The same export is available per run in Tab 4 ("Export Run"), carrying the
+run's own party, gear and trial.
+
+----------------------------------------------------------------------
+8. TROUBLESHOOTING
+----------------------------------------------------------------------
+"Please configure and create your party first..."
+    Fill all four slots in Tab 1 and press Confirm party configuration.
+
+"Please confirm your enemy configuration first..."
+    Press Confirm enemy configuration in Tab 2.
+
+"Gear, substats or the substat standard changed..."
+    The confirmed party no longer matches the inputs. Press Confirm party
+    configuration to rebuild it.
+
+"No trial is available for this team."
+    A preset trial is tied to one specific team. Build a custom trial for
+    any other party.
+
+"Cooldown Error! <character>'s '<ability>' is on CD until <t>s..."
+    The rotation asks for an ability before its cooldown ends. Move the cast
+    later or remove the extra cast, then run again.
+
+"Field sequence '...': ability '...' no longer exists..."
+    The imported build referenced an ability that is not part of this
+    version; that call was skipped.
+
+A trial ends with little or no damage:
+    Check the Trial Breakdown. A Time trial can end before the first cast if
+    the duration is shorter than the rotation.
+
+----------------------------------------------------------------------
+9. ASSUMPTIONS AND LIMITATIONS
+----------------------------------------------------------------------
+- Rotations are idealized: abilities start exactly at the times you enter
+  and every hit resolves at its fixed offset from the cast.
+- Hits keep resolving after a character swaps out (for example a summon
+  that stays on field). Nothing is cancelled by a swap.
+- Energy and particles are not simulated. Energy Recharge is only a stat.
+- Constellation levels that only raise talent levels (for example C3 and C5)
+  are not applied automatically; enter the final talent levels yourself.
+- The enemy is a single target with fixed resistances and the damage model
+  of this version.
+- Damage is reported as an average (crit rate x crit damage expected value).
+
+======================================================================
+
+10. Next Implementations
+
+Keep updating tsaritsa's nerfs/buffs.
+Add the stellar swirl buff.
+Fix sacrificial fragments cooldown.
+Implement data validation for artifacts' substats.
+Find the exact rounding the game engine uses for damage.
+Display artifacts individual CV.
+Apply aura for different elements other that cryo.
+
+Odette and Lumine are not possible rn. I don't have them and I need help to implement them,
+with precise data from someone.

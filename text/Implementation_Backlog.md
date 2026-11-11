@@ -5,8 +5,8 @@ been verified against in-game records. The `New test` calibration set is the
 only fully verified configuration so far; everything else is a stub that still
 needs a manual pass.
 
-Legend: ✔ = verified (the `New test` set or an automated invariant in
-`smoke_test.py`) | ◻ = implemented but not yet verified
+Legend: ✔ = verified (the `New test` set or an automated engine check) | ◻ = implemented
+but not yet verified
 
 ## Characters
 
@@ -63,7 +63,7 @@ Legend: ✔ = verified (the `New test` set or an automated invariant in
 | Scarlet Proof | ✔ (on-field swirl → holder CR + stellar 10s) |
 | New Tsaritsa set | ✔ (stacks 0-2, on-field decay, Cryo CR + stellar CR) |
 
-## Effects (buff_registry.py)
+## Effects
 
 Buff columns are gated by owner: a column only appears when the character
 (and constellation), weapon, artifact set or resonance that provides it is
@@ -119,7 +119,7 @@ present in the party.
 | Tsaritsa Stacks / Cryo CR / Stellar CR | Artifact | New Tsaritsa set | equipped | ✔ |
 | Cryo Resonance CR | Team | Cryo Resonance | 2+ Cryo + pre-existing Cryo aura | ✔ |
 
-## Verified buff semantics (asserted by smoke_test.py)
+## Verified buff semantics
 
 | Effect | Invariant |
 | --- | --- |
@@ -129,79 +129,6 @@ present in the party.
 | Mizuki C6-1 | +10% stellar CR / +20% stellar CD party-wide while DDS is up (C6 only) |
 | Mizuki C6-2 | +0.04% CR / +0.16% CD per FLAT EM above 500, capped 20% / 80% at 1000 |
 | Flat EM basis | base + weapon + artifacts + flat buffs; % shares (VBTD2, Sucrose A4) never feed it |
-
-## Buff architecture (buffs.py + stats_calc.py)
-
-`buffs.py` is a pure DATA catalogue; all arithmetic lives in `stats_calc.py`.
-Four tables, one dispatch table:
-
-| Table | Contents | Resolution |
-| --- | --- | --- |
-| `CONDITIONAL_CONSTANT_BUFFS` | flat stat values (optionally `[R1..R5]`) | added as-is |
-| `CONDITIONAL_NON_CONSTANT_BUFFS` | declarative dynamic effects | `evaluate_dynamic_buff()` |
-| `STACK_BUFFS` | per-stack values | value x stack count |
-| `DORMANT` | effects with known values but no modelled trigger | never resolved |
-| `stats_calc.FLAG_TO_BUFFS` | timeline flag -> effect descriptors | the single dispatch point |
-
-Dynamic effects never carry a lambda. Each declares a **basis**:
-
-| basis | meaning | example |
-| --- | --- | --- |
-| `em` | caster's initial EM (base + weapon + artifacts + permanent) | Mizuki C2 elemental bonus |
-| `flat_em` | caster's FLAT EM basis (never % shares) | Mizuki swirl bonus, VBTD2, C6-2, Sucrose A4 |
-| `atk` | caster's resolved ATK from the initial stats | Aether/Odette A4 + jubilee, Odette mv_mult |
-| `talent` | the value IS a talent scaling from `skill_scalings` | Odette burst, Faruzan C6 anemo bonus |
-
-`value = min(floor + ratio * max(basis - offset, 0), cap)`, where `ratio` may be a
-refinement list or be derived from a talent (`ratio_from_talent`).
-Talent levels are read once by `get_talent_level()` (N/S/B config), not parsed
-per character.
-
-`smoke_test.py` asserts the catalogue is consistent: every entry is either
-reachable from `FLAG_TO_BUFFS` or listed in `DORMANT`, every dispatch key exists,
-and every dynamic descriptor uses a known basis. A dead entry can no longer hide.
-
-### Weapons
-
-Weapons split in exactly two halves:
-
-* **Permanent** — base ATK, the secondary stat, and any *description* stat that is
-  always on (refinement-keyed values merged into the secondary, e.g.
-  `Starcaller's Watch` EM = 265 + [100…200]). These live in `weapons.py` and are
-  folded into `initial_stats`, so they show up in the card stats.
-* **Buffs** — anything conditional (Widsith roll, Jade toggle, Sunny's procs).
-  One timeline flag per effect, values in `buffs.py`, dispatch in `FLAG_TO_BUFFS`.
-
-Weapon buffs are holder-only by construction: the descriptor's caster is the
-sentinel `"holder:<Weapon Name>"`, which resolves to the party member equipping
-it (`None` if nobody does, which makes every target check fail). A single flag can
-therefore serve several value variants — The Widsith's two variants share
-`widsith_state` and the unequipped one is skipped automatically.
-
-Weapon labels go through `weapons.resolve_weapon_key()`, which strips only a
-trailing `(R<digit>)`; a weapon's own parentheses ("The Widsith (Average)") are
-kept, and `build_initial_stats` no longer mis-parses those names.
-
-Per-element DMG bonuses (e.g. Widsith's elemental third) are written out element
-by element and are **standard-damage only** — they never enter stellar or
-stellar-reaction damage, matching Sucrose C6's `cryo_bonus`.
-
-Three phase-2 capabilities worth knowing about:
-
-* **Party-composition permanent stats** — a weapon can declare a `party_stats`
-  block in `weapons.py` (`em_per_other_element`, `elem_bonus_per_same`,
-  `em_to_others`). `stats_calc.apply_weapon_party_stats()` applies it to the whole
-  `initial_stats` map (holder + allies). It is **idempotent** (removes its previous
-  delta first), so the UI (card stats) and the timeline can both call it.
-* **Basis-scaled stacks** — a `"type": "stack"` descriptor whose key lives in
-  `CONDITIONAL_NON_CONSTANT_BUFFS` instead of `STACK_BUFFS` resolves the dynamic
-  value once and multiplies it by the stack count (Wandering Evenstar).
-* **Dynamic-target and time-based windows** — the timeline can track *who* a buff
-  belongs to (Thrilling Tales: the next character to take the field) and derive a
-  stack count purely from `t` (Wandering Evenstar's 10s/12s cycle).
-
-Weapon values are always read with the **caster's** refinement, so an R5 weapon
-buffs an R1 ally with its R5 numbers.
 
 ## Stat vocabulary (what feeds what)
 
@@ -228,36 +155,30 @@ Rare/extra stats are **kept in the backend**: they live in the character's
 **not** printed on the character cards (a card only shows HP/ATK/DEF/EM,
 CR or CV + CD, ER and the element DMG lines).
 
-## Dormant passives (values kept in buffs.py `DORMANT`, triggers not modelled yet)
+## Dormant passives (values known, trigger not modelled yet)
 
-These have no timeline flag, so the engine can never apply them (and can never
-advertise them). Re-enabling one means adding, together: (a) its timeline state
-flag in `evaluate_timeline()` and (b) its `FLAG_TO_BUFFS` descriptor — and
-removing it from `buffs.DORMANT`.
+These effects have no modelled trigger yet, so the engine never applies them.
+Re-enabling one means adding its trigger to the timeline and its values to the
+buff dispatch.
 
 | Effect | Kind | Trigger that is still missing |
 | --- | --- | --- |
 | *(none)* | - | - |
 
 (Diona C6 left this list in the Diona round, and Odette C6 (self/party) left it in the
-Odette constellation round: `odette_shadow_state` + its `FLAG_TO_BUFFS` descriptors are
-in place, and `buffs.DORMANT` is empty again.)
+Odette constellation round.)
 
 ## Next verification targets
 
 Weapons (phases 1-3), artifacts (phase 1), Mizuki C2/C6, Sucrose, Cryo Resonance,
-Odette's Snow Swan's Dream and her C1/C2/C4/C6 effects are all implemented and covered
-by `smoke_test.py`. Remaining work:
+Odette's Snow Swan's Dream and her C1/C2/C4/C6 effects are all implemented and
+checked. Remaining work:
 
-1. Odette C3/C5 are talent-level-only by design (the user types the levels); nothing
-   else to implement. C1/C2/C4/C6 are asserted end-to-end in
-   `_run_odette_constellation_check()`.
+1. Odette C3/C5 are talent-level-only by design (the user types the levels).
 2. Sucrose's burst absorption stays hardcoded to `Cryo` **by design** for the
    foreseeable future (no work planned).
-3. Anastasya: C3/C5 are talent-level-only (user-entered). Accolades, the sealed/shared
-   state, Love and both Triumph procs are asserted end-to-end in
-   `_run_anastasya_constellation_check()`; the seal→unseal rule is
-   `ANASTASYA_UNSEAL_DELAY = 15.0` in `timeline.py`.
+3. Anastasya C3/C5 are talent-level-only (user-entered); the seal → unseal rule is
+   15s after the seal.
 
 ## Anastasya round (rotation with Odette QE)
 
@@ -300,17 +221,9 @@ The Anastasya trial totals ~~4,904,232.3~~ → **4,460,586.2** average damage ov
   +0.010s. See "Anastasya Accolades & constellation round".
 
 Side fixes from these rounds:
-* `Aether_jubilee` / `Odette_jubilee` (and Anastasya's jubilee + A4) are gated with
-  `require_party`, so a character that is **not in the party** can no longer apply
-  their passive. Before this, a party without Aether/Odette still received a
-  jubilee computed from the recipient's own ATK.
-* Editor catalogues are generated from `abilities.py`
-  (`FIELD_SEQUENCE_REGISTRY` / `ABILITY_REGISTRY` / `field_sequences_for()` /
-  `abilities_for()`), so the UI offers every field sequence and every ability of the
-  characters that are actually in the party. Engine-injected procs (Triumph, the
-  extra stellar beat) stay registered but are never offered by hand.
-* Custom config export/import round-trips abilities through the registry
-  (`ability_name` + `ability_character`) instead of a hardcoded name map.
+* Aether's, Odette's and Anastasya's jubilee passives (and Anastasya's A4) only apply
+  while their owner is in the party. Before this, a party without them still received
+  a jubilee computed from the recipient's own ATK.
 
 ## Odette constellation round
 
@@ -333,25 +246,10 @@ hit already has the shred / elevation / SSD it started.
 | C4 | SSD is shared with the OTHERS at 50% (`"multiplier": 0.5`); ANY party `STELLAR_DMG` hit triggers `odette_c4_stellar_hit` (bare Hit, 99% ATK, +0.010s) with a 3.5s CD from the trigger | `buffs.py`, `stats_calc.py`, `timeline.py` |
 | C6 | she keeps her 6 stacks off-field while the party still ramps at 2/s; the shadow grants +0.25 elevation to the OTHERS and +0.45 to her (0.25 party + 0.20 personal) | `buffs.py`, `stats_calc.py`, `timeline.py` |
 
-Implementation notes:
-
-* The old C1 **ability variant is gone**: `VARIANT_ABILITY_NAMES` is back to
-  `{"Elemental Burst"}`, `odette_recast_c1` was deleted and the recast is identical at
-  every constellation. C1 is now a TRIGGERED hit like Mizuki's nukes (bare `Hit`s, never
-  in `ABILITY_REGISTRY`).
-* `_insert_triggered_hit_chrono()` was added because C1 and C4 can both land at
-  `trigger + 0.010s`: it scans forward for the first slot that keeps the event list
-  chronological instead of assuming `i + 1`.
-* `evaluate_dynamic_buff()` gained a generic `multiplier` (default 1.0) applied to every
-  basis, which is how the C4 50% share is expressed.
-* `buffs.DORMANT` is empty again; `smoke_test._run_odette_constellation_check()` pins
-  every value above (C0/C1/C2/C3/C4/C6 timelines).
-
 **Side effect to be aware of:** the retimed `OdetteQE` (recast 2.250, swap-out 3.451)
 moved her Cryo applications out of the 3s life of Anastasya's level-2 Stellar Vortex, so
 the Anastasya preset no longer detonates one early. The A4 "spawn + 3 further swirls"
-rule is now asserted directly on `StellarVortex` (plus on any early detonation the preset
-still produces), so the invariant no longer depends on rotation spacing.
+rule is verified independently of the rotation spacing.
 
 ## Anastasya Accolades & constellation round
 
@@ -386,20 +284,6 @@ no window (`always_on`, C2+). At C6 Love also gives another `0.10 elevation_mult
 Love is up fires `anastasya_c6_triumph` (2.5× the talent-scaled Triumph MV —
 835 vs 334 base — credited to her, 15s per-character CD, so up to 2 per Love window).
 
-Implementation notes:
-
-* New generic gates in `resolve_active_buffs()`: `max_constellation` (mirror of the
-  existing `min_constellation`, so the C1–C3 and C4+ tiers replace each other) and
-  `include_elements` (mirror of `exclude_elements`, so Cryo recipients get ATK% and
-  everyone else gets EM).
-* `buffs.py` keeps the explicit tier entries (Acclades Shared/Sealed C0/C1/C4 + the
-  ATK/EM variants) — chosen over per-constellation value lists so every number can be
-  read straight off the table above.
-* `anastasya_a1_state` → `anastasya_accolades_state`; the registry shows
-  **Anastasya Accolades**, **Anastasya Sealed** (the effective shared state, so it is
-  also ON during the 8s linger) and **Anastasya Love** (C2+). The C3/C5 constellations
-  change nothing (talent levels only).
-
 ## Calibration baseline (after the Anastasya Accolades round)
 
 The standard 30s trial (DEFAULT_PARTY, Mizuki C0/C1/C2/C6):
@@ -417,89 +301,6 @@ part of every loop — that is the +44% at C1. C2 adds Love (0.60 stellar CD + 0
 elevation), C4 replaces the 300% tier with 430%, and C6 adds the 0.10 elevation plus the
 C6 Triumph procs (18 in the 6-loop preset).
 
-
-## Save / load round (`build_io.py`, cards, results shortcut)
-
-The UI used to export only *cooked* party data (`initial_stats` + `card_stats`), so a
-saved file could not reproduce a build: the artifact inputs came back empty, the
-artifact substats were not in the file at all, and because the uploader kept the
-file alive the importer re-applied it on **every rerun**, silently reverting every
-edit made after loading.
-
-New `build_io.py` owns the file format (`SCHEMA_VERSION = "2.0"`). It imports no
-Streamlit and takes any mutable mapping, so it is unit-testable:
-
-| function | role |
-| --- | --- |
-| `collect_build_document(state)` | UI state -> JSON-ready document |
-| `apply_build_document(doc, state, catalogue)` | document -> widget state (+ warnings) |
-| `build_party_from_document(doc)` | document -> `my_party` (initial + card stats) |
-| `assemble_party(slots)` | slot specs -> `my_party` (shared with the Confirm button) |
-| `slot_stats_from_pieces(...)` | pieces -> stat pools (the old inline confirm-button math) |
-| `load_trial_into_editor(trial, state)` | make any trial (preset or imported) editable |
-| `parse_document` / `document_to_json` | JSON I/O, upgrades schema 1.0 files |
-
-Document shape: `party` is a **list of slots** carrying the raw gear
-(`pieces[Flower].main_stat`, `.rarity`, `.substats[{stat, value}]`), plus `enemy`,
-`selected_trial`, `custom_field_sequences`, `custom_rotations` and `custom_trials`.
-Each rotation embeds its full field-sequence definitions, so a file stands alone
-while abilities are still re-resolved by name (numbers follow `abilities.py`).
-
-Rules the importer keeps:
-
-* It writes the **widget keys** (`char_*`, `level_*`, `const_*`, `weapon_*`, `ref_*`,
-  `talents_*`, `art_set_*`, `std_*`, `main_*`, `rarity_*`/`rarity_locked_*`,
-  `sub_type_*`, `sub_val_*`, `input_enemy_lv`, `input_<elem>_res`), not just the
-  finished party, so every input shows the imported build and stays editable.
-* Every value is validated against the UI's own tables (`BUILD_CATALOGUE`) and
-  replaced with a warning when it no longer exists.
-* Slots the file does not fill are reset, so loading a 2-character build over a
-  4-character team cannot leave stale characters behind.
-* `last_team_signature` / `last_enemy_signature` are re-seeded, so the "settings
-  changed" guards do not immediately un-confirm the imported build.
-* The uploaded bytes are hashed: a file is applied **once** and the panel then shows
-  "loaded, edit freely — re-upload to reset". Removing the file re-arms the importer.
-
-UI changes in the same round:
-
-* Character cards moved from the bottom of the tab to directly under
-  *"1. Team, Characters and Weapon Configuration"*. They are written into an empty
-  `st.container()` placeholder created there and filled at the end of the tab, so
-  they always reflect the party the Confirm button just built (no rerun needed).
-  Card height dropped from a fixed `height=1000` box with a full-width image to a
-  74px portrait + identity block + two-column stat grid.
-* Enemy *Target Overview* card shrunk the same way (88px thumbnail + 2-column
-  resistance grid).
-* Completing a run now shows **"Trial simulation complete!"** with a
-  `📊 View Simulation Results` button (persistent, via `trial_finished`) instead of a
-  message pointing at a tab.
-* Trial editor gained `⤵ Load selected trial into editor`: it copies the trial's
-  rotations (and any non-preset sequences) into the custom pools, pre-fills the
-  rotation queue and queues the trial name/description (`editor_prefill`, applied at
-  the top of the tab because widget keys cannot be written after instantiation).
-* Every history entry now stores `snapshot_build`, so the per-run export writes the
-  same 2.0 document (older entries fall back to `legacy_build_document`).
-
-Bugs found while verifying (both fixed):
-
-1. The `validate_talents` splice had dropped its `return True, None, levels`, which
-   made *Confirm party configuration* raise `TypeError: cannot unpack non-iterable
-   NoneType`. Caught by running the app headless with `streamlit.testing.v1.AppTest`.
-2. Importing a smaller party left the trailing slots holding the old characters
-   (which also tripped the "character already picked in another slot" guard).
-
-`smoke_test.py` now asserts the round trip: substats in the file, widget state
-identical after re-apply, rebuilt `initial_stats` equal to `build_initial_stats`,
-enemy + trial restored, unused slots cleared, schema 1.0 files still loading, and a
-source-level check that the widget-key names in `streamlit_app.py` still match the
-ones the importer writes. A headless AppTest run confirms the real load path
-(`char_1=C1 / Sacrificial Fragments R4 / talents 6/10/10`, Sands `EM` + substats
-`EM 40` / `Crit Rate% 3.9`, enemy `105 / 20% / 15%`, trailing slots
-`Select Character`) with **no exceptions**.
-
-Engine untouched: `DEFAULT_PARTY` baseline stays
-1064651.5 / 1211525.5 / 1273564.4 / 1476591.7 and the Anastasya trial stays at
-4,904,232.3.
 
 ## RV / KQM crit model + trigger-ordering round
 
@@ -555,12 +356,6 @@ insertions shift by one hit). Per-hit differences are exactly the triggering hit
 -651, ...). Mizuki's C1 mini-nuke moves with the swirl that empowers it, because
 `c1_debuff_state` is also read pre-application now.
 
-### UI
-
-The timeline table gained a **CV** column; RV rows print `-` for `CR%` / `CD%`
-(they are storage, not stats, in that model) and the CV the damage formula
-actually uses. `timeline` stores `rv_mode` on every damage event for this.
-
 ### `Test Aether` preset
 
 `required_party` was `MIZUKI_SACFRAG_TEAM` although the rotation only plays
@@ -577,50 +372,6 @@ Aether, which tripped the preset-gating check; it is now `["Aether"]`.
 * The trigger-ordering change is applied to **all** windows on the assumption
   that they behave the same way in game (the user's call). Per-effect in-game
   verification is still pending — see below.
-
-### Why it STILL looked broken after the engine fix (widget state ≠ confirmed party)
-
-The engine fix was correct but unreachable from the UI. The trial runner used
-`st.session_state["my_party"]` verbatim:
-
-```python
-party = st.session_state.get("my_party", {})          # whatever was CONFIRMED
-timeline = RotationTimeline(party=party, ...)
-```
-
-while the "settings changed" guard only hashed `character / level / constellation /
-weapon / refinement / talents / artifact SET`. The **substat standard and every gear
-input (mains, rarity, substats) were missing from that signature**, so:
-
-1. confirm the party (Aether = Manual),
-2. switch the radio to *100% RV* → nothing invalidates, the cards keep showing CR/CD,
-3. run → still the old manual party → `1 + CR*CD` = 2.178,
-4. export → `collect_build_document()` snapshots the **widgets**, so the file honestly
-   says `"substat_standard": "100% RV (Crit Value)"` even though the run never used it.
-
-That is why the exported test looked right while the numbers were not.
-
-Fixes (all in `streamlit_app.py` unless noted):
-
-* **Run-time rebuild**: `Run Trial Simulation` now rebuilds the party from the current
-  widgets before simulating —
-  `assemble_party([collect_slot(st.session_state, n) for n in 1..4])` — and stores it
-  back. A stale party is no longer possible, even in a long-lived session.
-* `build_io.assemble_party` accepts `substat_standard` (the key `collect_slot` emits)
-  as an alias of `standard_mode`; before this the widget path silently meant "Manual".
-* **Complete change signature**: the standard and a normalized gear tuple
-  (`main_stat`, `rarity`, `substats` per piece) are part of it, so changing them now
-  invalidates the confirmation, shows *"Gear, substats or the substat standard
-  changed…"* and hides the run button until the party is rebuilt.
-* **Visible model**: character cards print `Crit model: 100% RV` (or `Manual (CR / CD)`),
-  and each run stores `entry["standards"]` (`party_rv_summary()`), rendered as
-  **Crit Model:** in the results header, so an old manual run can never be mistaken for
-  an RV/KQM one.
-
-Verified headlessly (`streamlit.testing.v1.AppTest`) on the real app: confirming with
-`std_2 = 100% RV` gives `my_party["Aether"]["rv_mode"] is True`; flipping the radio to
-Manual without confirming sets `party_created = False`, shows the warning and removes
-the run button; re-confirming gives `standard_mode = "Manual"`, `rv_mode = False`.
 
 ### Aura column = pre-hit state
 
@@ -677,43 +428,6 @@ in `text/How_to_add_hits.txt` so the next one is mechanical.
 duplicate shells, so `"Mizuki E (Sac Frag Proc)"` / `"Mizuki E (Pullout)"` keep
 working and `"Mizuki E (2 nukes)"`, `"Mizuki E (3 nukes)"`, `"Mizuki Q"` were added.
 
-### Bugs found while validating (all fixed)
-
-1. `abilities.py` did not import: two `add_ability()` calls referenced a variable that
-   did not exist (`mizuki_2`), and two sequences were bound to `mizuiki_...`
-   (typo). Any of these makes the whole app fail at import, not just the new hits.
-2. Stale imports in `presets.py` (`mizuki_skill`, `mizuki_sacfrag_skill`),
-   `smoke_test.py` (`mizuki_skill`) and `streamlit_app.py`
-   (`mizuki_sacfrag_fill`, `mizuki_burstless_pull_out` - unused, dropped).
-3. The burst cast was named `"Cast"`, which the timeline reads as "Mizuki enters
-   Dreamdrifter" (`hit_name == "Cast"`). Renamed to `"Burst_Cast"`; the burst no
-   longer touches DDS, the C1 chain or the VBTD quill.
-4. The burst hits were tagged `AttackType.SKILL`, so they would have used
-   skill_bonus, armed Tenacity and skipped Noblesse. Now `AttackType.BURST`.
-5. `smoke_test`'s Starsealed check filtered `ability_name == "Mizuki Skill"`, which
-   the rename broke; it now compares against `mizuki_skill.name`.
-
-### Renames and backwards compatibility
-
-`SacFragFill` -> "Skill Pullout 1 Nuke", `BurstlessPullOut` -> "Skill Pullout 4
-Nukes", "Mizuki Skill" -> "Mizuki Skill 13 Ticks", "Mizuki Skill (SacFrag)" ->
-"Mizuki Skill 2 Ticks". `LEGACY_SEQUENCE_NAMES` / `LEGACY_ABILITY_NAMES` in
-`abilities.py` translate the old names in `build_io`, so builds and trials exported
-before the rename still load (including `New test/*.json`).
-
-### New regression checks (`smoke_test.py`)
-
-* **hit catalogue**: no empty field sequence (a lost `add_ability()`), every
-  `scaling_key` resolves in `skill_scalings`, no zero motion values, no duplicate
-  display names (variant pairs whitelisted in `VARIANT_ABILITY_NAMES`), and the list
-  of sequences whose field ends before their last hit.
-* **Mizuki burst**: exactly 9 hits, cast named `Burst_Cast`, all `AttackType.BURST`,
-  the field produces 9 engine hits, and none of them sets `dreamdrifter_state` or
-  picks up quill damage.
-
-Baselines did not move: the standard 30 s trial is still **1,266,300.5** (the shared
-sequences cast at 0.301 s instead of 0.300 s, which is invisible at 0.1 dmg).
-
 ### Known limitation (documented in the guide)
 
 Cooldowns are keyed on `(character, ability name)`, so the four skill variants of the
@@ -725,83 +439,7 @@ the Sac-Frag proc variant having `cooldown = 0`.
 
 ---
 
-## Architecture cleanup: field sequences now live in `presets.py`
-
-Pure move, no behaviour change (verified below). Before this, sequences were defined in
-`abilities.py` *and* re-declared in `presets.py`, so "where do I add a hit" had two
-answers and two definitions of the same name could drift apart.
-
-### New split
-
-| file | owns | registry |
-| --- | --- | --- |
-| `abilities.py` | `Ability` objects (hits, motion values, CD, attack type) - character data | `ABILITY_REGISTRY`, `abilities_for()` |
-| `presets.py` | `FieldSequence` objects (cast order + field time), rotations, trials | `FIELD_SEQUENCE_REGISTRY`, `field_sequences_for()` |
-| build JSON | user-made sequences / rotations / trials | none (payloads saved inline) |
-
-`abilities.py` keeps `configure_field_sequence_talents()` and `update_ability_talent_level()`
-because `timeline.py` imports them and they only manipulate `Ability` data.
-
-### What actually moved
-
-All 18 `FieldSequence` definitions moved verbatim, plus `FIELD_SEQUENCE_REGISTRY`,
-`field_sequences_for()` and `LEGACY_SEQUENCE_NAMES`. Import sites updated:
-`build_io` (registry + legacy sequence names now from `presets`), `streamlit_app`
-(`field_sequences_for` from `presets`; four unused sequence imports dropped),
-`smoke_test` (`aether_en1` / `odette_qe` / `sucrose_eq` / `sucrose_e` from `presets`,
-catalogue checks read both registries).
-
-### The duplicate objects are gone
-
-Five sequences existed twice with the same name and *identical* contents
-(`AetherEN1`, `AetherCQ`, `AetherECQ`, `FaruzanQSwap`, `OdetteEE`): the rotations used the
-`presets` copy while the editor offered the `abilities` copy. There is now exactly one
-object per name. Before deleting the shells I compared both versions - name, character,
-`swap_out_time` and every `(start_time, ability)` call were identical, so consolidation
-could not change a number.
-
-### Proof it is a pure move
-
-- Registry dump before/after: identical (same order, same 18 names, same `swap_out_time`,
-  same call lists).
-* `smoke_test` output diff: only four lines changed - the assertions that had gone stale
-  when "Mizuki Burst" was replaced by "Burst Pullout 4 Nukes". They now probe the burst
-  ability directly (a local burst-only `FieldSequence`) and expect the current
-  `STANDARD_FIELD_SEQUENCES` names. Every damage number, aura, stack and total in the run
-  is byte-identical, including `1,266,300.5` (30 s trial).
-* The Anastasya failure that was open at the time (`burst stellar_bonus ... 0.354,
-  expected 0.575`) is **fixed**: the nerf is now pinned deliberately in the smoke test.
-
-`text/How_to_add_hits.txt` was updated with the module map so the next hit register only
-needs one file per thing.
-
-### Follow-ups (optional)
-
-1. `smoke_test`: add the guards suggested earlier - "no two distinct sequence objects share
-   a name" (identity based, so imports do not count) and "every preset key resolves to a
-   registered sequence". The first one is already in the hit-catalogue check.
-2. `presets.describe_rotation(key)`: dump each step (name, character, swap_out, calls,
-   owning module) to debug a failing preset trial in one command.
-
----
-
 ## Triggered-hit round: Diona, Faruzan's trigger CD and the standardized delay
-
-### The convention (one rule, one helper)
-
-> A triggered hit is scheduled at `trigger_time + hit.relative_delay`, ALWAYS read from
-> the ability definition in `abilities.py`. The FIRST hit's `relative_delay` **is** the
-> trigger delay, `0.0` is an explicit value (so it can be turned into a delay later
-> without touching the engine), and the engine never hardcodes a trigger delay.
-
-Implemented once, in `timeline.RotationTimeline`:
-
-* `_resolved_triggered_ability(ability, character)` - deep copy + talent level from the
-  party, so a triggered hit's MV stays data-driven (`scaling_key` -> skill_scalings).
-* `_triggered_hit_event()` / `_insert_triggered_hit()` - build/insert the event at
-  `trigger + relative_delay`, with `hit_offset` = that delay, the trigger's audit flags
-  inherited (minus `quill_damage`, `c1_quill`, `burst_variant`, burst ids, swirl/vortex
-  metadata - all of which must not leak into a proc) and an explicit `owner`.
 
 ### Audit table of every triggered hit
 
@@ -822,22 +460,6 @@ Triggered abilities are listed in `abilities.ENGINE_INTERNAL_ABILITIES`, so they
 `FieldSequence` (a smoke check enforces that). An ability that can happen both ways gets
 two entries, like Faruzan's `Skill Cast` (active) and `Pressurized Collapse` (triggered).
 
-### What changed
-
-* **Faruzan**: the two hardcoded `t + 0.720` in `timeline.py` are gone; the delay lives
-  on `faruzan_pressurized_collapse.hits[0]`. The MV is resolved from the party's skill
-  talent. Her collapse CD is now measured **from the trigger** (`FARUZAN_COLLAPSE_CD`,
-  3.0s) instead of from the collapse itself, per the same rule as Diona's paws.
-* **Anastasya**: the extra stellar beat no longer ignores its `relative_delay` (it used
-  to copy the trigger's `global_time` and `hit_offset`); it is scheduled through the
-  helper with `owner="Anastasya"`.
-* **Mizuki**: nuke + C1 mini nuke were rewritten onto the helper with no behaviour change
-  (same MV, same insertion slots, `vbtd_state="OFF"` kept on the nuke).
-* **Bug found by the totals** while doing this: the first version of the collapse
-  insertion did not pass `owner`, so a collapse triggered by Mizuki's hit was credited to
-  **Mizuki** (wrong stats, -46,344 on the Anastasya preset). `owner` is now always
-  explicit and documented in the helper.
-
 ### Diona (new)
 
 * Choice Treasures: her tap OR hold skill **hit** opens a 20s state (refreshed by either).
@@ -851,8 +473,6 @@ two entries, like Faruzan's `Skill Cast` (active) and `Pressurized Collapse` (tr
   Window = **11.75s from the cast hit** (`DIONA_C6_WINDOW`), i.e. the whole burst: the
   last burst tick at +11.73 is still buffed. The cast hit itself is INCLUDED - the one
   deliberate exception to the "read pre-arm" rule: arm first, resolve the flag after.
-* `Diona C6` left `buffs.DORMANT`; `buff_registry` shows two columns for her
-  ("Diona Choice Treasures", "Diona C6 Buff" - the latter only at C6).
 * `diona_hEQ` swap-out time 3.071 -> **3.100**: her burst is cast 0.029s before leaving,
   so the cast hit is still ON FIELD (at 3.071 = swap-out it resolved with
   `active_character = None`, which dropped her own C6 buff and Faruzan's quill on it).
@@ -870,24 +490,4 @@ two entries, like Faruzan's `Skill Cast` (active) and `Pressurized Collapse` (tr
 Proof the refactor itself is neutral: with `FARUZAN_COLLAPSE_CD` temporarily set to
 3.72 (the old "CD from the hit" rule) the current engine reproduces the old Anastasya
 total **exactly** (4,628,073.7), so every remaining difference comes from the CD rule.
-
-### Smoke test additions
-
-* Anastasya: the post-nerf kit data is pinned as literals (`50.4` stellar swirl base ->
-  107.1 @ lv13, `0.354` burst bonus, 35.7 extra stellar, 251.175 tap) and the derived
-  buff checks expect **0.354**; the [OK] line says "(nerfed)".
-* New `_run_diona_check()`: state opened by tap AND hold, 20s refresh + expiry, no paws
-  without the state, 3 paws per volley with the right owner/category/attack type/aura,
-  first paw at trigger + 0.270, 3.5s CD between triggers, C6 = +200 EM / +0.40 stellar
-  on the ACTIVE char only, cast hit included, last burst tick covered, nothing past
-  11.75s, nothing at C5.
-* New `_run_triggered_ability_check()`: the delay table above (data + helper convention),
-  Faruzan collapses landing at +0.720 with the 3.0s trigger CD, Anastasya's 0.0 delay
-  landing on the beat, and the engine window constants.
-* Hit catalogue: `scaling_key` must be exactly 3 elements and
-  `update_ability_talent_level()` must work on EVERY ability (a 4-tuple key crashed
-  `add_field_sequence()` for anyone who set talents).
-* Editor catalogue: `faruzan_e` checks `Skill Cast`; the "absent character" probe is now
-  `"Nobody"` (Diona is a real character); triggered abilities must be registered, hidden
-  from the editor and absent from every `FieldSequence`.
 

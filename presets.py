@@ -166,14 +166,8 @@ STANDARD_FIELD_SEQUENCES = {
 }
 
 # ---------------------------------------------------------------------------
-# Sequence catalogue (read by the editors and by build_io's legacy lookups)
+# Sequence catalogue (read by the editors and by build_io)
 # ---------------------------------------------------------------------------
-# Renames are translated, not dropped: exported builds/trials saved before a rename
-# still reference the old display names, so build_io maps them back on load.
-LEGACY_SEQUENCE_NAMES = {
-    "SacFragFill": "Skill Pullout 1 Nuke",
-    "BurstlessPullOut": "Skill Pullout 4 Nukes",
-}
 
 
 def _collect_field_sequences():

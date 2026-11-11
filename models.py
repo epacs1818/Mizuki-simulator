@@ -30,23 +30,14 @@ class StatRef(Enum):
 class Hit:
     name: str
     relative_delay: float
-    element: str                          # Now mandatory (e.g., "Cryo", "Anemo", "Physical")
-    elemental_app: Optional[str] = None   # e.g., "1U"
+    element: str                          # "Cryo", "Anemo", "Physical", ...
+    elemental_app: Optional[str] = None   # e.g. "1U"
     category: ActionCategory = ActionCategory.STANDARD_DMG
     stat_ref: StatRef = StatRef.ATK
     motion_value: float = 0.0
     attack_type: Optional[AttackType] = None  # Optional tag for effect checks
     # Optional scaling coordinates in CHARACTER_SKILLS: (character, category, sub_ability)
     scaling_key: Optional[tuple] = None
-
-    @property
-    def multiplier(self) -> float:
-        """Alias for motion_value to preserve backward compatibility."""
-        return self.motion_value
-
-    @multiplier.setter
-    def multiplier(self, value: float):
-        self.motion_value = value
 
 
 @dataclass

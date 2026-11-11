@@ -6,7 +6,7 @@ import datetime
 import hashlib
 import plotly.express as px
 from pathlib import Path
-from timeline import RotationTimeline
+from timeline import RotationTimeline, CooldownError
 from abilities import ABILITY_REGISTRY, abilities_for
 from presets import field_sequences_for
 
@@ -27,9 +27,7 @@ from build_io import (
     collect_build_document,
     collect_slot,
     crit_model_label,
-    document_lacks_gear,
     document_to_json,
-    legacy_build_document,
     load_trial_into_editor,
     parse_document,
     party_rv_summary,
@@ -46,33 +44,49 @@ def go_to_rotation_tab():
 def go_to_results_tab():
     st.session_state["main_tabs"] = "Simulation Results"
 
+
+def _invalidate_last_run():
+    """Drop the "Trial simulation complete!" state: the inputs it ran on are stale.
+
+    Called by every party/gear change and by every trial-editor mutation, so the
+    confirmation (and the results shortcut) can never outlive the inputs that
+    produced it.
+    """
+    st.session_state.pop("trial_finished", None)
+
+
+def _toast(message: str) -> None:
+    """Queue a bottom toast for the next run.
+
+    Most editor actions are followed by st.rerun(); a toast emitted in the same run
+    would be discarded with the rest of that run's output, so the message is queued
+    and shown at the top of the next run (the same click, one instant later).
+    """
+    st.session_state["_pending_toast"] = message
+
 # Safe aliases for weapons and artifact sets to prevent KeyError
 WEAPON_STATS.setdefault("Select Weapon", {"base_atk": 0.0})
 
-# Set page layout to wide
-# Note: st.set_page_config may only be called once per app run.
+# st.set_page_config must be the first Streamlit call and may run only once.
 st.set_page_config(page_title="Yumemizuki Mizuki's Rotation Damage Calculator", layout="wide")
 
 import base64
 
-# Helper to load and encode the local image permanently
+# Wallpaper asset -> base64, embedded in the page CSS below.
 def get_base64_image(image_path):
     with open(image_path, "rb") as f:
         return base64.b64encode(f.read()).decode()
 
-# Get the base64 string (change to "assets/wallpaper.png" or "webp" if your file format differs)
 img_base64 = get_base64_image("assets/wallpaper.jpg")
 
-# Wallpaper + SOLID dark blocks.
+# Page styling: solid dark blocks on a dimmed wallpaper.
 #
 # The look: every block of content sits on a solid, opaque dark panel with white text,
-# and the wallpaper shows in the gaps BETWEEN those panels (page margins, the space
-# between the title plate and the tabs card). Nothing is translucent - no glass, no
-# blur - so text contrast is the same over any part of the wallpaper.
+# and the wallpaper shows in the gaps BETWEEN those panels. Nothing is translucent, so
+# text contrast is the same over any part of the wallpaper.
 #
-# PAGE_CSS is a PLAIN string with a __WALLPAPER__ placeholder (not an f-string): CSS is
-# full of braces, and inside an f-string every single one of them has to be doubled -
-# one missed brace silently breaks the whole style block.
+# PAGE_CSS is a PLAIN string with a __WALLPAPER__ placeholder (not an f-string): CSS
+# braces would all have to be doubled inside an f-string.
 PAGE_CSS = """
 <style>
     :root {
@@ -215,7 +229,7 @@ st.markdown(PAGE_CSS.replace("__WALLPAPER__", img_base64), unsafe_allow_html=Tru
 
 st.title("Yumemizuki Mizuki's Rotation Damage Calculator")
 
-# Constants & Options defined by your specifications
+# Constants & options
 CHARACTERS = ["Select Character", "Mizuki", "Aether", "Odette", "Anastasya", "Faruzan", "Sucrose", "Diona"]
 
 LEVEL_OPTIONS = [60, 70, 80, 90, 95, 100]
@@ -408,6 +422,16 @@ def _available_abilities(character: str) -> dict:
     if character not in _party_characters():
         return {}
     return abilities_for(character)
+
+
+def _rotation_field_time(rotation) -> float:
+    """Sum of the field times of one pass through a rotation."""
+    return sum(seq.swap_out_time for seq in rotation.sequences)
+
+
+def _trial_field_time(trial) -> float:
+    """Total field time of a trial: every rotation, every repetition."""
+    return sum(_rotation_field_time(rot) * rot.repetitions for rot in trial.rotations)
 
 
 def _select_trial_label(key: str, trial) -> str:
@@ -621,9 +645,8 @@ def render_party_card(char_name: str, data: dict, *, image_width: int = 74,
                       font_size: str = "0.82rem", column_gap: int = 12) -> None:
     """One character card: portrait, identity lines, then the gear stat grid.
 
-    Shared by the Tab 1 party cards and the Tab 4 result snapshots, so the two can
-    never show different information again. (Tab 4 used to lack the element, the
-    talent levels, the artifact set and the substat standard.)
+    Shared by the Tab 1 party cards and the Tab 4 result snapshots, so both always
+    show the same fields.
     """
     img_col, id_col = st.columns([1, 1.7], vertical_alignment="center")
     with img_col:
@@ -659,9 +682,9 @@ def render_character_cards(my_party: dict) -> None:
     """Compact off-field stat cards for the current party.
 
     Shown directly under the team section header so the party stays visible while the
-    slots/artifacts below are edited. Deliberately small: a thumbnail portrait next to
-    the identity block, then the gear stats as a two-column grid. Every card is drawn
-    by render_party_card(), i.e. exactly like the Tab 4 snapshots.
+    slots/artifacts below are edited. A thumbnail portrait sits next to the identity
+    block, then the gear stats as a two-column grid; every card is drawn by
+    render_party_card().
     """
     st.markdown("##### Character Cards (Off-Field Stats)")
     card_cols = st.columns(max(len(my_party), 1))
@@ -676,8 +699,7 @@ def render_build_io_panel() -> None:
     """Save / Load: download the current build, or restore one from a file.
 
     The importer is idempotent: the uploaded bytes are hashed and a file is applied
-    only once. (It used to re-apply on every rerun, which silently reverted every
-    edit made after loading.)
+    only once, so re-runs never revert edits made after loading.
     """
     st.subheader("Save / Load Build")
     upload_col, download_col = st.columns([1, 1], gap="large")
@@ -700,6 +722,19 @@ def render_build_io_panel() -> None:
             mime="application/json",
             key="export_current_build",
             use_container_width=True,
+        )
+        # Read the file on every run, so edits to it are served immediately.
+        manual_path = Path(__file__).with_name("user_manual.txt")
+        manual_text = (manual_path.read_text(encoding="utf-8")
+                       if manual_path.exists()
+                       else "The user manual (user_manual.txt) is missing.")
+        st.download_button(
+            "User manual (.txt)",
+            data=manual_text,
+            file_name="user_manual.txt",
+            mime="text/plain",
+            key="download_user_manual",
+            help="How to set up the party, build rotations and read the results.",
         )
 
     if uploaded_file is None:
@@ -735,16 +770,18 @@ def render_build_io_panel() -> None:
         f"{len(st.session_state['my_party'])} characters, gear and trials restored. "
         "Tweak anything below, then press **Confirm party configuration**."
     )
-    if document_lacks_gear(document):
-        st.warning(
-            "This file was saved by an older version and carries no artifact substats: "
-            "the party is restored, but the piece inputs start empty."
-        )
     for warning in warnings:
         st.warning(warning)
 
 
 team_data = {}
+
+
+# Toast queued by the previous run (see _toast): shown once, top of the app, so the
+# editor acknowledgements survive the st.rerun() that follows the action.
+_pending_toast = st.session_state.pop("_pending_toast", None)
+if _pending_toast:
+    st.toast(_pending_toast)
 
 
 # ---------------------------------------------------------
@@ -994,14 +1031,17 @@ with tab1:
             gear_signature,
         ))
     
-    # If settings changed since last party creation, reset confirmation
-    if "last_team_signature" in st.session_state and st.session_state["last_team_signature"] != current_signature:
+    # If settings changed since last party creation, the confirmed party is stale: hide
+    # it and mark the newest inputs as not processed yet (which also drops a stale
+    # "Trial simulation complete!" from the last run).
+    dirty = ("last_team_signature" in st.session_state
+             and st.session_state["last_team_signature"] != current_signature)
+    if dirty:
         st.session_state["party_created"] = False
-        st.warning(
-            "Gear, substats or the substat standard changed since the party was "
-            "confirmed — press **Confirm party configuration** to rebuild it. "
-            "(Running a trial always uses the current inputs.)"
-        )
+        _invalidate_last_run()
+    warn_slot = st.empty()   # filled after the button, so a confirming click can skip it
+
+    confirmed_now = False
 
 
     # Button renamed and validation relaxed to ONLY require characters
@@ -1020,9 +1060,6 @@ with tab1:
             st.session_state["party_created"] = False
             st.error("Please select characters for all slots.")
         else:
-            # Talent validation still runs if talents are filled, 
-            # or you can allow empty talents if desired. 
-            # Keeping your existing talent validation structure:
             talent_errors = []
             parsed_talents = {}
             for slot_num in range(1, 5):
@@ -1069,7 +1106,17 @@ with tab1:
                 st.session_state["my_party"] = assemble_party(slot_specs)
                 st.session_state["party_created"] = True
                 st.session_state["last_team_signature"] = current_signature
+                confirmed_now = True
                 st.success("Party successfully created!")
+
+    # Warn ONLY while the inputs are genuinely unconfirmed: on the click that confirms
+    # them, the success message above replaces the warning instead of stacking with it.
+    if dirty and not confirmed_now:
+        warn_slot.warning(
+            "Gear, substats or the substat standard changed since the party was "
+            "confirmed — press **Confirm party configuration** to rebuild it. "
+            "(Running a trial always uses the current inputs.)"
+        )
 
     # Party cards are written into the placeholder created under the section header,
     # so they appear at the top of the tab while still reflecting this run's party.
@@ -1160,8 +1207,8 @@ with tab2:
                 st.success("Enemy configuration confirmed!")
                 st.rerun()
 
-        # Enemy summary card: deliberately compact — a small thumbnail next to the level,
-        # then a two-column resistance grid. (A full-width image used to dominate here.)
+        # Enemy summary card: a small thumbnail next to the level, then a two-column
+        # resistance grid.
         with col_card:
             st.markdown("### Target Overview")
             if is_confirmed:
@@ -1267,29 +1314,36 @@ with tab3:
             trial_obj = trial_pool[selected_trial_key]
         else:
             st.warning(
-                "⚠️ No trial is available for this team. Preset trials are only offered "
-                "for their exact team — build a custom trial below, or change the party "
-                "in **Team & Gear Setup**."
+                "No trial is available for this team. "
+                "Please build a custom trial using the **Trial Editor** below."
             )
 
         if trial_obj is not None:
             with st.expander("Trial Breakdown", expanded=False):
                 st.write(f"**Description:** {trial_obj.description}")
-                st.write(f"**End Mode:** {trial_obj.end_mode.capitalize()} | **Duration:** {trial_obj.end_time}s")
+                end_label = trial_obj.end_mode.replace("_", " ").capitalize()
+                if trial_obj.end_mode == "last_swap":
+                    duration_text = (f"{_trial_field_time(trial_obj):.3f}s "
+                                     f"(auto: ends at the last swap-out)")
+                else:
+                    duration_text = f"{trial_obj.end_time:.3f}s"
+                st.write(f"**End Mode:** {end_label} | **Duration:** {duration_text}")
 
                 for r_idx, rotation in enumerate(trial_obj.rotations):
-                    st.markdown(f"**Rotation #{r_idx + 1}: {rotation.name}** (Repeated {rotation.repetitions}x)")
+                    st.markdown(
+                        f"**Rotation #{r_idx + 1}: {rotation.name} "
+                        f"[{_rotation_field_time(rotation):.3f}s]** "
+                        f"(Repeated {rotation.repetitions}x)"
+                    )
                     for s_idx, seq in enumerate(rotation.sequences):
                         st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;↳ Step {s_idx + 1}: `{seq.name}` (*{seq.character}* — {seq.swap_out_time}s field time)")
 
             st.markdown("<br>", unsafe_allow_html=True)
 
             if st.button("Run Trial Simulation", type="primary", key="run_trial_btn", use_container_width=True):
-                # ALWAYS simulate the current inputs. The confirmed party can be older
-                # than the widgets (changing the substat standard or the gear does not
-                # re-confirm itself), which used to make an RV/KQM build silently run on
-                # the old manual stats. Rebuilding here is cheap - only the simulation is
-                # expensive - and it makes a stale party impossible.
+                # Rebuild the party from the current widgets: the confirmed party may be older
+                # than the inputs (a gear or substat-standard change does not re-confirm
+                # itself). Rebuilding is cheap; only the simulation is expensive.
                 rebuilt_party = assemble_party(
                     [collect_slot(st.session_state, slot_num) for slot_num in range(1, 5)]
                 )
@@ -1298,48 +1352,59 @@ with tab3:
                 st.session_state["party_created"] = bool(party)
                 enemy = st.session_state.get("enemy_stats", {"enemy_lv": 100, "cryo_res": 0.1, "anemo_res": 0.1})
 
-                timeline = RotationTimeline(party=party, enemy_stats=enemy)
-                timeline.add_trial(trial_obj)
-                timeline.evaluate_timeline()
+                try:
+                    timeline = RotationTimeline(party=party, enemy_stats=enemy)
+                    trial_duration = timeline.add_trial(trial_obj)
+                    timeline.evaluate_timeline()
+                except CooldownError as exc:
+                    # A custom trial can schedule an ability before its CD is up. Show a
+                    # readable message instead of a traceback, and drop the stale
+                    # "Trial simulation complete!" so it cannot sit next to the error.
+                    _invalidate_last_run()
+                    st.error(
+                        f"Cooldown Error! {exc.character}'s '{exc.ability_name}' is on "
+                        f"CD until {exc.until:.3f}s. Please edit your trial!"
+                    )
+                else:
+                    analytics = timeline.get_analytics_summary(trial_duration)
 
-                trial_duration = trial_obj.end_time
-                analytics = timeline.get_analytics_summary(trial_duration)
+                    char_summary = ", ".join(
+                        f"{name} Lv{data.get('level', 90)} C{data['constellation']} {data['talents']} "
+                        f"{data['weapon']} R{data.get('refinement', 1)}"
+                        for name, data in party.items()
+                    )
+                    enemy_summary = f"Lv{enemy.get('enemy_lv','?')} | Cryo Res {int(enemy.get('cryo_res',0.1)*100)}% | Anemo Res {int(enemy.get('anemo_res',0.1)*100)}%"
+                    # Substat standard used by THIS run (empty when every member is Manual),
+                    # so an old manual entry can never be confused with an RV/KQM one.
+                    standards = party_rv_summary(party)
+                    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
 
-                char_summary = ", ".join(
-                    f"{name} Lv{data.get('level', 90)} C{data['constellation']} {data['talents']} "
-                    f"{data['weapon']} R{data.get('refinement', 1)}"
-                    for name, data in party.items()
-                )
-                enemy_summary = f"Lv{enemy.get('enemy_lv','?')} | Cryo Res {int(enemy.get('cryo_res',0.1)*100)}% | Anemo Res {int(enemy.get('anemo_res',0.1)*100)}%"
-                # Substat standard used by THIS run (empty when every member is Manual),
-                # so an old manual entry can never be confused with an RV/KQM one.
-                standards = party_rv_summary(party)
-                timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+                    entry = {
+                        "timestamp": timestamp,
+                        "sim_name": trial_labels.get(selected_trial_key, selected_trial_key),
+                        "chars": char_summary,
+                        "standards": standards,
+                        "field_sequences": selected_trial_key,
+                        "enemy": enemy_summary,
+                        "trial_duration": trial_duration,
+                        "analytics": analytics,
+                        "timeline_events": timeline.global_events,
+                        "snapshot_party": copy.deepcopy(party),
+                        "snapshot_enemy": copy.deepcopy(enemy),
+                        "snapshot_custom_fs": copy.deepcopy(st.session_state.get("custom_field_sequences", {})),
+                        "snapshot_custom_rots": copy.deepcopy(st.session_state.get("custom_rotations", {})),
+                        # Full, gear-complete build document for THIS run: the per-run
+                        # export writes it, so the run can be re-imported and tweaked.
+                        "snapshot_build": collect_build_document(
+                            st.session_state,
+                            trial_labels.get(selected_trial_key, selected_trial_key),
+                        ),
+                    }
 
-                entry = {
-                    "timestamp": timestamp,
-                    "sim_name": trial_labels.get(selected_trial_key, selected_trial_key),
-                    "chars": char_summary,
-                    "standards": standards,
-                    "field_sequences": selected_trial_key,
-                    "enemy": enemy_summary,
-                    "timeline_events": timeline.global_events,
-                    "snapshot_party": copy.deepcopy(party),
-                    "snapshot_enemy": copy.deepcopy(enemy),
-                    "snapshot_custom_fs": copy.deepcopy(st.session_state.get("custom_field_sequences", {})),
-                    "snapshot_custom_rots": copy.deepcopy(st.session_state.get("custom_rotations", {})),
-                    # Full, gear-complete build document for THIS run: the per-run
-                    # export writes it, so the run can be re-imported and tweaked.
-                    "snapshot_build": collect_build_document(
-                        st.session_state,
-                        trial_labels.get(selected_trial_key, selected_trial_key),
-                    ),
-                }
-
-                if "history" not in st.session_state:
-                    st.session_state["history"] = []
-                st.session_state["history"].append(entry)
-                st.session_state["trial_finished"] = True
+                    if "history" not in st.session_state:
+                        st.session_state["history"] = []
+                    st.session_state["history"].append(entry)
+                    st.session_state["trial_finished"] = True
 
         # Result of the last run. Rendered outside the button branch so the message and
         # the shortcut to the results stay available after the run.
@@ -1394,7 +1459,8 @@ with tab3:
                              help="Copies this trial's rotations into the editor so they "
                                   "can be tweaked and re-used in a new trial."):
                     load_trial_into_editor(trial_obj, st.session_state)
-                    st.session_state["toast_msg"] = f"Trial '{trial_obj.name}' loaded into the editor."
+                    _toast(f"Trial '{trial_obj.name}' loaded into the editor.")
+                    _invalidate_last_run()
                     st.rerun()
 
         with trial_col_right:
@@ -1404,7 +1470,8 @@ with tab3:
                 
                 if st.button("➕ Add Rotation to Trial", key="adv_add_rot_to_trial_btn", use_container_width=True):
                     st.session_state["temp_trial_rot_entries"].append({"rotation_name": chosen_rot_key, "repetitions": rot_reps_input})
-                    st.session_state["toast_msg"] = f"Added {chosen_rot_key} ({rot_reps_input}x) to trial queue."
+                    _toast(f"Added {chosen_rot_key} ({rot_reps_input}x) to trial queue.")
+                    _invalidate_last_run()
                     st.rerun()
 
                 if st.session_state["temp_trial_rot_entries"]:
@@ -1416,6 +1483,7 @@ with tab3:
                         with rc2:
                             if st.button("✕", key=f"rm_trial_rot_{entry_idx}"):
                                 st.session_state["temp_trial_rot_entries"].pop(entry_idx)
+                                _invalidate_last_run()
                                 st.rerun()
             else:
                 st.info("No custom rotations created yet.")
@@ -1429,7 +1497,8 @@ with tab3:
                     del_trial_key = st.selectbox("Select Custom Trial to Delete", custom_trials_to_delete, key="del_trial_select")
                     if st.button("Delete Selected Trial", key="del_trial_btn"):
                         del st.session_state["active_trial_pool"][del_trial_key]
-                        st.session_state["toast_msg"] = f"Custom trial '{del_trial_key}' deleted."
+                        _toast(f"Custom trial '{del_trial_key}' deleted.")
+                        _invalidate_last_run()
                         st.rerun()
 
         st.markdown("<br><hr><br>", unsafe_allow_html=True)
@@ -1437,24 +1506,75 @@ with tab3:
         # --- EXPANDER 1: CUSTOM ROTATION BUILDER ---
         with st.expander("Create Custom Rotation", expanded=False):
             rot_name = st.text_input("Rotation Name", placeholder="e.g. 'No Burst Starter'", key="adv_rot_name")
-            
-            chosen_seq_keys = st.multiselect(
-                "Select Field Sequences in Order",
-                options=list(all_available_sequences.keys()),
-                key="adv_rot_seq_picker"
-            )
+
+            # The order matters and a sequence may appear more than once (e.g. a
+            # "burst every other loop" rotation that contains both variants).
+            if "temp_rot_seqs" not in st.session_state:
+                st.session_state["temp_rot_seqs"] = []
+            available_seq_keys = list(all_available_sequences.keys())
+            st.session_state["temp_rot_seqs"] = [
+                key for key in st.session_state["temp_rot_seqs"]
+                if key in all_available_sequences
+            ]
+
+            seq_to_add = None
+            pick_col, add_col = st.columns([4, 1], vertical_alignment="bottom")
+            with pick_col:
+                if available_seq_keys:
+                    if st.session_state.get("adv_rot_seq_pick") not in available_seq_keys:
+                        st.session_state.pop("adv_rot_seq_pick", None)
+                    seq_to_add = st.selectbox("Select Field Sequence",
+                                              available_seq_keys, key="adv_rot_seq_pick")
+                else:
+                    st.info("No field sequence is available for this party.")
+            with add_col:
+                if st.button("➕ Add", key="adv_rot_add_seq_btn",
+                             use_container_width=True, disabled=seq_to_add is None):
+                    st.session_state["temp_rot_seqs"].append(seq_to_add)
+                    _invalidate_last_run()
+                    st.rerun()
+
+            if st.session_state["temp_rot_seqs"]:
+                st.markdown("**Sequence order** (a sequence may be added more than once):")
+                for seq_idx, seq_key in enumerate(list(st.session_state["temp_rot_seqs"])):
+                    label_col, up_col, down_col, remove_col = st.columns(
+                        [7, 1, 1, 1], vertical_alignment="center")
+                    with label_col:
+                        st.text(f"{seq_idx + 1}. {seq_key}")
+                    with up_col:
+                        if st.button("↑", key=f"rot_seq_up_{seq_idx}",
+                                     disabled=seq_idx == 0):
+                            seqs = st.session_state["temp_rot_seqs"]
+                            seqs[seq_idx - 1], seqs[seq_idx] = seqs[seq_idx], seqs[seq_idx - 1]
+                            _invalidate_last_run()
+                            st.rerun()
+                    with down_col:
+                        if st.button("↓", key=f"rot_seq_down_{seq_idx}",
+                                     disabled=seq_idx == len(st.session_state["temp_rot_seqs"]) - 1):
+                            seqs = st.session_state["temp_rot_seqs"]
+                            seqs[seq_idx + 1], seqs[seq_idx] = seqs[seq_idx], seqs[seq_idx + 1]
+                            _invalidate_last_run()
+                            st.rerun()
+                    with remove_col:
+                        if st.button("✕", key=f"rot_seq_remove_{seq_idx}"):
+                            st.session_state["temp_rot_seqs"].pop(seq_idx)
+                            _invalidate_last_run()
+                            st.rerun()
 
             col_rot_save, col_rot_del = st.columns([4, 1], vertical_alignment="bottom")
             with col_rot_save:
                 if st.button("Save Rotation", key="adv_save_rot_btn", type="secondary", use_container_width=True):
-                    if rot_name and chosen_seq_keys:
-                        seq_list = [all_available_sequences[k] for k in chosen_seq_keys]
+                    rotation_seqs = st.session_state["temp_rot_seqs"]
+                    if rot_name and rotation_seqs:
+                        seq_list = [all_available_sequences[k] for k in rotation_seqs]
                         new_rot = Rotation(name=rot_name, sequences=seq_list, repetitions=1)
                         st.session_state["custom_rotations"][rot_name] = new_rot
-                        st.session_state["toast_msg"] = f"Rotation '{rot_name}' saved successfully!"
+                        st.session_state["temp_rot_seqs"] = []
+                        _toast(f"Rotation '{rot_name}' saved successfully!")
+                        _invalidate_last_run()
                         st.rerun()
                     else:
-                        st.error("Please provide a rotation name and pick at least one field sequence.")
+                        st.error("Please provide a rotation name and add at least one field sequence.")
             
             # Management/Deletion for custom rotations
             if st.session_state["custom_rotations"]:
@@ -1462,7 +1582,8 @@ with tab3:
                     del_rot_key = st.selectbox("Select Custom Rotation to Delete", list(st.session_state["custom_rotations"].keys()), key="del_rot_select")
                     if st.button("✕ Delete Rotation", key="del_rot_btn"):
                         del st.session_state["custom_rotations"][del_rot_key]
-                        st.session_state["toast_msg"] = f"Rotation '{del_rot_key}' deleted."
+                        _toast(f"Rotation '{del_rot_key}' deleted.")
+                        _invalidate_last_run()
                         st.rerun()
 
         # --- EXPANDER 2: CUSTOM FIELD SEQUENCE BUILDER ---
@@ -1494,7 +1615,8 @@ with tab3:
                     
                     if st.button("➕ Add Ability to Sequence", key="adv_add_abil_btn", use_container_width=True):
                         st.session_state["temp_seq_calls"].append((abil_start_time, avail_abilities[chosen_abil_key]))
-                        st.session_state["toast_msg"] = f"Added {chosen_abil_key} at {abil_start_time}s"
+                        _toast(f"Added {chosen_abil_key} at {abil_start_time}s")
+                        _invalidate_last_run()
                         st.rerun()
 
             # Queued abilities list arranged horizontally below the two divided columns
@@ -1519,7 +1641,8 @@ with tab3:
                         new_fs.add_ability(st_time, ab_obj)
                     st.session_state["custom_field_sequences"][seq_name] = new_fs
                     st.session_state["temp_seq_calls"] = []
-                    st.session_state["toast_msg"] = f"Field Sequence '{seq_name}' saved successfully!"
+                    _toast(f"Field Sequence '{seq_name}' saved successfully!")
+                    _invalidate_last_run()
                     st.rerun()
                 else:
                     st.error("Please provide a name for the field sequence.")
@@ -1531,7 +1654,8 @@ with tab3:
                     del_fs_key = st.selectbox("Select Custom Field Sequence to Delete", list(st.session_state["custom_field_sequences"].keys()), key="del_fs_select")
                     if st.button("✕ Delete Field Sequence", key="del_fs_btn"):
                         del st.session_state["custom_field_sequences"][del_fs_key]
-                        st.session_state["toast_msg"] = f"Field Sequence '{del_fs_key}' deleted."
+                        _toast(f"Field Sequence '{del_fs_key}' deleted.")
+                        _invalidate_last_run()
                         st.rerun()
 
         st.markdown("<br>", unsafe_allow_html=True)
@@ -1556,6 +1680,7 @@ with tab3:
                 st.session_state["active_trial_pool"][trial_name] = new_trial
                 st.session_state["temp_trial_rot_entries"] = []
                 st.session_state["toast_msg"] = f"Trial '{trial_name}' successfully created and added to the selection dropdown!"
+                _invalidate_last_run()
                 st.rerun()
             else:
                 st.error("Please enter a trial name and add at least one rotation.")
@@ -1643,8 +1768,7 @@ with tab4:
                                 (elem.capitalize(), f"{snapshot_enemy.get(f'{elem}_res', 0.1) * 100:.1f}")
                                 for elem in elements
                             ]
-                            # Every resistance, exactly like the Tab 1 enemy card (the grid
-                            # used to be cut at 4 entries).
+                            # Every resistance, matching the Tab 1 enemy card.
                             grid = "".join(
                                 f"<div style='opacity:0.85'>{name}</div>"
                                 f"<div style='text-align:right;font-weight:600'>{value}%</div>"
@@ -1662,18 +1786,7 @@ with tab4:
 
                 st.markdown("---")
                 st.subheader("Performance Calculations & Analytics")
-                # --- FALLBACK: Compute analytics on-the-fly for old history entries ---
-                analytics = entry.get("analytics", {})
-                if not analytics and "timeline_events" in entry and entry["timeline_events"]:
-                    from timeline import RotationTimeline
-                    temp_timeline = RotationTimeline(
-                        party=entry.get("snapshot_party", {}), 
-                        enemy_stats=entry.get("snapshot_enemy", {})
-                    )
-                    temp_timeline.global_events = entry["timeline_events"]
-                    max_t = max((ev["global_time"] for ev in entry["timeline_events"]), default=30.0)
-                    analytics = temp_timeline.get_analytics_summary(max_t)
-                    entry["analytics"] = analytics # Cache it back into the entry
+                analytics = entry.get("analytics") or {}
 
                 if analytics:
                     # 1. Key Metrics Summary Cards
@@ -1770,9 +1883,7 @@ with tab4:
                         "stays fully editable."
                     )
 
-                    # Runs recorded before schema 2.0 have no full document saved, so the
-                    # best possible one is rebuilt from their snapshots.
-                    run_doc = entry.get("snapshot_build") or legacy_build_document(entry)
+                    run_doc = entry["snapshot_build"]
                     run_doc["simulation_name"] = entry["sim_name"]
                     st.download_button(
                         label=f"Export JSON Config for '{entry['sim_name']}'",

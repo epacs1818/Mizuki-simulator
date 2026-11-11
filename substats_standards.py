@@ -110,9 +110,9 @@ def build_recommended_subs(char_name: str):
 #      (18 additional Crit-Value rolls), then the utility stat (2 ATK%/EM rolls).
 #
 # Crit is carried as a single Crit Value (folded into crit_dmg), so the same
-# "100% RV" CV damage path applies. Note: treating crit as one combined CV stat
-# lets the 18 flexible crit rolls coexist with "max 2 per substat" (CR/CD caps
-# don't apply to a merged CV stat). The fixed 20 still look like real piece subs.
+# "100% RV" CV damage path applies. Treating crit as one combined CV stat lets the
+# 18 flexible crit rolls coexist with "max 2 per substat" (CR/CD caps don't apply to
+# a merged CV stat). The fixed 20 still look like real piece subs.
 # ---------------------------------------------------------------------------
 KQM_FIXED_PER_STAT = 2       # 2 of each fixed stat (10 stats -> 20 rolls)
 KQM_FLEX_CRIT_ROLLS = 18     # flexible crit (CV) rolls for carries

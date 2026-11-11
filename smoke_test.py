@@ -30,8 +30,8 @@ Checks:
      (Mizuki nuke 0.500, C1 mini nuke 0.0, Faruzan collapse 0.720, Diona paws
      0.270/0.360/0.360, Anastasya extra stellar/Triumph/C6 Triumph 0.010), lands at
      trigger + that delay, and respects its trigger-based cooldown.
- 12. The Anastasya "Tsaritsa Nerfs" values (50.4% stellar swirl base, 0.354 burst
-     bonus at B13) are pinned as literals, so a revert cannot pass silently.
+ 12. The Anastasya kit values (50.4% stellar swirl base, 0.354 burst bonus at B13)
+     are pinned as literals, so an accidental drift cannot pass silently.
 """
 from timeline import (
     RotationTimeline, SUCROSE_BURST_WINDOW, ANASTASYA_UNSEAL_DELAY,
@@ -771,7 +771,7 @@ def _run_artifact_stat_check() -> dict:
         out["stellar_uses_bonus"] = stellar["bonus_mult"] > stellar_without_bonus["bonus_mult"] + 1e-9
         out["stellar_cd"] = round(final.get("Stellar CD", 0.0), 4)         # 0.40
 
-        # Real sets that used to lose their permanent stats.
+        # Artifact sets with permanent stats of their own.
         vv = build_initial_stats("Faruzan", 90, "Favonius Warbow", "Viridescent Venerer", {}, {})
         noblesse = build_initial_stats("Faruzan", 90, "Favonius Warbow", "Noblesse Oblige", {}, {})
         out["vv_anemo"] = round(vv.get("anemo_bonus", 0.0), 4)             # 0.15
@@ -1072,7 +1072,7 @@ def _run_odette_constellation_check() -> dict:
         out["c1"][cons] = {
             "count": len(c1),
             "delay": round(c1[0]["global_time"] - 3.121, 3) if c1 else None,
-            "mv": c1[0].get("multiplier") if c1 else None,
+            "mv": c1[0].get("motion_value") if c1 else None,
             "stellar": bool(c1) and c1[0].get("category") == ActionCategory.STELLAR_DMG,
             "owner": c1[0].get("character") if c1 else None,
         }
@@ -1098,7 +1098,7 @@ def _run_odette_constellation_check() -> dict:
             "count": len(c4),
             "delays": delays,
             "gaps": gaps,
-            "mv": c4[0].get("multiplier") if c4 else None,
+            "mv": c4[0].get("motion_value") if c4 else None,
             "owner": c4[0].get("character") if c4 else None,
         }
 
@@ -1246,7 +1246,7 @@ def _run_rv_mode_check() -> dict:
     party = build_io.assemble_party(slots)
     out["entry_flag"] = bool(party["Aether"].get("rv_mode"))
     out["manual_entry_flag"] = bool(party["Mizuki"].get("rv_mode"))
-    # Hand-written / legacy entries only carry the UI label.
+    # A hand-written entry may carry only the UI label.
     out["kqm_label"] = bool(is_rv_mode({"standard_mode": "KQM Standards (40 rolls)"}))
     out["manual_label"] = bool(is_rv_mode({"standard_mode": "Manual"}))
     out["empty_entry"] = bool(is_rv_mode({}))
@@ -1327,8 +1327,8 @@ def _run_hit_catalogue_check() -> dict:
     for ability_map in ab.ABILITY_REGISTRY.values():
         for ability in ability_map.values():
             # Re-configuring the talent level must work for EVERY ability: a malformed
-            # scaling_key (e.g. a 4-tuple that still carries the talent level) used to
-            # crash timeline.add_field_sequence() the moment a party set talents.
+            # scaling_key (e.g. a 4-tuple that still carries the talent level) crashes
+            # timeline.add_field_sequence() as soon as a party sets talents.
             try:
                 ab.update_ability_talent_level(copy.deepcopy(ability), 10)
             except Exception as exc:  # noqa: BLE001 - reported, not raised
@@ -1431,13 +1431,13 @@ def _run_mizuki_burst_check() -> dict:
 def _run_buff_catalogue_check() -> dict:
     """Structural integrity of the buff catalogue (buffs.py) vs its dispatch table.
 
-    Catches the class of bug we hit before: a catalogue entry that no timeline
-    flag can ever reach (dead data), a dispatch key that no longer exists, and a
-    non-constant descriptor that the basis engine could not resolve.
+    Catches a catalogue entry that no timeline flag can ever reach (dead data), a
+    dispatch key that no longer exists, and a non-constant descriptor that the basis
+    engine could not resolve.
 
-    Note: every REACHABLE non-constant entry is also exercised numerically by the
-    other checks in this file (Mizuki swirl/VBTD/C6/C2, Odette burst+A4+jubilee,
-    Aether A4+jubilee, Faruzan C6 anemo bonus, Sucrose A4 share), so a wrong
+    Every REACHABLE non-constant entry is also exercised numerically by the other
+    checks in this file (Mizuki swirl/VBTD/C6/C2, Odette burst+A4+jubilee, Aether
+    A4+jubilee, Faruzan C6 anemo bonus, Sucrose A4 share), so a wrong
     skill_scalings path would already fail there.
     """
     import buffs
@@ -1692,10 +1692,9 @@ def _run_anastasya_check() -> dict:
     out["early_count"] = len(early)
     out["early_swirls"] = sorted({n for _t, n in early})
 
-    # The preset's swirl spacing depends on the rotation (Odette's retimed QE moved
-    # her Cryo applications out of the 3s vortex life, so THIS preset no longer
-    # detonates early), so the "spawn at Lv2 + 3 further swirls" rule is also
-    # asserted directly on the lifecycle object, independent of any timing.
+    # The preset's swirl spacing depends on the rotation and can fall outside the 3s
+    # vortex life, so the "spawn at Lv2 + 3 further swirls" rule is also asserted
+    # directly on the lifecycle object, independent of any timing.
     from mechanics import StellarVortex
     probe = StellarVortex({"anemo_contributor": "Mizuki",
                            "cryo_contributors": ["Odette"]},
@@ -1870,8 +1869,8 @@ def _run_anastasya_constellation_check() -> dict:
                              for a, b in zip(ts, ts[1:]))
                          for ts in per_char.values()),
             "max_per_char": max((len(ts) for ts in per_char.values()), default=0),
-            "mv": procs[0].get("multiplier") if procs else None,
-            "expected_mv": 2.5 * anastasya_triumph.hits[0].multiplier,
+            "mv": procs[0].get("motion_value") if procs else None,
+            "expected_mv": 2.5 * anastasya_triumph.hits[0].motion_value,
             "owner": procs[0].get("character") if procs else None,
         }
 
@@ -2202,8 +2201,7 @@ def _run_editor_catalogue_check() -> dict:
         seq.character == "Mizuki" for seq in only_mizuki.values())
     out["filter_hides_outside"] = "AnastasyaEQ" not in only_mizuki
     out["abilities_for_anastasya"] = sorted(abilities.abilities_for("Anastasya").keys())
-    # A character that is not registered at all must yield NOTHING ("Diona" is a real
-    # character now, so it can no longer be used as the "absent" probe).
+    # A character that is not registered at all must yield NOTHING.
     out["abilities_for_absent"] = abilities.abilities_for("Nobody")
     # Engine-injected procs stay registered but are never offered by the editor.
     out["internal_hidden"] = ({"Triumph", "C6 Triumph", "Palestar Crown Extra Stellar"}
@@ -2361,24 +2359,11 @@ def _run_save_load_check() -> dict:
     out["editor_queue"] = (len(editor_state["temp_trial_rot_entries"])
                            == len(preset_trial.rotations))
 
-    # A schema 1.0 file still loads: characters + enemy, but no artifact gear.
-    legacy = {"schema_version": "1.0", "simulation_name": "legacy",
-              "party": {"Mizuki": {"level": 90, "constellation": 2,
-                                   "weapon": "Sacrificial Fragments", "refinement": 5,
-                                   "talents": "6/10/10", "artifact_set": "Gilded Dreams"}},
-              "enemy_stats": {"enemy_lv": 95, "cryo_res": 0.2}}
-    legacy_doc = build_io.parse_document(json.dumps(legacy))
-    legacy_state = {}
-    build_io.apply_build_document(legacy_doc, legacy_state, catalogue)
-    out["legacy_ok"] = (build_io.document_lacks_gear(legacy_doc)
-                        and legacy_state.get("char_1") == "Mizuki"
-                        and "Mizuki" in build_io.build_party_from_document(legacy_doc))
-
     # A slot the file does not fill must be emptied, not left holding an old character.
     small_state = {"char_3": "Odette", "char_4": "Aether"}
     build_io.apply_build_document(
         build_io.parse_document(json.dumps({
-            "schema_version": "2.0",
+            "schema_version": build_io.SCHEMA_VERSION,
             "party": [{"slot": 1, "character": "Mizuki", "level": 90,
                        "constellation": 2, "weapon": "Sacrificial Fragments",
                        "refinement": 5, "talents": "6/10/10", "pieces": {}}],
@@ -2408,6 +2393,28 @@ def _run_save_load_check() -> dict:
         out["key_mismatches"] = [name for name in templates
                                  if 'f"%s"' % name not in app_source]
     return out
+
+
+def _run_trial_duration_check() -> dict:
+    """Trial duration = the configured window (time) or the last swap-out (last_swap).
+
+    A run must not modify the trial it was given, so the same preset can be
+    simulated again with exactly the same numbers.
+    """
+    preset = presets.STANDARD_TRIALS["Mizuki Sac Frag Pull out 6x rotations"]
+    field_sum = sum(seq.swap_out_time * rot.repetitions
+                    for rot in preset.rotations for seq in rot.sequences)
+    before = preset.end_time
+    last_swap = RotationTimeline(party=presets.DEFAULT_PARTY).add_trial(preset)
+    time_duration = RotationTimeline(party=presets.DEFAULT_PARTY).add_trial(
+        copy.deepcopy(presets.TEST_TRIAL_30S))
+    return {
+        "mode": preset.end_mode,
+        "time": time_duration,
+        "last_swap": last_swap,
+        "field_sum": field_sum,
+        "end_untouched": preset.end_time == before,
+    }
 
 
 def run(verbose: bool = True) -> None:
@@ -3398,10 +3405,26 @@ def run(verbose: bool = True) -> None:
         print(f"[OK] editor catalogues: {cat2['sequence_count']} field sequences / "
               f"{cat2['ability_count']} abilities, party-gated; preset trials team-gated")
 
+    # 2p. Trial duration accounting.
+    dur = _run_trial_duration_check()
+    duration_checks = [
+        (dur["mode"] == "last_swap", f"duration probe preset ends by {dur['mode']}"),
+        (abs(dur["time"] - 30.0) < 1e-9, f"a 30s time trial reports {dur['time']}s"),
+        (dur["end_untouched"], "add_trial() mutates the trial's own end_time"),
+        (abs(dur["last_swap"] - dur["field_sum"]) < 1e-6,
+         f"last-swap duration {dur['last_swap']}s != field time {dur['field_sum']}s"),
+    ]
+    duration_failures = [msg for ok, msg in duration_checks if not ok]
+    failures.extend(duration_failures)
+    if not duration_failures and verbose:
+        print(f"[OK] trial duration: time window kept, last swap = field time "
+              f"({dur['last_swap']:.3f}s), the trial object stays untouched")
+
     # 2q. Save / Load build documents (export + import).
     save = _run_save_load_check()
     save_checks = [
-        (save["schema"].startswith("2"), f"build document schema is {save['schema']}"),
+        (save["schema"] == build_io.SCHEMA_VERSION,
+         f"build document schema is {save['schema']}"),
         (save["substats_saved"], "artifact substats are not written to the build file"),
         (save["trial_saved"], "the custom trial is not written to the build file"),
         (not save["restore_warnings"],
@@ -3417,7 +3440,6 @@ def run(verbose: bool = True) -> None:
          "rebuilt initial_stats differ from build_initial_stats (substats lost?)"),
         (save["editor_materialised"] and save["editor_queue"],
          "a loaded/preset trial could not be opened in the editor"),
-        (save["legacy_ok"], "a schema 1.0 build file no longer loads"),
         (save["slot_cleanup"], "slots the file does not use keep stale characters"),
         (save["key_mismatches"] == [],
          "the importer writes keys the UI does not use: "
