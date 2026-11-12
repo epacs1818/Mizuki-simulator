@@ -119,7 +119,7 @@ mizuki_n1c.add_ability(1.080, mizuki_charged)
 
 mizuki_pullout_burst_4_nukes = FieldSequence("Burst Pullout 4 Nukes", "Mizuki", swap_out_time=9.3)
 mizuki_pullout_burst_4_nukes.add_ability(0.301, mizuki_pullout_13)
-mizuki_pullout_burst_4_nukes.add_ability(8.100, mizuki_burst)
+mizuki_pullout_burst_4_nukes.add_ability(8.301, mizuki_burst)
 
 # --- Sucrose ---
 sucrose_e = FieldSequence("Sucrose E", "Sucrose", swap_out_time=1.259)
