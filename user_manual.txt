@@ -4,250 +4,517 @@
 ======================================================================
 
 CONTENTS
-  1. What this tool does  
-  2. Tab 1 - Team & Gear Setup
-  3. Tab 2 - Enemy Configuration
-  4. Tab 3 - Rotation Setup
-  5. Tab 4 - Simulation Results & History
-  6. Saving and loading a build
-  7. Troubleshooting
-  8. Assumptions and limitations
+  1. What This Tool Does (and Doesn't Do)
+     1.1 What it does
+     1.2 What it doesn't do
+  2. Quick Start
+  3. Tab 1 - Team & Gear Setup
+     3.1 Character, Level, Constellation, Weapon, and Talents
+     3.2 Artifacts and Substat Standards
+     3.3 Confirming Configuration & Off-Field Stats
+  4. Tab 2 - Enemy Configuration
+  5. Tab 3 - Rotation Setup
+     5.1 Running a Trial
+     5.2 Field Sequences
+     5.3 Rotations
+     5.4 Trials Assembly
+  6. Tab 4 - Simulation Results & History
+     6.1 Overview Metrics
+     6.2 Charts & Visualizations
+     6.3 The Rotation Timeline Table
+     6.4 Detailed Timeline Column Blocks
+  7. Damage Categories & Stellar Swirl Mechanics
+     7.1 The Three Damage Categories
+     7.2 Stellar Swirl & Vortex Mechanics
+  8. Saving and Loading a Build
+  9. Assumptions and Limitations
+  10. Next Major Implementations & Roadmap
 
 ----------------------------------------------------------------------
-1. WHAT THIS TOOL DOES
+1. WHAT THIS TOOL DOES (AND DOESN'T DO)
 ----------------------------------------------------------------------
+1.1 What it does
 The calculator simulates a full party rotation over time and reports what
-each hit deals, the total damage and the overall DPS. It models every
-character, weapon and artifact set shipped with this version, including
-their triggered effects (extra hits, buff windows, stack decay, cooldowns
+each hit deals, the total damage, and the overall DPS. It models every
+character, weapon, and artifact set shipped with this version, including
+their triggered effects (extra hits, buff windows, stack decay, cooldowns,
 and reaction damage).
 
-The simulation is event based: each ability schedules its hits at fixed
+The simulation is event-based: each ability schedules its hits at fixed
 offsets from the cast, the timeline resolves them in order, and the buffs
-of every hit are recomputed from the state at that moment. Because of that,
-changing a rotation's timings can change the damage of every later hit.
-On cast (or on button press) effects are considered before the first hit of the action.
+for every hit are recomputed from the exact party state at that moment.
+Because of that, changing a rotation's timings can change the damage of
+every subsequent hit. On-cast (or on-button-press) effects are considered
+before the first hit of the action.
 
-The abilities hit timings are based on my setup's performance including fps and ping.
-All the timeline data is taken from personal tests on the training dummy.
-The available preset trials take into account my personal timinings as well.
+Ability hit timings are based on my own setup's performance, including
+FPS and ping. All timeline data is taken from personal tests on the
+training dummy, and the available preset trials take into account my
+personal timings as well.
 
-All the calculations made are presented as transparently as possible via the timeline table.
-Any mistakes found can be sent to me, I'll gladly try to solve them.
+All calculations are presented as transparently as possible via the
+timeline table in Tab 4. Any mistakes spotted can be sent to me, and
+I'll gladly try to fix them.
 
-----------------------------------------------------------------------
-1. WHAT THIS TOOL DOES NOT DO
-----------------------------------------------------------------------
-The calculator does not calculate particle generation and energy recharge
-requirements for the party.
-It does not calculate events based on the distance of the enemy.
-It does not consider the frames of the attacks. It's just a simulation of scheduled hits.
-It does not calculate aoe damage.
-It does not simulate a random trial. All damage values are averages (unless everyone has 100% cr).
-
-3. Quick start
-  1.  Fill the four party slots in Tab 1 and press Confirm party configuration.
-      Artifacts are optional. After you confirm your party, you can check their off field stats.
-  2.  Set the enemy level and resistances in Tab 2 and confirm. Check the enemy card
-  3.  Pick a trial in Tab 3 and press Run Trial Simulation.
-  4.  Read the results in Tab 4.
+1.2 What it doesn't do
+- It does not calculate particle generation or Energy Recharge
+  requirements for the party.
+- It does not calculate events based on the distance to the enemy.
+- It does not consider attack frame counts or hitlag; it's simply a
+  simulation of scheduled hit events.
+- It does not calculate AoE damage (all calculations assume single target).
+- It does not run random trials with RNG rolls. All damage numbers are
+  mathematical averages (unless everyone has 100% Crit Rate).
 
 ----------------------------------------------------------------------
-2. TAB 1 - TEAM & GEAR SETUP
+2. QUICK START
 ----------------------------------------------------------------------
-Four slots are shown. For each slot choose:
+If you want to jump right in, here is the fastest way to get a simulation
+running:
 
+  1. Fill the four party slots in Tab 1 and click "Confirm Party
+     Configuration". Artifacts are optional. Once confirmed, you can
+     check everyone's off-field stats on their stat cards.
+  2. Set the enemy level and resistances in Tab 2 and click "Confirm Enemy
+     Configuration". Check the updated enemy card.
+  3. Pick a trial from the dropdown in Tab 3 and press "Run Trial
+     Simulation".
+  4. Review your results, graphs, and the full event timeline in Tab 4.
+
+----------------------------------------------------------------------
+3. TAB 1 - TEAM & GEAR SETUP
+----------------------------------------------------------------------
+Four party slots are displayed. For each slot, configure:
+
+3.1 Character, Level, Constellation, Weapon, and Talents
   Character       The character for that slot.
-                  Mizuki/Odette/Anastasya/Aether/Faruzan/Sucrose/Diona
-  Level           60 / 70 / 80 / 90 / 95 / 100.
-                  A4/A4/A5/A6/A7/A8 respectively.
-                  A4 minimum to guarantee all characters' passives.
-  Constellation   C0/C1/C2/C3/C4/C5/C6.
-                  C3 and C5 are currently decorative only.
-                  Unavailable constellations are not implemented in the program.
-  Weapon          Only weapons that character can equip are listed.
-  Refinement      R1/R2/R3/R4/R5.
-  Talent Levels   Normal / Skill / Burst, e.g. 1/13/13.
-                  Includes C3 and C5 bonuses.
+                  Available: Mizuki, Odette, Anastasya, Aether, Faruzan,
+                  Sucrose, Diona.
+  Level           60 / 70 / 80 / 90 / 95 / 100
+                  (corresponds to A4 / A4 / A5 / A6 / A7 / A8 respectively).
+                  Level 60 (A4) is the minimum to guarantee all characters'
+                  ascension passives are unlocked.
+  Constellation   C0 / C1 / C2 / C3 / C4 / C5 / C6.
+                  Note: C3 and C5 are currently decorative in this dropdown;
+                  they do not automatically bump talent levels in the app,
+                  so enter your boosted talent levels manually.
+                  Unavailable constellations are not implemented.
+  Weapon          Only weapons that the selected character can equip are
+                  listed.
+  Refinement      R1 / R2 / R3 / R4 / R5.
+  Talent Levels   Normal / Skill / Burst (e.g. 1 / 13 / 13).
+                  Remember to include C3 and C5 bonuses here if applicable.
 
-Artifact set and pieces
-  Choose the set, then set each piece's main stat, rarity and up to four
-  substats. Flower and Feather have fixed main stats.
+3.2 Artifacts and Substat Standards
+  Artifact set and pieces:
+    Choose the artifact set, then set each piece's main stat, rarity, and
+    up to four substats. The Flower and Feather pieces have fixed main stats
+    (HP and ATK respectively).
 
-Substat standard (carries only)
-  Manual                    You enter mains and substats yourself.
-  100% RV (Crit Value)      The best-case crit-value distribution for that
-                            character; mains and substats are generated.
-  KQM Standards (40 rolls)  A more forgiving 40-roll standard. https://compendium.keqingmains.com/
+  Substat standard (carries only):
+    Manual                    You enter all main stats and substats yourself.
+    100% RV (Crit Value)      The best-case crit-value distribution for that
+                              character (assuming average roll values); main
+                              stats and substats are automatically generated.
+    KQM Standards (40 rolls)  A more realistic 40-roll standard based on the
+                              KeqingMains framework:
+                              https://compendium.keqingmains.com/
 
-  The two standards lock the main stats AND the substats, and model crit as
-  one Crit Value line. They are only offered for the characters that have a
-  standard defined.
+    Both standards lock the main stats and substats, modeling crit as a
+    unified Crit Value (CV) pool. They are only available for characters
+    that have a defined standard.
+    Note: Energy Recharge requirements are currently NOT taken into account
+    in either 100% RV or KQM Standards mode.
 
-  Currently ER requirements are not taken into consideration in neither 100% RV or KQM Standards mode.
+3.3 Confirming Configuration & Off-Field Stats
+  Press CONFIRM PARTY CONFIGURATION when all four slots are ready. The
+  stat cards appear under the section header and stay visible while you
+  tweak slots and artifacts below. The card stats mirror the off-field
+  stats displayed in-game (so Aether, for example, doesn't receive bonus
+  stats from each resonated element while off-field).
 
-Press CONFIRM PARTY CONFIGURATION when the four slots are ready. The stat
-cards appear under the section header and stay visible while you edit the
-slots and artifacts below.
-
-If you change gear, substats or the substat standard after confirming, the
-app warns you and hides the cards until you confirm again. Running a trial
-always uses the current inputs, confirmed or not.
+  If you change gear, substats, or the substat standard after confirming,
+  the app warns you and hides the cards until you confirm again. However,
+  running a trial always uses your active inputs, confirmed or not.
 
 ----------------------------------------------------------------------
 4. TAB 2 - ENEMY CONFIGURATION
 ----------------------------------------------------------------------
-Set the enemy level and its resistance for each element (Pyro, Cryo, Hydro,
-Electro, Anemo, Geo, Dendro and Physical), then press CONFIRM ENEMY
-CONFIGURATION. Resistance shred from buffs and artifacts is applied on top
-of these values when damage is calculated.
+Set the enemy level and its base resistance for each element (Pyro, Cryo,
+Hydro, Electro, Anemo, Geo, Dendro, and Physical), then click CONFIRM
+ENEMY CONFIGURATION.
+
+Resistance shred from character buffs, passives, and artifact sets (like
+Viridescent Venerer) will be applied dynamically on top of these base
+values when damage is calculated. You can inspect the final resistance
+multiplier for every hit in the detailed timeline table in Tab 4.
 
 ----------------------------------------------------------------------
 5. TAB 3 - ROTATION SETUP
 ----------------------------------------------------------------------
 5.1 Running a trial
   Pick a trial from the dropdown. Preset trials only appear when the party
-  is exactly the team they were written for; custom trials always appear.
+  matches the exact team they were designed for; custom trials are always
+  visible.
+
   The TRIAL BREAKDOWN expander shows the description, the end mode, the
-  trial duration, and every rotation with its field time and steps:
+  trial duration, and every rotation with its field time and individual
+  action steps:
 
       Rotation #1: Standard Mizuki-Faruzan Loop [19.702s] (Repeated 6x)
         Step 1: Aether EN1 (Aether - 1.23s field time)
         Step 2: Faruzan Q (Faruzan - 1.41s field time)
         ...
 
-  END MODE
-    Time       The trial stops at the duration you set.
+  END MODE:
+    Time       The trial stops strictly when the configured duration expires.
     Last swap  The trial ends when the last scheduled character swaps out.
-               The duration shown is the sum of every field time.
+               The duration shown is the sum of all field times.
 
-  Press RUN TRIAL SIMULATION. Each run is stored in the history of Tab 4.
-  If a rotation asks for an ability before its cooldown is over, the run is
-  stopped with a Cooldown Error instead of producing results.
+  Press RUN TRIAL SIMULATION to execute the run. Each completed run is
+  automatically saved to the history log in Tab 4.
+  If a rotation attempts to cast an ability before its cooldown has reset,
+  the simulation stops immediately with a Cooldown Error instead of
+  generating invalid results.
 
 5.2 Field sequences
-  A field sequence is one character's visit: which abilities they use, when
-  each one starts (seconds after the swap-in) and how long they stay on
-  field. Build one in "Create Custom Field Sequence":
-    - enter the name, the character and the field (swap-out) time;
-    - pick an ability and its insertion time, then press "Add";
-    - repeat for every ability of the visit, then Save Field Sequence.
+  A field sequence represents one character's time on-field: which
+  abilities they use, when each ability starts (in seconds relative to
+  when they swap in), and their total on-field duration. You can build one
+  under "Create Custom Field Sequence":
+    - Enter the sequence name, the character, and their total field
+      (swap-out) time.
+    - Select an ability and its start time offset, then click "Add".
+    - Repeat for all abilities cast during that visit, then click "Save
+      Field Sequence".
 
-  Only abilities of characters in the party are offered. Engine-injected
-  procs (extra hits, triggered abilities) can never be added by hand: they
-  fire on their own conditions.
+  Only abilities belonging to characters currently in your party are
+  available. Note that engine-injected procs (extra triggered hits,
+  coordinated attacks, passives) cannot be added manually—they fire
+  automatically based on their own in-game conditions.
 
 5.3 Rotations
-  A rotation is an ordered list of field sequences plus a repetition count.
-  In "Create Custom Rotation" add sequences one by one. The same sequence
-  can be added more than once, which is useful for patterns such as "burst
-  every other loop": put both variants in one rotation and repeat it.
-  Use the arrows to reorder and the X to remove an entry, then Save
-  Rotation.
+  A rotation is an ordered sequence of character visits (field sequences)
+  plus a repetition count. In "Create Custom Rotation", add your saved
+  field sequences one by one.
 
-5.4 Trials
-  A trial combines rotations and defines when it ends. In the trial
-  assembly area set the name and description, choose the end mode (Time or
-  Last swap) and, for Time, the duration. Add rotations with their
-  repetitions using "Add Rotation to Trial", then press Create Trial.
+  The same field sequence can be added multiple times. This is especially
+  handy for patterns like "Burst every other rotation": just include both
+  the Burst variant and the non-Burst variant inside one rotation and set
+  it to repeat. Use the arrow buttons to reorder visits and the "X" button
+  to remove one, then click "Save Rotation".
 
-  "Load selected trial into editor" copies the selected trial's rotations
-  into the editor so they can be tweaked and re-used, including the shipped
-  presets.
+5.4 Trials assembly
+  A trial combines one or more rotations and defines how the simulation
+  concludes. In the trial assembly area:
+    - Set the name and description.
+    - Choose the End Mode (Time or Last swap), setting the duration if
+      using Time.
+    - Add rotations along with their repetition counts using "Add Rotation
+      to Trial".
+    - Click "Create Trial".
+
+  You can also click "Load selected trial into editor" to copy an existing
+  trial's rotations (including the built-in presets) into the editor so you
+  can tweak and repurpose them without starting from scratch.
 
 ----------------------------------------------------------------------
 6. TAB 4 - SIMULATION RESULTS & HISTORY
 ----------------------------------------------------------------------
-Each run is stored with the party, gear, enemy, trial and custom setups it
-used. The newest run is expanded first. An entry can be renamed, deleted
-and exported as a build file.
+Every executed run is recorded in Tab 4 alongside the exact party, gear,
+enemy, and trial configurations used. The most recent run is expanded by
+default. Past runs can be renamed, deleted, or exported as standalone build
+files.
 
-  Total Damage    Sum of every hit's average damage in the trial.
-  Overall DPS     Total Damage divided by the trial duration.
-  Trial Duration  The duration used for the run: the configured window for
-                  a Time trial, the sum of the field times for Last swap.
+6.1 Overview metrics
+  Total Damage    The sum of average damage across every single hit landed
+                  during the trial.
+  Overall DPS     Total Damage divided by the actual trial duration.
+  Trial Duration  The exact simulation time window: the configured limit
+                  for a Time trial, or the cumulative field time for a
+                  Last swap trial.
 
-  Charts show the damage by element, by hit type and by character
-  (reactions excluded), plus a per-second damage bar chart.
+6.2 Charts & visualizations
+  Alongside the summary numbers, the app displays four visual charts to
+  help you analyze team performance:
+    - Damage by Element (Pie Chart): Shows elemental distribution.
+    - Damage by Hit Type / Category (Pie Chart): Breaks down damage by
+      type of damage.
+    - Damage by Character (Pie Chart): Compares each character's direct
+      damage output.
+      Note: This chart excludes Stellar Reaction damage so that credit
+      attribution doesn't artificially inflate a character's personal
+      share over their teammates (see Section 7 for how reaction shares
+      work).
+    - DPS Timeline (Bar Chart): Shows per-second damage output across the
+      entire duration of the trial. This is especially useful for
+      identifying your burst spikes and timing your team's highest DPS
+      windows to coincide with boss vulnerability or down phases.
 
-  ROTATION TIMELINE TABLE
-    One row per event: time, active character, owner, action, element
-    application, aura, reaction and damage. Tick "Show detailed columns"
-    for the full audit view (buff states, stacks, multipliers, ...).
+6.3 The Rotation Timeline table
+  The timeline table provides a complete, chronological log of every event
+  in the trial. At present, events consist of character swaps and damage
+  instances. (Buff activations and stack gains aren't listed as standalone
+  events, but their status is snapshotted on every hit).
+
+  The main purpose of this table is total transparency: it lets you verify
+  exactly how every single number was calculated. By following the game's
+  underlying rules, the table tracks active buffs, debuffs, and stack
+  counts at the exact millisecond of impact, feeding those values directly
+  into the damage formula.
+
+  - The standard view displays only the most essential columns, keeping it
+    clean and easy to read at a glance.
+  - Ticking "Show detailed columns" expands the table into a full audit
+    view. Because this view contains a wealth of data, downloading the
+    table and opening it in spreadsheet software (like Excel or Google
+    Sheets) is highly recommended for deep analysis.
+
+6.4 Detailed timeline column blocks
+  To make the damage math as clear as possible, the detailed table is
+  organized into several main blocks:
+
+  - Description block [Time Elapsed / Active Character / Event Owner / Action Name]:
+    Covers basic event metadata: the timestamp, who is currently on-field,
+    who owns the action, and the specific skill/attack name.
+
+  - Elemental block [Target's Cryo Aura / Dmg Element / Elemental App / Reaction Triggered]:
+    Tracks elements and reactions triggered by the hit. The app currently
+    tracks Cryo auras. If an Anemo attack hits but cannot trigger Swirl
+    because no Cryo aura is present, the app flags it as "No Aura". This
+    makes it easier to spot missed swirls in the rotation.
+
+  - Stats block [HP / ATK / DEF / EM / CR% / CD% / CV]:
+    The event owner's combat stats snapshotted at that moment, including
+    all active stat buffs. (CR% and CD% are hidden when using the Crit
+    Value standard mode, as crit is tracked as combined CV instead).
+
+  - Multipliers block [Base DMG / Quills / Bonus Mult / Elev Mult / Crit Mult / Def Mult / Res Mult]:
+    Displays the core multipliers that determine the hit's damage.
+    (Note: Multipliers are currently hidden for Stellar Reaction damage;
+    see Section 7 for why).
+      * Base DMG: The talent motion value multiplied by the scaling stat
+        (e.g. ATK).
+      * Quills: Additive base damage from buffs. For standard damage,
+        this adds directly to Base DMG.
+      * Bonus Mult: Sum of elemental/stellar damage bonuses, EM scaling,
+        attack-type bonuses, etc.
+      * Elev Mult: The Elevation Multiplier, currently used for Stellar
+        Glimmer damage (see Section 7).
+      * Crit Mult: The statistical expected multiplier from critical hits
+        (1 + CR * CD). In CV mode, this uses the optimal 1:2 crit
+        distribution formula.
+      * Def Mult: Defense mitigation factor based on attacker level vs.
+        enemy level.
+      * Res Mult: Enemy resistance factor based on base elemental resistance
+        minus resistance shred.
+
+  - Damage Output block [Avg DMG / Non-Crit DMG / Crit DMG / Effective Avg DMG]:
+    The final calculated damage numbers. "Effective Avg DMG" shows the
+    damage output before applying the enemy's resistance multiplier, which
+    is useful for testing raw damage thresholds against boss Effective HP
+    pools.
+
+  - Buffs block:
+    Displays the active state of all major buffs relevant to the trial. If
+    a buff utilizes stacks, its current stack count is displayed instead.
+    If there is any buff you want tracked in its own column that isn't
+    currently shown, feel free to ask me and I can add it.
 
 ----------------------------------------------------------------------
-7. SAVING AND LOADING A BUILD
+7. DAMAGE CATEGORIES & STELLAR SWIRL MECHANICS
 ----------------------------------------------------------------------
-Team & Gear Setup -> Save / Load Build
+7.1 The three damage categories
+The calculator divides damage instances into three main categories based on
+the underlying formulas and multipliers they use:
 
-  Export current build (.json)
-      Writes the party, gear (mains and substats), enemy, custom field
-      sequences, rotations and trials, and the selected trial.
+  1. Standard Damage:
+     The conventional damage model used by most abilities in the game. It
+     is mitigated by enemy defense (Def Mult) and affected by elemental
+     resistances (Res Mult). Additive buffs ("quills") are added directly
+     to Base DMG before bonus multipliers.
+     Standard damage is further categorized by attack type: Normal,
+     Charged, Plunge, Skill, and Burst. Elemental damage bonuses apply
+     within the Bonus Multiplier. Currently, there is no Elevation
+     Multiplier for standard damage.
 
-  Upload a previously saved build JSON file
-      Restores the file and keeps every input editable. A file is applied
-      only once; upload it again to start over from it.
+  2. Stellar Damage (Stellar Direct Damage):
+     Known as "stellar direct damage" in the wiki. This damage type
+     completely ignores enemy defense. Additive quills do not scale with
+     the Bonus Multiplier here. The Bonus Multiplier displayed in the
+     timeline table already includes the reaction base damage multiplier
+     (such as from Stellar Jubilee passives).
 
-  User manual (.txt)
-      Downloads this file.
+  3. Stellar Reaction Damage:
+     Known as "stellar indirect damage" in the wiki. The most intricate
+     damage type in the app, covering Stellar Swirls and
+     Stellar Vortex explosions. Because multiple party members contribute
+     to each reaction and their individual contributions can independently
+     crit, the final damage is calculated through a joint probability
+     distribution. See Section 7.2 below for the complete breakdown.
+     Quills for this category (currently only Mizuki C1) are added after
+     contributor shares are distributed, scaling with the quill owner's crit
+     stats, without applying bonus multipliers.
 
-The same export is available per run in Tab 4 ("Export Run"), carrying the
-run's own party, gear and trial.
+7.2 Stellar Swirl & Vortex mechanics
+When characters possessing the Stellar Linchpin effect are present in the
+party, the team's standard Swirl reaction transforms into Stellar Swirl:
+
+  - Stellar Glimmer mode:
+    Triggering a Stellar Swirl puts the entire party into Stellar Glimmer
+    mode for 8 seconds (currently assumed to be permanently active in the
+    sim), enabling their special Stellar Swirl mechanics and buffs.
+
+  - Natural Crits:
+    Unlike standard Swirls (which rely purely on character level and EM and
+    cannot crit), Stellar Swirls and Vortex explosions can naturally crit
+    based on the contributing characters' Crit Rate and Crit DMG stats.
+
+  - Two Damage Instances:
+    Stellar Swirl damage is delivered in two separate instances:
+      1. The Swirl portion:
+         Triggered when Anemo is applied to a Cryo aura, consuming half of
+         the attack's gauge. Unlike the standard Swirl damage, it deals Anemo
+         damage and can critically strike.
+      2. The Stellar Vortex explosion portion:
+         Triggering a Stellar Swirl immediately spawns a Lv 1 Stellar
+         Vortex. The vortex detonates 3 seconds after its creation,
+         dealing Cryo damage and applying 1U of Cryo gauge. The base damage
+         of a Lv 1 Stellar Vortex explosion is 2.67x the swirl's Anemo
+         damage.
+
+  - Vortex leveling & early detonation:
+    Only one Stellar Vortex is permitted on the field at a time. If
+    additional Swirls occur while a vortex is already active, they empower
+    the existing vortex instead of spawning duplicates:
+      * Lv 2 Upgrade: If 2 additional Swirls (3 Swirls total) are
+        triggered before the vortex explodes, it upgrades to a Lv 2 Stellar
+        Vortex. The 3-second detonation timer remains unchanged, but its
+        explosion damage is multiplied by 1.5x.
+      * Premature Detonation: If 3 further Swirls (6 Swirls total) are
+        triggered after upgrading to Lv 2 but before it detonates, the
+        vortex explodes prematurely on that 3rd Swirl. This immediately
+        frees up the field so a brand-new vortex can spawn on subsequent
+        swirls.
+
+  - Multi-Contributor Damage Scaling:
+    Both the Swirl and Vortex portions scale with the combined stats of all
+    characters who contributed to the reaction. Base damage scales with
+    each contributor's character level, their Elemental Mastery, and their
+    Crit stats. Relevant Stellar Swirl/Glimmer bonuses and Elevation buffs
+    are applied as well.
+
+    The engine calculates reaction damage individually for each
+    participating contributor. Each individual contribution rolls for crit
+    independently based on that contributor's Crit Rate. The calculated
+    damage values are then sorted from highest to lowest and distributed
+    according to fixed shares:
+      * 1st contributor (highest): 60% of total damage
+      * 2nd contributor:           30% of total damage
+      * 3rd contributor:            5% of total damage
+      * 4th contributor:            5% of total damage
+
+    If fewer than 4 characters contributed, the percentage distribution
+    remains identical (e.g. with 2 contributors, shares are 60% and 30%),
+    and the remaining unassigned percentage is truncated.
+    If the contributor with the highest damage share rolled a crit, the
+    reaction as a whole is displayed as a critical hit.
+
+  - Contributor credit rules:
+    * Cryo contributors: Every Cryo character who applied or refreshed the
+      Cryo aura used by that specific Stellar Swirl is credited as a
+      contributor. The credit eligibility window matches the duration of
+      the aura (9.5 seconds for a 1U application).
+    * Anemo contributors: Every Anemo character who triggered the Swirl
+      receives contribution credit.
+    * Under these rules, exactly one Anemo character can contribute to the
+      initial Anemo Swirl portion (alongside up to three Cryo characters).
+      The delayed Cryo Vortex explosion can have up to three Anemo
+      contributors and up to three Cryo contributors (disregarding innate
+      enemy auras).
+    * In the timeline log, credit for the Swirl portion is assigned to the
+      triggering Anemo character; credit for the Vortex explosion is
+      assigned to the last Anemo character who triggered a Swirl.
+
+  - Why multipliers are hidden for Stellar Reactions:
+    Because each of the n contributors can independently crit or not crit,
+    evaluating the true average damage requires computing a probability
+    distribution across 2^n distinct states. For 4 contributors, that means
+    2^4 = 16 states! To display Base DMG, Bonus Mult, Elev Mult, and Crit
+    Mult across all 16 states would require 16 * 4 = 64 individual columns
+    in the table. I haven't settled on a clean, compact way to present all
+    those intermediate numbers yet, so they are omitted from the detailed
+    multipliers block for now.
 
 ----------------------------------------------------------------------
-8. TROUBLESHOOTING
+8. SAVING AND LOADING A BUILD
 ----------------------------------------------------------------------
-"Please configure and create your party first..."
-    Fill all four slots in Tab 1 and press Confirm party configuration.
+Found in: Tab 1 (Team & Gear Setup) -> Save / Load Build
 
-"Please confirm your enemy configuration first..."
-    Press Confirm enemy configuration in Tab 2.
+  Export Current Build (.json)
+      Exports a JSON file containing the full party setup, gear (main
+      stats and substats), enemy configuration, custom field sequences,
+      rotations, trials, and the currently selected trial.
 
-"Gear, substats or the substat standard changed..."
-    The confirmed party no longer matches the inputs. Press Confirm party
-    configuration to rebuild it.
+  Upload Saved Build (.json)
+      Restores a previously exported build file, loading all settings into
+      the interface while keeping everything fully editable. A loaded file
+      applies once upon upload; upload it again if you want to revert back
+      to it.
 
-"No trial is available for this team."
-    A preset trial is tied to one specific team. Build a custom trial for
-    any other party.
+  User Manual (.txt)
+      Downloads a copy of this manual file.
 
-"Cooldown Error! <character>'s '<ability>' is on CD until <t>s..."
-    The rotation asks for an ability before its cooldown ends. Move the cast
-    later or remove the extra cast, then run again.
-
-"Field sequence '...': ability '...' no longer exists..."
-    The imported build referenced an ability that is not part of this
-    version; that call was skipped.
-
-A trial ends with little or no damage:
-    Check the Trial Breakdown. A Time trial can end before the first cast if
-    the duration is shorter than the rotation.
+Note: You can also export individual runs directly from Tab 4 using the
+"Export Run" button, which bundles that specific run's party, gear, and
+trial setup.
 
 ----------------------------------------------------------------------
 9. ASSUMPTIONS AND LIMITATIONS
 ----------------------------------------------------------------------
-- Rotations are idealized: abilities start exactly at the times you enter
-  and every hit resolves at its fixed offset from the cast.
-- Hits keep resolving after a character swaps out (for example a summon
-  that stays on field). Nothing is cancelled by a swap.
-- Energy and particles are not simulated. Energy Recharge is only a stat.
-- Constellation levels that only raise talent levels (for example C3 and C5)
-  are not applied automatically; enter the final talent levels yourself.
-- The enemy is a single target with fixed resistances and the damage model
-  of this version.
-- Damage is reported as an average (crit rate x crit damage expected value).
+- Rotations are idealized: abilities' casts hit at the exact timestamps
+  specified in your field sequences, and every hit resolves at its fixed
+  offset from cast time.
+- Persistent hits continue resolving off-field (for example, deployables or
+  summons that remain active after swapping). Swapping never cancels an
+  already-scheduled hit.
+- Energy and particles are not simulated. Energy Recharge is treated solely
+  as a stat line.
+- Constellation levels that grant talent levels (C3 and C5) are not
+  applied automatically; please input your final talent levels directly.
+- The enemy is modeled as a single target with static base resistances and
+  standard defense formulas.
+- Damage values are reported as mathematical averages (Expected Value =
+  Crit Rate * Crit DMG), rather than randomized trial runs.
 
+----------------------------------------------------------------------
+10. NEXT MAJOR IMPLEMENTATIONS
+----------------------------------------------------------------------
+Here is my current wishlist and roadmap for upcoming updates:
+
+- Keep tracking and updating Tsaritsa's buffs and nerfs as new data
+  becomes available.
+- Implement the actual active/inactive state and uptime logic for the
+  Stellar Swirl buff (instead of assuming 100% uptime).
+- Fix the internal cooldown logic for Sacrificial Fragments.
+- Allow customizable artifact main stats in CV mode (right now you can't
+  run an EM circlet on C6 Mizuki while using CV mode).
+- Add substat data validation for artifacts to prevent mathematically
+  impossible rolls.
+- Determine the exact integer rounding rules the game engine uses for
+  final damage values.
+- Rework Mizuki's skill behavior so it functions as a single channeled
+  skill that gets interrupted on swap-out, rather than registering as
+  multiple separate skill casts.
+- Display individual Crit Value (CV) for each artifact piece on the gear
+  screen.
+- Expand elemental aura tracking beyond Cryo to support other elements.
+
+Notes on additional characters:
+- Vodyanitsa and Lumine aren't possible right now. I don't have them
+  myself and need someone's help with precise frame, hit timing, and
+  timeline data before I can implement them properly.
+- If anyone requests her, Vesna wouldn't be too hard to add either. Even
+  though this simulator was originally built specifically for Mizuki, I
+  don't mind welcoming another SSW carry buddy to the party.
 ======================================================================
-
-10. Next Implementations
-
-Keep updating tsaritsa's nerfs/buffs.
-Add the stellar swirl buff.
-Fix sacrificial fragments cooldown.
-Implement data validation for artifacts' substats.
-Find the exact rounding the game engine uses for damage.
-Display artifacts individual CV.
-Apply aura for different elements other that cryo.
-
-Odette and Lumine are not possible rn. I don't have them and I need help to implement them,
-with precise data from someone.
