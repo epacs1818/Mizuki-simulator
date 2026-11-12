@@ -21,7 +21,9 @@ Checks:
   9. Weapons phase 1: permanent stats resolve for every implemented weapon
      (name parsing / secondary keys) and the conditional passives of The Widsith,
      Sacrificial Jade and Sunny Morning Sleep-In honour their triggers, durations
-     and cooldowns.
+     and cooldowns. Phases 2/3 cover the composition stats (A Thousand Floating
+     Dreams, Jade Vista), the periodic/sigil windows and Rainbow Serpent's
+     Rain Bow's off-field trigger.
  10. Diona kit: "Choice Treasures" (20s state opened by her tap OR hold skill hit) fires
      a 3-hit Icy Paw volley 0.270s after ANY Stellar Swirl (3.5s CD from the trigger),
      and her C6 burst cast buffs the ACTIVE character (+200 EM / +0.40 stellar_bonus)
@@ -356,38 +358,45 @@ def _run_weapon_check() -> dict:
 
 
 def _run_weapon_phase2_check() -> dict:
-    """Weapon phase 2: A Thousand Floating Dreams (party composition), Wandering
-    Evenstar (periodic stacks), Thrilling Tales (next-character proc) and
-    Starsealed Edict (cast window + swirl stacks)."""
+    """Weapon phase 2: A Thousand Floating Dreams and Jade Vista (party
+    composition), Wandering Evenstar (periodic stacks), Thrilling Tales
+    (next-character proc) and Starsealed Edict (cast window + swirl stacks)."""
     from stats_calc import build_initial_stats, apply_weapon_party_stats, compute_flat_em
 
     out = {}
     aether = {"constellation": 0, "level": 90, "refinement": 1,
               "weapon": "New Bough", "artifact_set": "2p/2p ATK", "talents": "1/13/13"}
 
-    # --- 1. A Thousand Floating Dreams: composition-dependent permanent stats --
-    def atfd_deltas(members, refinement=5):
+    # --- 1. Composition-dependent permanent stats (ATFD / Jade Vista) ---------
+    # Both weapons count allies per element: same element -> EM, different
+    # element -> a second stat. The element bonus lands on the HOLDER's own
+    # element, so an Anemo holder always moves anemo_bonus.
+    def composition_deltas(weapon, members, refinement=5):
+        """(holder EM, holder anemo_bonus, holder ATK%, first ally's EM)."""
         party, raw, enriched = {}, {}, {}
         for index, name in enumerate(members):
-            weapon = "A Thousand Floating Dreams" if index == 0 else "New Bough"
+            weapon_name = weapon if index == 0 else "New Bough"
             party_ref = refinement if index == 0 else 1
-            party[name] = {"weapon": weapon, "refinement": party_ref}
-            raw[name] = build_initial_stats(name, 90, weapon, "2p/2p EM", {}, {},
+            party[name] = {"weapon": weapon_name, "refinement": party_ref}
+            raw[name] = build_initial_stats(name, 90, weapon_name, "2p/2p EM", {}, {},
                                             refinement=party_ref)
             enriched[name] = dict(raw[name])
         apply_weapon_party_stats(enriched, party)
         holder = members[0]
-        return (enriched[holder]["em"] - raw[holder]["em"],
-                enriched[holder]["anemo_bonus"] - raw[holder]["anemo_bonus"],
-                enriched[members[1]]["em"] - raw[members[1]]["em"])
+        return (round(enriched[holder]["em"] - raw[holder]["em"], 3),
+                round(enriched[holder]["anemo_bonus"] - raw[holder]["anemo_bonus"], 4),
+                round(enriched[holder]["atk_percent"] - raw[holder]["atk_percent"], 4),
+                round(enriched[members[1]]["em"] - raw[members[1]]["em"], 3))
 
-    # Anemo holder: Aether/Odette are Cryo (different), Sucrose is Anemo (same).
-    em, elem, ally = atfd_deltas(["Mizuki", "Aether", "Odette", "Sucrose"])
-    out["atfd_mixed"] = (round(em, 3), round(elem, 4), round(ally, 3))       # 128, .26, 48
-    em, elem, _ = atfd_deltas(["Mizuki", "Aether", "Odette", "Diona"])
-    out["atfd_all_diff"] = (round(em, 3), round(elem, 4))                    # 192, 0
-    em, elem, _ = atfd_deltas(["Mizuki", "Sucrose", "Faruzan"])
-    out["atfd_all_same"] = (round(em, 3), round(elem, 4))                    # 0, .52
+    atfd = "A Thousand Floating Dreams"
+    # Anemo holder: Sucrose shares her element, Aether/Odette are Cryo.
+    out["atfd_mixed"] = composition_deltas(atfd, ["Mizuki", "Aether", "Odette", "Sucrose"])
+    out["atfd_all_diff"] = composition_deltas(atfd, ["Mizuki", "Aether", "Odette", "Diona"])
+    out["atfd_all_same"] = composition_deltas(atfd, ["Mizuki", "Sucrose", "Faruzan"])
+    # Jade Vista: EM per SAME-element ally, ATK% per DIFFERENT-element ally.
+    out["jade_mixed"] = composition_deltas(
+        "Jade Vista", ["Faruzan", "Mizuki", "Sucrose", "Diona"], refinement=1)
+    out["jade_pair"] = composition_deltas("Jade Vista", ["Diona", "Aether"])
 
     party = {"Mizuki": {"weapon": "A Thousand Floating Dreams", "refinement": 5},
              "Aether": {"weapon": "New Bough", "refinement": 1},
@@ -697,6 +706,55 @@ def _run_weapon_phase3_check() -> dict:
     else:
         out["silverdawn_atk_pct"] = out["silverdawn_stellar_cd"] = None
         out["silverdawn_plain_cd"] = None
+
+    # --- 8. Rainbow Serpent's Rain Bow: only OFF-field holder hits count ------
+    # Diona's Icy Paw volley is a genuine off-field hit (a swirl triggers it while
+    # she is benched), so it is the natural trigger. Her own on-field skill hits
+    # must never arm the passive.
+    import abilities as ab
+    rainbow = "Rainbow Serpent's Rain Bow"
+    diona_bow = {"constellation": 6, "level": 90, "refinement": 1,
+                 "weapon": rainbow, "artifact_set": "2p/2p EM", "talents": "1/10/10"}
+
+    on_field = _run_sequences_trial(["Diona E"], {"Diona": dict(diona_bow)}, 4.0)
+    out["rainbow_onfield_never_on"] = not any(
+        e.get("rainbow_bow_state") == "ON" for e in on_field.global_events)
+
+    tail = FieldSequence("Tail", "Aether", swap_out_time=12.0)
+    for offset in (0.5, 4.5, 9.5, 11.5):
+        tail.add_ability(offset, aether_n1)
+    party = {"Diona": dict(diona_bow), "Mizuki": dict(mizuki_base),
+             "Aether": dict(aether_base)}
+    t = RotationTimeline(party=party)
+    t.add_trial(Trial(name="rainbow", end_mode="time", end_time=30.0,
+                      rotations=[Rotation(name="r", sequences=[
+                          presets.STANDARD_FIELD_SEQUENCES["Diona HEQ"],
+                          presets.STANDARD_FIELD_SEQUENCES["Mizuki E (Pullout)"],
+                          tail], repetitions=1)]))
+    t.evaluate_timeline()
+    hits = [e for e in t.global_events if e.get("event_type") == "HIT"]
+    paws = [e for e in hits if e.get("ability_name") == ab.diona_choice_treasures.name]
+    on_paws = [e for e in paws if e.get("rainbow_bow_state") == "ON"]
+    out["rainbow_paws"] = len(paws)
+    out["rainbow_opens"] = bool(on_paws)
+    # The hit that opens the window resolves first (house rule: read pre-event).
+    out["rainbow_first_paw_off"] = bool(paws) and paws[0].get("rainbow_bow_state") == "OFF"
+    # A volley more than 8s after the first ON proves the refresh.
+    first_on = on_paws[0]["global_time"] if on_paws else None
+    out["rainbow_refreshes"] = any(e["global_time"] > first_on + 8.05 for e in on_paws)
+    out["rainbow_expires"] = bool(hits) and hits[-1].get("rainbow_bow_state") == "OFF"
+    out["rainbow_atk_pct"] = (
+        round(_flag_delta(t, on_paws[0], "Diona", "rainbow_bow_state", "atk_percent"), 4)
+        if on_paws else None)
+
+    # Data nobody can pick is dead data: both bows must be offered by the UI.
+    try:
+        with open("streamlit_app.py", encoding="utf-8") as handle:
+            app_source = handle.read()
+    except OSError:
+        app_source = ""
+    out["bow_ui"] = [name for name in (rainbow, "Jade Vista")
+                     if '("%s", [1, 2, 3, 4, 5])' % name not in app_source]
 
     return out
 
@@ -2248,6 +2306,103 @@ def _run_editor_catalogue_check() -> dict:
     out["no_3_char_match"] = not ana_trial.matches_party(["Mizuki", "Anastasya", "Odette"])
     out["timed_trial_not_offered"] = all(
         t.end_mode != "time" for t in presets.STANDARD_TRIALS.values())
+
+    # Sucrose rounds. N1 has to be a real Ability: it was once written with a stray
+    # trailing comma, which turned it into a 1-tuple (unregistered, and "Sucrose QN1"
+    # crashed the field-sequence builder). The two preset trials must also build and
+    # evaluate without a cooldown error.
+    out["sucrose_n1_registered"] = "N1" in abilities.abilities_for("Sucrose")
+    sucrose = {"constellation": 6, "level": 90, "refinement": 1,
+               "weapon": "The Widsith (Average)", "artifact_set": "2p/2p EM",
+               "talents": "1/10/10"}
+    anastasya = {"constellation": 6, "level": 90, "refinement": 1,
+                 "weapon": "Silverdawn", "artifact_set": "2p/2p ATK",
+                 "talents": "1/13/13"}
+
+    def run_sucrose_trial(key, extra, exact=False):
+        """{rotations, duration, hits, total} or {error} for a preset trial.
+
+        exact=True builds the party from *extra* alone (the combination trials are
+        gated on exactly four characters); otherwise DEFAULT_PARTY is the base.
+        """
+        party = {} if exact else copy.deepcopy(presets.DEFAULT_PARTY)
+        party.update({name: dict(data) for name, data in extra.items()})
+        timeline = RotationTimeline(party=party)
+        trial = presets.STANDARD_TRIALS[key]
+        try:
+            duration = timeline.add_trial(trial)
+            timeline.evaluate_timeline()
+        except Exception as exc:  # noqa: BLE001 - reported, not raised
+            return {"error": repr(exc), "rotations": len(trial.rotations)}
+        hits = [e for e in timeline.global_events if e.get("event_type") == "HIT"]
+        return {"error": None,
+                "rotations": len(trial.rotations),
+                "duration": round(duration, 3),
+                "hits": len(hits),
+                "total": round(sum(e.get("average_damage") or 0.0 for e in hits), 1)}
+
+    out["sucrose_aether_trial"] = run_sucrose_trial(
+        "Sucrose Mizuki, Alternating 3 and 4 Nukes", {"Sucrose": dict(sucrose)})
+    out["sucrose_anastasya_trial"] = run_sucrose_trial(
+        "Sucrose Mizuki, Alternating 3 and 4 Nukes (Anastasya)",
+        {"Sucrose": dict(sucrose), "Anastasya": dict(anastasya)})
+    out["sucrose_standard_steps"] = [seq.name for seq in
+                                     presets.STANDARD_ROTATIONS["sucrose_standard"].sequences]
+    aether_rounds = presets.STANDARD_TRIALS["Sucrose Mizuki, Alternating 3 and 4 Nukes"]
+    ana_rounds = presets.STANDARD_TRIALS["Sucrose Mizuki, Alternating 3 and 4 Nukes (Anastasya)"]
+    out["sucrose_trials_gated"] = (
+        aether_rounds.matches_party(presets.MIZUKI_SUCROSE_TEAM)
+        and not aether_rounds.matches_party(presets.MIZUKI_SUCROSE_ANASTASYA_TEAM)
+        and ana_rounds.matches_party(presets.MIZUKI_SUCROSE_ANASTASYA_TEAM)
+        and not ana_rounds.matches_party(presets.MIZUKI_SUCROSE_TEAM))
+
+    # --- The other combination teams (always Mizuki + two of the Cryo trio + a
+    # 4th slot of Sucrose / Faruzan). Two of those parties had no trial at all.
+    mizuki_entry = presets.DEFAULT_PARTY["Mizuki"]
+    aether_entry = presets.DEFAULT_PARTY["Aether"]
+    odette_entry = presets.DEFAULT_PARTY["Odette"]
+    faruzan_entry = presets.DEFAULT_PARTY["Faruzan"]
+    out["triple_cryo_trial"] = run_sucrose_trial(
+        "Triple Cryo Rotation",
+        {"Mizuki": mizuki_entry, "Aether": aether_entry,
+         "Odette": odette_entry, "Anastasya": anastasya}, exact=True)
+    out["sucrose_aether_anastasya_trial"] = run_sucrose_trial(
+        "Sucrose Mizuki, Alternating 3 and 4 Nukes (Aether + Anastasya)",
+        {"Mizuki": mizuki_entry, "Aether": aether_entry,
+         "Anastasya": anastasya, "Sucrose": sucrose}, exact=True)
+    out["sacfrag_aether_anastasya_trial"] = run_sucrose_trial(
+        "Mizuki Sac Frag Pull out 6x rotations (Aether + Anastasya)",
+        {"Mizuki": mizuki_entry, "Aether": aether_entry,
+         "Anastasya": anastasya, "Faruzan": faruzan_entry}, exact=True)
+    out["triple_cryo_steps"] = [seq.name for seq in
+                                presets.STANDARD_ROTATIONS["triple_cryo_standard"].sequences]
+    out["combo_trials_gated"] = (
+        presets.STANDARD_TRIALS["Triple Cryo Rotation"]
+        .matches_party(presets.MIZUKI_TRIPLE_CRYO_TEAM)
+        and not presets.STANDARD_TRIALS["Triple Cryo Rotation"]
+        .matches_party(presets.MIZUKI_SUCROSE_TEAM)
+        and presets.STANDARD_TRIALS["Sucrose Mizuki, Alternating 3 and 4 Nukes (Aether + Anastasya)"]
+        .matches_party(presets.MIZUKI_SUCROSE_AETHER_ANASTASYA_TEAM)
+        and not presets.STANDARD_TRIALS["Sucrose Mizuki, Alternating 3 and 4 Nukes (Aether + Anastasya)"]
+        .matches_party(presets.MIZUKI_SUCROSE_TEAM)
+        and presets.STANDARD_TRIALS["Mizuki Sac Frag Pull out 6x rotations (Aether + Anastasya)"]
+        .matches_party(presets.MIZUKI_SACFRAG_AETHER_ANASTASYA_TEAM)
+        and not presets.STANDARD_TRIALS["Mizuki Sac Frag Pull out 6x rotations (Aether + Anastasya)"]
+        .matches_party(presets.MIZUKI_SACFRAG_TEAM))
+
+    # Every Mizuki + (two of the Cryo trio) + (Sucrose | Faruzan) party must be
+    # playable without building a custom trial.
+    expected_teams = [
+        ["Mizuki", "Aether", "Odette", "Sucrose"],
+        ["Mizuki", "Anastasya", "Odette", "Sucrose"],
+        ["Mizuki", "Aether", "Anastasya", "Sucrose"],
+        ["Mizuki", "Aether", "Odette", "Faruzan"],
+        ["Mizuki", "Anastasya", "Odette", "Faruzan"],
+        ["Mizuki", "Aether", "Anastasya", "Faruzan"],
+    ]
+    out["missing_combination_trials"] = [
+        team for team in expected_teams
+        if not any(t.matches_party(team) for t in presets.STANDARD_TRIALS.values())]
     return out
 
 
@@ -2720,14 +2875,21 @@ def run(verbose: bool = True) -> None:
     # 3i. Weapons phase 2: composition stats, periodic stacks, next-char proc.
     wp2 = _run_weapon_phase2_check()
     phase2_checks = [
-        (wp2["atfd_mixed"] == (128.0, 0.26, 48.0),
-         f"ATFD mixed party gave {wp2['atfd_mixed']}, expected (128.0, 0.26, 48.0)"),
-        (wp2["atfd_all_diff"] == (192.0, 0.0),
-         f"ATFD all-different party gave {wp2['atfd_all_diff']}, expected (192.0, 0.0)"),
-        (wp2["atfd_all_same"] == (0.0, 0.52),
-         f"ATFD all-same party gave {wp2['atfd_all_same']}, expected (0.0, 0.52)"),
+        (wp2["atfd_mixed"] == (64.0, 0.52, 0.0, 48.0),
+         f"ATFD mixed party gave {wp2['atfd_mixed']}, expected (64.0, 0.52, 0.0, 48.0)"),
+        (wp2["atfd_all_diff"] == (0.0, 0.78, 0.0, 48.0),
+         f"ATFD all-different party gave {wp2['atfd_all_diff']}, "
+         f"expected (0.0, 0.78, 0.0, 48.0)"),
+        (wp2["atfd_all_same"] == (128.0, 0.0, 0.0, 48.0),
+         f"ATFD all-same party gave {wp2['atfd_all_same']}, "
+         f"expected (128.0, 0.0, 0.0, 48.0)"),
         (wp2["atfd_idempotent"],
          "A Thousand Floating Dreams party stats are not idempotent"),
+        (wp2["jade_mixed"] == (128.0, 0.0, 0.12, 0.0),
+         f"Jade Vista mixed party gave {wp2['jade_mixed']}, expected (128.0, 0.0, 0.12, 0.0)"),
+        (wp2["jade_pair"] == (128.0, 0.0, 0.0, 0.0),
+         f"Jade Vista same-element party gave {wp2['jade_pair']}, "
+         f"expected (128.0, 0.0, 0.0, 0.0)"),
         (wp2["evenstar_stacks_at"] == [1, 2, 1],
          f"Evenstar stack timeline is {wp2['evenstar_stacks_at']}, expected [1, 2, 1]"),
         (wp2["evenstar_self_one"] is not None
@@ -2814,12 +2976,26 @@ def run(verbose: bool = True) -> None:
          f"expected 0.88 at R5"),
         (abs(wp3["silverdawn_plain_cd"] or 0.0) <= 1e-9,
          f"Silverdawn leaked into STANDARD crit dmg ({wp3['silverdawn_plain_cd']})"),
+        (wp3["rainbow_onfield_never_on"],
+         "Rain Bow armed from an on-field hit by its own holder"),
+        (wp3["rainbow_opens"],
+         f"Rain Bow never armed from an off-field hit "
+         f"({wp3['rainbow_paws']} Icy Paw hits seen)"),
+        (wp3["rainbow_first_paw_off"],
+         "the Icy Paw that opens the Rain Bow window buffed itself"),
+        (wp3["rainbow_refreshes"],
+         "Rain Bow did not refresh on a later off-field hit"),
+        (wp3["rainbow_expires"], "Rain Bow window outlived its 8s"),
+        (abs((wp3["rainbow_atk_pct"] or 0.0) - 0.28) <= 1e-6,
+         f"Rain Bow ATK% is {wp3['rainbow_atk_pct']}, expected 0.28 at R1"),
+        (wp3["bow_ui"] == [],
+         f"bows missing from the UI weapon catalogue: {wp3['bow_ui']}"),
     ]
     phase3_failures = [msg for ok, msg in phase3_checks if not ok]
     failures.extend(phase3_failures)
     if not phase3_failures and verbose:
         print("[OK] weapons phase 3: permanents + Whitelake/Finale/Breeze/Elegy/"
-              "NewBough/Silverdawn behave")
+              "NewBough/Silverdawn/RainBow behave")
 
     # 3k. Artifact rare stats: data + damage yes, card no.
     art = _run_artifact_stat_check()
@@ -3398,6 +3574,53 @@ def run(verbose: bool = True) -> None:
         (cat2["no_3_char_match"], "preset trial matched an incomplete team"),
         (cat2["timed_trial_not_offered"],
          "a time-capped trial is still offered in the preset pool"),
+        (cat2["sucrose_n1_registered"],
+         "Sucrose's N1 is not a registered ability (sucrose_n1 must be an Ability, "
+         "not a tuple)"),
+        (cat2["sucrose_aether_trial"]["error"] is None,
+         f"the Sucrose/Aether trial failed: {cat2['sucrose_aether_trial']['error']}"),
+        (cat2["sucrose_aether_trial"]["rotations"] == 4
+         and abs((cat2["sucrose_aether_trial"].get("duration") or 0.0) - 114.994) <= 1e-3,
+         f"the Sucrose/Aether trial is {cat2['sucrose_aether_trial']}"),
+        (cat2["sucrose_anastasya_trial"]["error"] is None,
+         f"the Sucrose/Anastasya trial failed: {cat2['sucrose_anastasya_trial']['error']}"),
+        (cat2["sucrose_anastasya_trial"]["rotations"] == 6
+         and abs((cat2["sucrose_anastasya_trial"].get("duration") or 0.0) - 187.697) <= 1e-3,
+         f"the Sucrose/Anastasya trial is {cat2['sucrose_anastasya_trial']}"),
+        (cat2["sucrose_standard_steps"] == [
+            "Sucrose E", "AetherECQ", "OdetteEE", "Sucrose E",
+            "Skill Pullout 3 Nukes", "Sucrose E", "AetherECQ", "OdetteEE",
+            "Sucrose QN1", "Burst Pullout 4 Nukes"],
+         f"the Sucrose Standard rotation is {cat2['sucrose_standard_steps']}"),
+        (cat2["sucrose_trials_gated"],
+         "a Sucrose trial is offered for the other team"),
+        (cat2["missing_combination_trials"] == [],
+         f"no preset trial covers these teams: {cat2['missing_combination_trials']}"),
+        (cat2["triple_cryo_trial"]["error"] is None,
+         f"the Triple Cryo trial failed: {cat2['triple_cryo_trial']['error']}"),
+        (cat2["triple_cryo_trial"]["rotations"] == 4
+         and abs((cat2["triple_cryo_trial"].get("duration") or 0.0) - 135.740) <= 1e-3,
+         f"the Triple Cryo trial is {cat2['triple_cryo_trial']}"),
+        (cat2["triple_cryo_steps"] == [
+            "AetherECQ", "AnastasyaEQ", "OdetteQE", "Skill Pullout 4 Nukes",
+            "AetherECQ", "AnastasyaEQ", "OdetteQE", "Burst Pullout 4 Nukes"],
+         f"the Triple Cryo Standard rotation is {cat2['triple_cryo_steps']}"),
+        (cat2["sucrose_aether_anastasya_trial"]["error"] is None,
+         f"the Aether+Anastasya Sucrose trial failed: "
+         f"{cat2['sucrose_aether_anastasya_trial']['error']}"),
+        (cat2["sucrose_aether_anastasya_trial"]["rotations"] == 4
+         and abs((cat2["sucrose_aether_anastasya_trial"].get("duration") or 0.0)
+                 - 118.354) <= 1e-3,
+         f"the Aether+Anastasya Sucrose trial is {cat2['sucrose_aether_anastasya_trial']}"),
+        (cat2["sacfrag_aether_anastasya_trial"]["error"] is None,
+         f"the Aether+Anastasya Sac Frag trial failed: "
+         f"{cat2['sacfrag_aether_anastasya_trial']['error']}"),
+        (cat2["sacfrag_aether_anastasya_trial"]["rotations"] == 1
+         and abs((cat2["sacfrag_aether_anastasya_trial"].get("duration") or 0.0)
+                 - 121.092) <= 1e-3,
+         f"the Aether+Anastasya Sac Frag trial is {cat2['sacfrag_aether_anastasya_trial']}"),
+        (cat2["combo_trials_gated"],
+         "a combination trial is offered for the wrong team"),
     ]
     cat2_failures = [msg for ok, msg in cat2_checks if not ok]
     failures.extend(cat2_failures)

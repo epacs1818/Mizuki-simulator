@@ -26,20 +26,21 @@ WEAPON_STATS = {
         "base_atk": 542.0,
         "em": [265.0 + 100.0, 265.0 + 125.0, 265.0 + 150.0, 265.0 + 175.0, 265.0 + 200.0]
     },
-    # A Thousand Floating Dreams: the description effect depends on the PARTY
-    # COMPOSITION, so it is not a fixed value list. stats_calc.apply_weapon_party_stats()
-    # reads this "party_stats" block:
-    #   em_per_other_element -> holder EM per ally whose element differs from the holder's
-    #   elem_bonus_per_same  -> holder's OWN element bonus per ally sharing that element
-    #   em_to_others         -> flat EM granted to every other party member
+    # A Thousand Floating Dreams / Jade Vista: the description effect depends on the
+    # PARTY COMPOSITION, so it is not a fixed value list. stats_calc.
+    # apply_weapon_party_stats() reads this "party_stats" block:
+    #   em_per_same                   -> holder EM per ally sharing the holder's element
+    #   elem_bonus_per_other_element  -> holder's OWN element bonus per ally of a DIFFERENT element
+    #   atk_percent_per_other_element -> holder ATK% per ally of a different element
+    #   em_to_others                  -> flat EM granted to every other party member
     # The holder itself never counts in either ally tally.
     "A Thousand Floating Dreams":{
         "base_atk": 542.0,
         "em": 265.0,
         "party_stats": {
-            "em_per_other_element": [32.0, 40.0, 48.0, 56.0, 64.0],
-            "elem_bonus_per_same":  [0.10, 0.14, 0.18, 0.22, 0.26],
-            "em_to_others":         [40.0, 42.0, 44.0, 46.0, 48.0],
+            "em_per_same":                  [32.0, 40.0, 48.0, 56.0, 64.0],
+            "elem_bonus_per_other_element": [0.10, 0.14, 0.18, 0.22, 0.26],
+            "em_to_others":                 [40.0, 42.0, 44.0, 46.0, 48.0],
         },
     },
     "Wandering Evenstar":{
@@ -111,6 +112,18 @@ WEAPON_STATS = {
     "Silverdawn":{
         "base_atk": 674.0,
         "crit_rate": 0.441
+    },
+    "Rainbow Serpent's Rain Bow": {
+        "base_atk": 510.0,
+        "er": 0.459
+    },
+    "Jade Vista": {
+        "base_atk": 510.0,
+        "crit_rate": 0.276,
+        "party_stats": {
+            "em_per_same":                   [64.0, 80.0, 96.0, 112.0, 128.0],
+            "atk_percent_per_other_element": [0.12, 0.15, 0.18, 0.21, 0.24],
+        },
     }
 }
 

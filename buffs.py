@@ -222,9 +222,9 @@ CONDITIONAL_CONSTANT_BUFFS = {
     "Sunny Morning Sleep-In Burst": {
         "em": [32.0, 40.0, 48.0, 56.0, 64.0],
     },
-    # A Thousand Floating Dreams has no buff entry: its permanent, party-composition
-    # dependent effect lives in weapons.py ("party_stats") and is applied by
-    # stats_calc.apply_weapon_party_stats().
+    # A Thousand Floating Dreams and Jade Vista have no buff entry: their permanent,
+    # party-composition dependent effect lives in weapons.py ("party_stats") and is
+    # applied by stats_calc.apply_weapon_party_stats().
     "Thrilling Tales of Dragon Slayers":{
         "atk_percent": [0.24, 0.30, 0.36, 0.42, 0.48],
     },
@@ -255,6 +255,11 @@ CONDITIONAL_CONSTANT_BUFFS = {
     "Silverdawn":{
         "atk_percent":[0.40, 0.52, 0.64, 0.76, 0.88],
         "stellar_crit_dmg":[0.40, 0.52, 0.64, 0.76, 0.88],
+    },
+    # Rainbow Serpent's Rain Bow: a hit the holder deals while OFF the field
+    # (owner != active) grants +ATK% for 8s; every later off-field hit refreshes it.
+    "Rainbow Serpent's Rain Bow":{
+        "atk_percent": [0.28, 0.35, 0.42, 0.49, 0.56]
     }
 }
 

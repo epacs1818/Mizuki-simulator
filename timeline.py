@@ -552,6 +552,8 @@ class RotationTimeline:
         silverdawn_expiration: Optional[float] = None
         silverdawn_extensions = 0
         silverdawn_ext_cd_ready: float = -1.0
+        rainbow_bow_holder = self._weapon_holder("Rainbow Serpent's Rain Bow")
+        rainbow_bow_expiration: Optional[float] = None
         # Artifact set trackers (phase 1)
         gilded_holder = self._artifact_holder("Gilded Dreams")
         gilded_expiration: Optional[float] = None
@@ -1244,6 +1246,19 @@ class RotationTimeline:
                 event["finale_state"] = "ON" if finale_on else "OFF"
             else:
                 event["finale_state"] = "OFF"
+
+            #      Rainbow Serpent's Rain Bow: only a hit the holder deals while
+            #      OFF the field counts (owner != active), and it opens an 8s ATK%
+            #      window that refreshes on every later off-field hit.
+            if rainbow_bow_holder is not None:
+                rainbow_bow_on = (rainbow_bow_expiration is not None
+                                  and t <= rainbow_bow_expiration + _WINDOW_EPS)
+                if (e_type == "HIT" and char == rainbow_bow_holder
+                        and active_character != rainbow_bow_holder):
+                    rainbow_bow_expiration = t + 8.0
+                event["rainbow_bow_state"] = "ON" if rainbow_bow_on else "OFF"
+            else:
+                event["rainbow_bow_state"] = "OFF"
 
             #      Breezeborne Refrain: skill/burst damage grants a sigil (0.03s CD,
             #      sigils never expire). At 3 the sigils reset and the whole party

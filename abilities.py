@@ -439,7 +439,7 @@ sucrose_n1 = Ability(
     hits=[
         Hit("N1", 0.000, element="Anemo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Sucrose", "Normal Attack", "1-Hit DMG", 10), attack_type=AttackType.NORMAL, scaling_key=("Sucrose", "Normal Attack", "1-Hit DMG"))
     ]
-),
+)
 
 sucrose_n2 = Ability(
     name="N2",

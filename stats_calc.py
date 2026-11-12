@@ -167,7 +167,8 @@ def party_element_split(party, holder):
     """(same_element_allies, different_element_allies) for *holder*.
 
     The holder itself is never counted. Shared by party-composition effects:
-    A Thousand Floating Dreams' permanent stats and Gilded Dreams' buff.
+    A Thousand Floating Dreams / Jade Vista's permanent stats and Gilded Dreams'
+    buff.
     """
     party = party or {}
     holder_element = get_character_element(holder)
@@ -185,9 +186,10 @@ def apply_weapon_party_stats(stats_map, party):
     plain value because they count the OTHER party members. A weapon opts in with a
     "party_stats" block:
 
-        em_per_other_element   holder EM per ally whose element differs from the holder's
-        elem_bonus_per_same    holder's OWN element bonus per ally sharing that element
-        em_to_others           flat EM granted to every other party member
+        em_per_same                    holder EM per ally sharing the holder's element
+        elem_bonus_per_other_element   holder's OWN element bonus per ally of a different element
+        atk_percent_per_other_element  holder ATK% per ally of a different element
+        em_to_others                   flat EM granted to every other party member
 
     The holder is never counted in either ally tally.
 
@@ -224,13 +226,18 @@ def apply_weapon_party_stats(stats_map, party):
         holder_element = get_character_element(holder)
         same, different = party_element_split(party, holder)
 
-        em_per_other = _get_refinement_val(party_stats.get("em_per_other_element", 0.0), refinement)
-        elem_per_same = _get_refinement_val(party_stats.get("elem_bonus_per_same", 0.0), refinement)
+        em_per_same = _get_refinement_val(party_stats.get("em_per_same", 0.0), refinement)
+        elem_per_other = _get_refinement_val(
+            party_stats.get("elem_bonus_per_other_element", 0.0), refinement)
+        atk_per_other = _get_refinement_val(
+            party_stats.get("atk_percent_per_other_element", 0.0), refinement)
         em_to_others = _get_refinement_val(party_stats.get("em_to_others", 0.0), refinement)
 
-        add(holder, "em", em_per_other * len(different))
+        add(holder, "em", em_per_same * len(same))
+        add(holder, "atk_percent", atk_per_other * len(different))
         if holder_element:
-            add(holder, f"{holder_element.lower()}_bonus", elem_per_same * len(same))
+            add(holder, f"{holder_element.lower()}_bonus",
+                elem_per_other * len(different))
         for other in [char for char in party if char != holder]:
             add(other, "em", em_to_others)
 
@@ -522,6 +529,11 @@ FLAG_TO_BUFFS = {
     # hits keep extending.
     "silverdawn_state": [
         {"type": "constant",     "key": "Silverdawn",                        "target": "User",   "caster": "holder:Silverdawn"},
+    ],
+    # Rainbow Serpent's Rain Bow: only a hit the holder deals while OFF the field
+    # (owner != active) opens the window, and every later one refreshes it.
+    "rainbow_bow_state": [
+        {"type": "constant",     "key": "Rainbow Serpent's Rain Bow",          "target": "User",   "caster": "holder:Rainbow Serpent's Rain Bow"},
     ],
     # ---- Diona (C6) ---------------------------------------------------------
     # Her burst cast hit gives the ACTIVE character flat EM + stellar_bonus for the

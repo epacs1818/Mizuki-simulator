@@ -271,6 +271,8 @@ CHARACTER_WEAPONS = {
         ("Favonius Warbow", [1, 2, 3, 4, 5]),
         ("Sacrificial Bow", [1, 2, 3, 4, 5]),        
         ("Elegy for the End", [1, 2, 3, 4, 5]),        
+        ("Rainbow Serpent's Rain Bow", [1, 2, 3, 4, 5]),
+        ("Jade Vista", [1, 2, 3, 4, 5]),
     ],
     "Faruzan": [
         ("Favonius Warbow", [1, 2, 3, 4, 5]),
@@ -278,6 +280,8 @@ CHARACTER_WEAPONS = {
         ("Sacrificial Bow", [1, 2, 3, 4, 5]),        
         ("Elegy for the End", [1, 2, 3, 4, 5]),
         ("Silverdawn", [1, 2, 3, 4, 5]),
+        ("Rainbow Serpent's Rain Bow", [1, 2, 3, 4, 5]),
+        ("Jade Vista", [1, 2, 3, 4, 5]),
     ],
     "Sucrose": [
         ("Sacrificial Fragments", [1, 2, 3, 4, 5]),
@@ -297,6 +301,8 @@ CHARACTER_WEAPONS = {
         ("Sacrificial Bow", [1, 2, 3, 4, 5]),        
         ("Elegy for the End", [1, 2, 3, 4, 5]),
         ("Silverdawn", [1, 2, 3, 4, 5]),
+        ("Rainbow Serpent's Rain Bow", [1, 2, 3, 4, 5]),
+        ("Jade Vista", [1, 2, 3, 4, 5]),
     ],
 }
 

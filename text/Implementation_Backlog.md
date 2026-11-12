@@ -34,7 +34,7 @@ but not yet verified
 | Sacrificial Jade | Catalyst | ✔ (on/off-field toggle passive) |
 | Sunny Morning Sleep-In | Catalyst | ✔ (swirl 6s / skill 9s / burst 30s EM windows) |
 | Starcaller's Watch | Catalyst | ✔ (permanent EM only, no buff) |
-| A Thousand Floating Dreams | Catalyst | ✔ (permanent stats from party composition) |
+| A Thousand Floating Dreams | Catalyst | ✔ (permanent stats from party composition: EM per same-element ally, elemental DMG bonus per different-element ally, +EM to the others) |
 | Wandering Evenstar | Catalyst | ✔ (10s cycle / 12s buff, stacks to 2, self + others) |
 | Thrilling Tales of Dragon Slayers | Catalyst | ✔ (swap-out proc → next character, 10s, 20s CD) |
 | Starsealed Edict | Catalyst | ✔ (permanent CD% + 20s skill-cast EM window + swirl stacks) |
@@ -46,6 +46,8 @@ but not yet verified
 | Breezeborne Refrain | Bow | ✔ (permanent ER + 3 sigils → party stellar_bonus 12s) |
 | Elegy for the End | Bow | ✔ (permanent EM + 4 sigils → party ATK%/EM, 20s lockout) |
 | Silverdawn | Bow | ✔ (6s self ATK%/stellar crit, +3s per swirl/stellar hit) |
+| Rainbow Serpent's Rain Bow | Bow | ✔ (off-field hit by the holder → 8s self ATK%, refreshed on every later one) |
+| Jade Vista | Bow | ✔ (permanent stats from party composition: EM per same-element ally, ATK% per different-element ally) |
 
 ## Artifact sets
 

@@ -73,6 +73,7 @@ BUFFS = [
     {"key": "newbough_stacks", "label": "New Bough Stacks", "group": "Weapon", "owner": "New Bough"},
     {"key": "silverdawn_state", "label": "Silverdawn Buff", "group": "Weapon", "owner": "Silverdawn"},
     {"key": "silverdawn_extensions", "label": "Silverdawn Ext", "group": "Weapon", "owner": "Silverdawn"},
+    {"key": "rainbow_bow_state", "label": "Rain Bow ATK%", "group": "Weapon", "owner": "Rainbow Serpent's Rain Bow"},
     # --- Artifact sets -----------------------------------------------------
     {"key": "hotf_state", "label": "HotF Stellar", "group": "Artifact", "owner": "Heart Of The Furnace"},
     {"key": "vv_state", "label": "VV Elemental Shred", "group": "Artifact", "owner": "Viridescent Venerer"},
