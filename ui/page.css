@@ -1,0 +1,142 @@
+<style>
+    /* Page styling: solid dark blocks on a dimmed wallpaper.
+     *
+     * The look: every block of content sits on a solid, opaque dark panel with white
+     * text, and the wallpaper shows in the gaps BETWEEN those panels. Nothing is
+     * translucent, so text contrast is the same over any part of the wallpaper.
+     *
+     * The wallpaper placeholder is substituted by ui.style.page_css(); the base64
+     * blob is never stored in this file.
+     */
+    :root {
+        --page-ink: #0e1117;                       /* solid background behind text */
+        --page-panel: #1a2130;                     /* grouped blocks: cards on top of it */
+        --page-edge: rgba(255, 255, 255, 0.08);    /* 1px block outline */
+        --page-radius: 16px;
+        --page-scrim: rgba(5, 7, 11, 0.55);        /* dims the wallpaper only */
+    }
+
+    /* 1. The wallpaper, pinned to the viewport. */
+    .stApp {
+        background-image: url("data:image/jpeg;base64,__WALLPAPER__");
+        background-size: cover;
+        background-position: center;
+        background-repeat: no-repeat;
+        background-attachment: fixed;
+    }
+
+    /* 2. Scrim: keeps the wallpaper visible but calm enough to sit behind the gaps. */
+    .stApp::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        z-index: 0;
+        pointer-events: none;
+        background: var(--page-scrim);
+    }
+
+    [data-testid="stMain"] {
+        position: relative;
+        z-index: 1;
+    }
+
+    /* 3. No sheet across the page: the container stays transparent so the wallpaper
+          shows in the gaps between the blocks. */
+    [data-testid="stMainBlockContainer"] {
+        background: transparent !important;
+        border: 0 !important;
+        box-shadow: none !important;
+        padding-top: 2rem !important;
+    }
+
+    /* 4. Everything OUTSIDE the tabs (the title) gets its own solid plate. */
+    [data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"]
+        > [data-testid="stElementContainer"]:not(:has([data-baseweb="tab-list"])) {
+        background: var(--page-ink);
+        border: 1px solid var(--page-edge);
+        border-radius: var(--page-radius);
+        padding: 0.4rem 1.1rem;
+        margin-bottom: 0.9rem;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+    }
+
+    /* ...except the injected <style> and the "---" separators, which are not blocks. */
+    [data-testid="stElementContainer"]:has(style),
+    [data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"]
+        > [data-testid="stElementContainer"]:has(> [data-testid="stMarkdownContainer"] hr) {
+        background: transparent;
+        border: 0;
+        box-shadow: none;
+        padding: 0;
+        margin: 0;
+    }
+
+    /* 5. Tabs: a solid bar, and the tab panel is the main solid surface. */
+    div[data-baseweb="tab-list"] {
+        background: var(--page-panel) !important;
+        border: 1px solid var(--page-edge) !important;
+        padding: 8px 12px !important;
+        border-radius: 14px !important;
+        gap: 6px !important;
+        margin-bottom: 12px !important;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45) !important;
+    }
+
+    div[data-baseweb="tab"] {
+        border-radius: 9px !important;
+        color: var(--text-color) !important;
+        opacity: 0.72;
+        font-weight: 600 !important;
+        padding: 8px 16px !important;
+        transition: all 0.25s ease !important;
+    }
+
+    div[data-baseweb="tab"]:hover {
+        background: rgba(255, 255, 255, 0.07) !important;
+        opacity: 1;
+    }
+
+    button[data-baseweb="tab"][aria-selected="true"] {
+        background: var(--primary-color) !important;
+        color: #ffffff !important;
+        opacity: 1;
+    }
+
+    div[data-baseweb="tab-panel"] {
+        background: var(--page-ink) !important;
+        border: 1px solid var(--page-edge) !important;
+        border-radius: var(--page-radius) !important;
+        padding: 22px 26px !important;
+        box-shadow: 0 14px 38px rgba(0, 0, 0, 0.5) !important;
+    }
+
+    /* 6. Grouped blocks inside a tab: a lighter solid card, so the blocks read as
+          separate boxes on the dark surface (expanders, metrics, tables, alerts). */
+    [data-testid="stExpander"],
+    [data-testid="stMetric"],
+    [data-testid="stDataFrame"],
+    [data-testid="stAlert"] {
+        background: var(--page-panel) !important;
+        border: 1px solid var(--page-edge) !important;
+        border-radius: 12px !important;
+        padding: 0.55rem 0.85rem !important;
+    }
+
+    /* 7. White text everywhere (the theme is pinned to dark, so --text-color is white);
+          captions stay one step dimmer so the hierarchy survives. */
+    .stApp,
+    .stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp h5, .stApp h6,
+    .stApp p, .stApp li, .stApp label {
+        color: var(--text-color);
+    }
+
+    [data-testid="stCaptionContainer"] {
+        opacity: 0.85;
+    }
+
+    /* 8. The top bar floats over the wallpaper too: give it a solid strip. */
+    [data-testid="stHeader"] {
+        background: var(--page-ink);
+        border-bottom: 1px solid var(--page-edge);
+    }
+</style>

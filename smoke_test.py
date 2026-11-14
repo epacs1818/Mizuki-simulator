@@ -35,6 +35,8 @@ Checks:
  12. The Anastasya kit values (50.4% stellar swirl base, 0.354 burst bonus at B13)
      are pinned as literals, so an accidental drift cannot pass silently.
 """
+from pathlib import Path
+
 from timeline import (
     RotationTimeline, SUCROSE_BURST_WINDOW, ANASTASYA_UNSEAL_DELAY,
     ANASTASYA_ACCOLADES_WINDOW, ANASTASYA_C6_TRIUMPH_CD,
@@ -58,6 +60,11 @@ import copy
 import presets
 import build_io
 
+
+def _ui_source() -> str:
+    """Every UI source file, concatenated (two checks scan the UI as text)."""
+    return chr(10).join(p.read_text(encoding="utf-8")
+                        for p in [Path("streamlit_app.py"), *sorted(Path("ui").rglob("*.py"))])
 
 def _buffed_stats(timeline, event, char):
     """Resolve *char*'s final stats for one event (same path the engine uses)."""
@@ -749,8 +756,7 @@ def _run_weapon_phase3_check() -> dict:
 
     # Data nobody can pick is dead data: both bows must be offered by the UI.
     try:
-        with open("streamlit_app.py", encoding="utf-8") as handle:
-            app_source = handle.read()
+        app_source = _ui_source()
     except OSError:
         app_source = ""
     out["bow_ui"] = [name for name in (rainbow, "Jade Vista")
@@ -2406,6 +2412,63 @@ def _run_editor_catalogue_check() -> dict:
     return out
 
 
+def _run_ui_style_check() -> dict:
+    """ui/page.css must reach Streamlit as a single <style> block.
+
+    Anything before <style> (a stray comment, a BOM, a markdown heading) makes
+    Streamlit treat the payload as a paragraph, so the CSS - base64 wallpaper
+    included - is printed on the page as visible text. The wallpaper must also be
+    embedded exactly once: a second placeholder in a comment doubles the payload.
+    """
+    from ui.style import page_css
+
+    css = page_css()
+    return {
+        "head": css[:40],
+        "starts_with_style": css.startswith("<style>"),
+        "style_tags": sum(1 for line in css.splitlines() if line.strip() == "<style>"),
+        "no_placeholder": "__WALLPAPER__" not in css,
+        "data_uris": css.count("data:image/jpeg;base64,"),
+        "bytes": len(css.encode("utf-8")),
+    }
+
+
+def _run_ui_undefined_check() -> dict:
+    """Every name the UI uses must be defined in its own module.
+
+    The UI is split over streamlit_app.py and ui/**, so a missing import only blows
+    up when that exact branch runs (a results card, a file upload). This walks the
+    symbol tables instead, so the hole is found without clicking every button.
+    """
+    import builtins
+    import symtable
+
+    dunder = {"__file__", "__name__", "__doc__", "__package__", "__spec__",
+              "__builtins__"}
+    known = set(dir(builtins)) | dunder
+
+    def used_globals(table):
+        names = set()
+        for symbol in table.get_symbols():
+            if symbol.is_global() and symbol.is_referenced():
+                names.add(symbol.get_name())
+        for child in table.get_children():
+            names |= used_globals(child)
+        return names
+
+    files = [Path("streamlit_app.py")] + sorted(Path("ui").rglob("*.py"))
+    problems = []
+    for path in files:
+        table = symtable.symtable(path.read_text(encoding="utf-8-sig"), str(path), "exec")
+        defined = {s.get_name() for s in table.get_symbols()
+                   if s.is_assigned() or s.is_imported() or s.is_parameter()
+                   or s.is_namespace()}
+        missing = sorted(used_globals(table) - defined - known)
+        if missing:
+            problems.append(f"{path}: " + ", ".join(missing))
+    return {"files": len(files), "problems": problems}
+
+
 def _run_save_load_check() -> dict:
     """Build documents (save / load): a saved build must round-trip completely.
 
@@ -2532,8 +2595,7 @@ def _run_save_load_check() -> dict:
     # so a rename in streamlit_app.py has to be mirrored in build_io (and vice versa).
     out["key_mismatches"] = ["(streamlit_app.py not found)"]
     try:
-        with open("streamlit_app.py", encoding="utf-8") as handle:
-            app_source = handle.read()
+        app_source = _ui_source()
     except OSError:
         pass
     else:
@@ -3627,6 +3689,41 @@ def run(verbose: bool = True) -> None:
     if not cat2_failures and verbose:
         print(f"[OK] editor catalogues: {cat2['sequence_count']} field sequences / "
               f"{cat2['ability_count']} abilities, party-gated; preset trials team-gated")
+
+    # Page stylesheet (ui/page.css): Streamlit must receive ONE <style> block and
+    # nothing before it, or it renders the payload as a paragraph and the CSS
+    # (base64 wallpaper included) leaks onto the page as visible text.
+    ui_style = _run_ui_style_check()
+    head = ui_style["head"]
+    tags = ui_style["style_tags"]
+    uris = ui_style["data_uris"]
+    kb = ui_style["bytes"] // 1024
+    ui_checks = [
+        (ui_style["starts_with_style"],
+         f"ui/page.css starts with {head!r}; Streamlit renders anything before "
+         f"<style> as text"),
+        (tags == 1,
+         f"ui/page.css has {tags} <style> tags"),
+        (ui_style["no_placeholder"],
+         "the wallpaper placeholder was not substituted"),
+        (uris == 1,
+         f"the wallpaper is embedded {uris} times (a second placeholder doubles "
+         f"the payload)"),
+    ]
+    ui_failures = [msg for ok, msg in ui_checks if not ok]
+    failures.extend(ui_failures)
+    if not ui_failures and verbose:
+        print(f"[OK] page stylesheet: one <style> block, nothing before it, "
+              f"wallpaper inlined once ({kb} KB)")
+
+    # Undefined-name sweep over the whole UI (streamlit_app.py + ui/**).
+    ui_names = _run_ui_undefined_check()
+    count = ui_names["files"]
+    ui_name_failures = list(ui_names["problems"])
+    failures.extend(f"undefined name(s) in the UI -> {problem}"
+                    for problem in ui_name_failures)
+    if not ui_name_failures and verbose:
+        print(f"[OK] ui names: {count} modules, every used global is defined")
 
     # 2p. Trial duration accounting.
     dur = _run_trial_duration_check()
