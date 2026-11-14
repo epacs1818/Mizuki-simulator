@@ -2412,6 +2412,371 @@ def _run_editor_catalogue_check() -> dict:
     return out
 
 
+def _run_editor_port_check() -> dict:
+    """The ported editor must agree with the runner, trial for trial.
+
+    The editor talks to the same engine through its own adapter (ui/editor), so a
+    silent mismatch here would mean the strip and the history disagree. Every preset
+    is simulated both ways and compared, then the payload builders are fed one of
+    those results to prove they describe exactly the blocks and hits they were given.
+    The strip's one off-field cue is checked as well: a tick may only be dimmed when
+    the hit's owner was off field, and dimming may not be flattened away.
+    """
+    import copy
+
+    import presets
+    from timeline import RotationTimeline
+    from ui.editor import catalog, engine, payloads, validate
+
+    problems = []
+    party = copy.deepcopy(presets.DEFAULT_PARTY)
+    spec = catalog.preset_spec(list(presets.DEFAULT_PARTY.keys()))
+    characters = spec["catalog"]["characters"]
+    abilities = spec["catalog"]["abilities"]
+
+    for sequence_key, sequence in spec["field_seqs"].items():
+        if characters.get(sequence["character"]) is None:
+            problems.append(f"{sequence_key}: unknown character")
+        for placement in sequence["placements"]:
+            if placement["ability"] not in abilities:
+                problems.append(f"{sequence_key}: unknown ability {placement['ability']}")
+    for rotation_key, rotation in spec["rotations"].items():
+        for block in rotation["blocks"]:
+            if block not in spec["field_seqs"]:
+                problems.append(f"{rotation_key}: unknown block {block}")
+    for trial_key, trial in spec["trials"].items():
+        for slot in trial["slots"]:
+            if slot["rotation"] not in spec["rotations"]:
+                problems.append(f"{trial_key}: unknown rotation {slot['rotation']}")
+        for issue in validate.trial_issues(spec, trial_key, trial["required_party"]):
+            if issue["severity"] == "error":
+                problems.append(f"{trial_key}: {issue['message']}")
+
+    ability_map = engine._ability_map()
+    compared = 0
+    hits_by_trial = {}
+    for trial_key, trial in spec["trials"].items():
+        result = engine.simulate(spec, trial_key, party, {})
+        if result["warnings"]:
+            problems.append(f"{trial_key}: {result['warnings'][0]['message']}")
+            continue
+        direct = RotationTimeline(party=copy.deepcopy(party))
+        duration = direct.add_trial(engine._trial(trial, spec, ability_map))
+        direct.evaluate_timeline()
+        expected = direct.get_analytics_summary(duration)["total_damage"]
+        totals = result["totals"]
+        if abs(totals["damage"] - expected) > 1e-6:
+            problems.append(f"{trial_key}: adapter {totals['damage']:.3f} != engine {expected:.3f}")
+        if abs(sum(result["by_block"].values()) - totals["damage"]) > 1e-3:
+            problems.append(f"{trial_key}: block damage does not add up to the total")
+        compared += 1
+        hits_by_trial[trial_key] = totals["hits"]
+
+    sample = "triple_cryo_rotation"
+    result = engine.simulate(spec, sample, party, {})
+    payload = payloads.trial_payload(spec, sample, result, px_per_sec=14.0)
+    bands = [item for item in payload["items"] if item["kind"] == "band"]
+    ticks = [item for item in payload["items"] if item["kind"] == "hit"]
+    if len(bands) != len(result["blocks"]):
+        problems.append(f"{sample}: {len(bands)} bands for {len(result['blocks'])} blocks")
+    if len(ticks) != len(result["hits"]):
+        problems.append(f"{sample}: {len(ticks)} ticks for {len(result['hits'])} hits")
+    if payload["tMax"] < max(block["end"] for block in result["blocks"]) - 1e-6:
+        problems.append(f"{sample}: the strip axis ends before the last block")
+    # The one off-field cue the editor keeps: a tick is dimmed when its owner was
+    # not the active character. It is a paint flag only, so it must mirror the
+    # engine's on_field exactly and must not be flattened back to False.
+    dimmed_ticks = [tick for tick in ticks if tick["off"]]
+    off_field_hits = [hit for hit in result["hits"] if not hit["on_field"]]
+    if len(dimmed_ticks) != len(off_field_hits):
+        problems.append(f"{sample}: {len(dimmed_ticks)} dimmed ticks for "
+                        f"{len(off_field_hits)} off-field hits")
+    elif not dimmed_ticks:
+        problems.append(f"{sample}: no hit is dimmed, the off-field cue is flat")
+
+    rotation_key = "standard_mizuki_loop"
+    preview = payloads.rotation_preview(spec, rotation_key, party, {})
+    loop = payloads.rotation_payload(spec, rotation_key, preview)
+    markers = [item for item in loop["items"] if item["kind"] == "marker"]
+    if len(markers) != 2:
+        problems.append(f"{rotation_key}: expected a loop start and a loop end marker")
+    if abs(loop["tMax"] - (payloads.rotation_seconds(spec, rotation_key))) < 1e-6:
+        problems.append(f"{rotation_key}: the strip hides the loop tail")
+    loop_ticks = [item for item in loop["items"] if item["kind"] == "hit"]
+    first_loop = payloads.rotation_seconds(spec, rotation_key)
+    drawn = {block["id"] for block in preview["blocks"] if block["start"] < first_loop - 1e-9}
+    loop_hits = [hit for hit in preview["hits"] if hit["block"] in drawn]
+    dimmed_loop = [tick for tick in loop_ticks if tick["off"]]
+    off_field_loop = [hit for hit in loop_hits if not hit["on_field"]]
+    if len(dimmed_loop) != len(off_field_loop):
+        problems.append(f"{rotation_key}: {len(dimmed_loop)} dimmed ticks for "
+                        f"{len(off_field_loop)} off-field hits")
+    elif not dimmed_loop:
+        problems.append(f"{rotation_key}: no hit is dimmed, the off-field cue is flat")
+
+    sequence_key = next(iter(spec["field_seqs"]))
+    focus = payloads.field_sequence_payload(spec, sequence_key)
+    if not any(item.get("draggable") for item in focus["items"]):
+        problems.append(f"{sequence_key}: the placements are not draggable")
+    if not any(item["kind"] == "marker" for item in focus["items"]):
+        problems.append(f"{sequence_key}: the swap markers are missing")
+
+    # The rotation table is measured inside the trial, so its rows must add up to
+    # the trial total, cover every rotation played, and count every hit once.
+    from ui.editor import results as editor_results
+
+    table = editor_results.rotation_rows(spec, result)
+    if abs(sum(row["damage"] for row in table) - result["totals"]["damage"]) > 1e-3:
+        problems.append(f"{sample}: the rotation table does not add up to the trial total")
+    played = {block["rotation"] for block in result["blocks"]}
+    if {row["id"] for row in table} != played:
+        problems.append(f"{sample}: the rotation table lists {len(table)} of "
+                        f"{len(played)} rotations")
+    if sum(row["hits"] for row in table) != len(result["hits"]):
+        problems.append(f"{sample}: the rotation table counts "
+                        f"{sum(row['hits'] for row in table)} of {len(result['hits'])} hits")
+    busiest = max(table, key=lambda row: row["uses"])
+    passes = editor_results.occurrence_rows(spec, result, busiest["id"])
+    if len(passes) != busiest["uses"]:
+        problems.append(f"{sample}: {len(passes)} passes for {busiest['uses']} occurrences")
+    if abs(sum(row["damage"] for row in passes) - busiest["damage"]) > 1e-3:
+        problems.append(f"{sample}: the per-occurrence rows do not add up to the rotation")
+
+    return {
+        "problems": problems,
+        "counts_match": (len(spec["field_seqs"]) == len(presets.FIELD_SEQUENCE_REGISTRY)
+                         and len(spec["rotations"]) == len(presets.STANDARD_ROTATIONS)
+                         and len(spec["trials"]) == len(presets.STANDARD_TRIALS)
+                         and len(characters) == len(presets.DEFAULT_PARTY) + 3),
+        "character_count": len(characters),
+        "ability_count": len(abilities),
+        "sequence_count": len(spec["field_seqs"]),
+        "rotation_count": len(spec["rotations"]),
+        "trial_count": len(spec["trials"]),
+        "compared": compared,
+        "hits": hits_by_trial,
+        "active": spec["active_trial"],
+        "dimmed": {"trial": len(dimmed_ticks), "rotation": len(dimmed_loop)},
+    }
+
+
+def _run_editor_edit_check() -> dict:
+    """The editor must build a trial from nothing, and refuse the bad edits.
+
+    Every rule the screens rely on lives in ui/editor/mutations.py, so this drives
+    that module the way the widgets do: duplicate a preset, rename it, add a block,
+    build a sequence and a trial around it, then try what must fail.
+    """
+    import copy
+
+    import presets
+    from ui.editor import engine, mutations, payloads, results, validate
+    from ui.editor.catalog import preset_spec
+
+    problems = []
+    spec = preset_spec(list(presets.DEFAULT_PARTY.keys()))
+    party = copy.deepcopy(presets.DEFAULT_PARTY)
+
+    def expect_refusal(action, why):
+        try:
+            action()
+        except ValueError:
+            return
+        problems.append("allowed: " + why)
+
+    expect_refusal(lambda: mutations.rename(spec, "rotations", "standard_mizuki_loop", "x"),
+                   "renaming a preset rotation")
+
+    expect_refusal(lambda: mutations.delete(spec, "rotations", "standard_mizuki_loop"),
+                   "deleting a preset rotation")
+
+    rotation_id = mutations.duplicate(spec, "rotations", "standard_mizuki_loop")
+    if spec["rotations"][rotation_id]["preset"]:
+        problems.append("the duplicate is still marked as a preset")
+    mutations.rename(spec, "rotations", rotation_id, "Edited loop")
+
+    sequence_id = mutations.new_sequence(spec, "Edit probe skill", "sucrose")
+    placement_id = mutations.add_placement(spec, sequence_id, "sucrose__sucrose_skill", 0.0)
+    mutations.move_placement(spec, sequence_id, placement_id, 0.5)
+    mutations.set_field_time(spec, sequence_id, 2.5)
+    placed = spec["field_seqs"][sequence_id]["placements"][0]
+    if abs(placed["first_hit"] - 0.5) > 1e-9:
+        problems.append("moving a placement did not stick")
+    if abs(spec["field_seqs"][sequence_id]["field_time"] - 2.5) > 1e-9:
+        problems.append("the swap-out time did not stick")
+
+    mutations.add_block(spec, rotation_id, sequence_id, 0)
+    trial_id = mutations.new_trial(spec, "Built trial", rotation_id)
+    mutations.set_trial_end(spec, trial_id, "time", 30.0)
+    mutations.set_trial_party(spec, trial_id, ["mizuki", "sucrose"])
+    slot_id = spec["trials"][trial_id]["slots"][0]["id"]
+    mutations.set_slot_repeat(spec, trial_id, slot_id, 2)
+    if spec["trials"][trial_id]["slots"][0]["repeat"] != 2:
+        problems.append("the slot repeat did not stick")
+
+    result = engine.simulate(spec, trial_id, party, {})
+    if result["warnings"]:
+        problems.append("the built trial warned: " + result["warnings"][0]["message"])
+    expected = len(spec["rotations"][rotation_id]["blocks"]) * 2
+    if len(result["blocks"]) != expected:
+        problems.append("expected %d blocks, got %d" % (expected, len(result["blocks"])))
+    if result["totals"]["hits"] <= 0:
+        problems.append("the built trial produced no hits")
+
+    frame = results.slim_frame(spec, result)
+    if list(frame.columns) != results.COLUMNS:
+        problems.append("slim table columns are %s" % list(frame.columns))
+    preview = payloads.rotation_preview(spec, rotation_id, party, {})
+    loop = results.loop_totals(spec, rotation_id, preview)
+    if loop["duration"] <= 0 or loop["hits"] <= 0:
+        problems.append("the loop totals are empty")
+    damage = results.slot_damage(result)
+    if abs(sum(damage.values()) - result["totals"]["damage"]) > 1e-3:
+        problems.append("per-slot damage does not add up to the total")
+
+    # Publishing must not change a single number: the runner gets the same trial.
+    from timeline import RotationTimeline
+    from ui.editor import publish
+
+    built, published_sequences, published_rotations = publish.build(spec, trial_id)
+    direct = RotationTimeline(party=copy.deepcopy(party))
+    published_duration = direct.add_trial(built)
+    direct.evaluate_timeline()
+    published = direct.get_analytics_summary(published_duration)["total_damage"]
+    if abs(published - result["totals"]["damage"]) > 1e-6:
+        problems.append("the published trial deals %.1f, the editor shows %.1f"
+                        % (published, result["totals"]["damage"]))
+    if built.required_party != ["Mizuki", "Sucrose"]:
+        problems.append("the published trial carries the party %s"
+                        % (built.required_party,))
+    if not published_sequences or not published_rotations:
+        problems.append("publishing returned no rotations or sequences")
+
+    # Re-opening a published trial must land on the same spec entry and deal the same
+    # damage: runner -> editor -> runner has to be a lossless loop, and it is what the
+    # "Open in editor" button does.
+    from ui.editor import catalog, importer
+
+    reopened = importer.trial_to_spec(spec, built)
+    if reopened != trial_id:
+        problems.append("re-opening the published trial landed on %r, not %r"
+                        % (reopened, trial_id))
+    elif spec["trials"][reopened].get("preset"):
+        problems.append("a trial built in the editor was re-opened as a read-only preset")
+    again = engine.simulate(spec, reopened, party, {})
+    if abs(again["totals"]["damage"] - result["totals"]["damage"]) > 1e-6:
+        problems.append("the re-opened trial deals %.1f, the editor showed %.1f"
+                        % (again["totals"]["damage"], result["totals"]["damage"]))
+
+    # Opening a preset must land on that preset (that is what keeps it read-only),
+    # and a trial the spec has never seen must be copied in as an editable entry.
+    active = spec["active_trial"]
+    preset_object = next(trial for key, trial in presets.STANDARD_TRIALS.items()
+                         if catalog.slug(key) == active)
+    if importer.trial_to_spec(spec, preset_object) != active:
+        problems.append("opening the preset %r did not land on the preset" % active)
+    stranger = copy.deepcopy(preset_object)
+    stranger.name = "Opened from outside"
+    stranger_id = importer.trial_to_spec(spec, stranger)
+    if stranger_id == active:
+        problems.append("a renamed copy overwrote the preset it came from")
+    if spec["trials"][stranger_id].get("preset"):
+        problems.append("a trial copied in from outside was marked read-only")
+    copied = engine.simulate(spec, stranger_id, party, {})
+    preset_damage = engine.simulate(spec, active, party, {})["totals"]["damage"]
+    if abs(copied["totals"]["damage"] - preset_damage) > 1e-6:
+        problems.append("the copied-in trial deals %.1f, not the %.1f of the trial it "
+                        "came from" % (copied["totals"]["damage"], preset_damage))
+
+    # A broken field sequence must be reported on the trial that plays it, with a
+    # `where` pointing at the sequence: that is what the warning click-through uses.
+    broken = mutations.new_sequence(spec, "Broken probe skill", "sucrose")
+    placement = mutations.add_placement(spec, broken, "sucrose__sucrose_skill", 0.0)
+    broken_loop = mutations.new_rotation(spec, "Broken probe loop")
+    mutations.add_block(spec, broken_loop, broken, 0)
+    broken_trial = mutations.new_trial(spec, "Broken probe trial", broken_loop)
+    mutations.remove_placement(spec, broken, placement)
+    flagged = validate.trial_issues(spec, broken_trial,
+                                    [catalog.character_id(name) for name in party])
+    if not any(issue.get("where") == ("fs", broken) for issue in flagged):
+        problems.append("a broken field sequence is not reported on its trial")
+
+    expect_refusal(lambda: mutations.delete(spec, "rotations", rotation_id),
+                   "deleting a rotation a trial still uses")
+    mutations.remove_slot(spec, trial_id, slot_id)
+    mutations.delete(spec, "rotations", rotation_id)
+    if rotation_id in spec["rotations"]:
+        problems.append("a rotation that is no longer used could not be deleted")
+
+    return {
+        "problems": problems,
+        "blocks": len(result["blocks"]),
+        "expected_blocks": expected,
+        "hits": result["totals"]["hits"],
+        "damage": result["totals"]["damage"],
+        "loop_damage": loop["damage"],
+        "published": published,
+    }
+
+
+def _run_editor_ui_check() -> dict:
+    """The editor has to mount in the real page, not only inside its own modules.
+
+    Boots the app with a party, then walks the three editor screens. Nothing here
+    asserts damage - the headless checks do that - it asserts that no widget, key,
+    fragment or table blows up when the page actually runs.
+    """
+    import copy
+
+    import presets
+    from streamlit.testing.v1 import AppTest
+
+    from ui.editor import results as editor_results
+
+    problems = []
+    seen = []
+    app = AppTest.from_file("streamlit_app.py", default_timeout=300)
+    app.session_state["party_created"] = True
+    app.session_state["enemy_confirmed"] = True
+    app.session_state["my_party"] = copy.deepcopy(presets.DEFAULT_PARTY)
+
+    def check(label: str) -> bool:
+        if not app.exception:
+            return True
+        value = app.exception[0].value
+        problems.append("%s raised %s: %s" % (label, type(value).__name__, value))
+        return False
+
+    app.run()
+    if check("the page"):
+        if "[Advanced] Trial Editor" not in [header.value for header in app.header]:
+            problems.append("the [Advanced] Trial Editor section is not on tab 3")
+        seen.append(("Trial", len(app.metric)))
+        if len(app.metric) != 4:
+            problems.append("the trial screen shows %d metrics, expected 4"
+                            % len(app.metric))
+        # The hit log is behind "Show details"; open it and read the columns back.
+        app.session_state["ed_trial_hits"] = True
+        app.run()
+        if check("the hit log"):
+            columns = []
+            for table in app.dataframe:
+                value = getattr(table, "value", None)
+                if hasattr(value, "columns"):
+                    columns.append(list(value.columns))
+            if not columns:
+                problems.append("the hit log rendered no table")
+            elif editor_results.COLUMNS not in columns:
+                problems.append("the hit log columns are %s" % (columns,))
+        for screen in ("Rotation", "Field sequence"):
+            app.session_state["editor_screen"] = screen
+            app.run()
+            if not check("the %s screen" % screen):
+                break
+            seen.append((screen, len(app.metric)))
+    return {"problems": problems, "screens": seen}
+
+
 def _run_ui_style_check() -> dict:
     """ui/page.css must reach Streamlit as a single <style> block.
 
@@ -3724,6 +4089,64 @@ def run(verbose: bool = True) -> None:
                     for problem in ui_name_failures)
     if not ui_name_failures and verbose:
         print(f"[OK] ui names: {count} modules, every used global is defined")
+
+    # 2r. The ported trial editor (ui/editor) agrees with the runner.
+    port = _run_editor_port_check()
+    port_checks = [
+        (port["counts_match"],
+         "the editor catalog does not cover every registry entry"),
+        (port["character_count"] == 7 and port["ability_count"] == 30,
+         f"catalog has {port['character_count']} characters / {port['ability_count']} abilities"),
+        (port["compared"] == port["trial_count"],
+         f"only {port['compared']} of {port['trial_count']} preset trials could be compared"),
+        (port["hits"].get("triple_cryo_rotation") == 808,
+         f"triple cryo reports {port['hits'].get('triple_cryo_rotation')} hits, expected 808"),
+        (port["active"] == "mizuki_sac_frag_pull_out_6x_rotations",
+         f"the default party opens the editor on {port['active']}"),
+        (not port["problems"], "editor port: " + "; ".join(port["problems"][:3])),
+    ]
+    port_failures = [msg for ok, msg in port_checks if not ok]
+    failures.extend(port_failures)
+    if not port_failures and verbose:
+        print(f"[OK] trial editor port: {port['trial_count']} presets match the runner "
+              f"exactly ({port['sequence_count']} sequences / {port['rotation_count']} rotations); "
+              f"off-field dimming: {port['dimmed']['trial']} of "
+              f"{port['hits']['triple_cryo_rotation']} ticks in the sample trial, "
+              f"{port['dimmed']['rotation']} in one loop; the rotation table adds up")
+
+
+    # 2s. The editor builds a trial from nothing, and refuses the bad edits.
+    edits = _run_editor_edit_check()
+    edit_checks = [
+        (not edits["problems"], "editor edit rules: " + "; ".join(edits["problems"][:3])),
+        (edits["blocks"] == edits["expected_blocks"],
+         "built trial has %d blocks, expected %d" % (edits["blocks"], edits["expected_blocks"])),
+        (edits["hits"] > 0 and edits["damage"] > 0,
+         "the trial built in the editor produced no damage"),
+        (edits["loop_damage"] > 0, "the built rotation loop is worth nothing"),
+    ]
+    edit_failures = [msg for ok, msg in edit_checks if not ok]
+    failures.extend(edit_failures)
+    if not edit_failures and verbose:
+        print(f"[OK] editor editing: built a {edits['blocks']}-block trial from nothing "
+              f"({edits['hits']} hits, " + format(edits["damage"], ",.0f") +
+              "), presets protected, re-opened losslessly, broken blocks roll up")
+
+
+    # 2t. The editor mounts in the real page and its three screens switch.
+    editor_ui = _run_editor_ui_check()
+    editor_ui_checks = [
+        (not editor_ui["problems"],
+         "editor UI: " + "; ".join(editor_ui["problems"][:2])),
+        (len(editor_ui["screens"]) == 3,
+         "only %d editor screens rendered" % len(editor_ui["screens"])),
+    ]
+    editor_ui_failures = [msg for ok, msg in editor_ui_checks if not ok]
+    failures.extend(editor_ui_failures)
+    if not editor_ui_failures and verbose:
+        print("[OK] editor UI: tab 3 mounts, the 3 screens switch, 4 metrics, "
+              "7-column hit log")
+
 
     # 2p. Trial duration accounting.
     dur = _run_trial_duration_check()

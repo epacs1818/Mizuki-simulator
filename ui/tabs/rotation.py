@@ -16,14 +16,6 @@ def render() -> None:
             st.success(st.session_state["toast_msg"])
             st.session_state["toast_msg"] = None
 
-        # Values queued by "Load selected trial into editor". Widget keys can only be
-        # written before the widget itself is created, so they are queued and applied
-        # here, at the top of the tab.
-        editor_prefill = st.session_state.pop("editor_prefill", None)
-        if editor_prefill:
-            st.session_state["adv_trial_name"] = editor_prefill.get("name", "")
-            st.session_state["adv_trial_desc"] = editor_prefill.get("description", "")
-
         st.header("Trial Setup")
 
         # Initialize session state pools for custom advanced building if missing
@@ -35,6 +27,12 @@ def render() -> None:
             st.session_state["active_trial_pool"] = STANDARD_TRIALS.copy()
         if "temp_trial_rot_entries" not in st.session_state:
             st.session_state["temp_trial_rot_entries"] = []
+
+        # A trial published by the editor is queued the same way: the selectbox key
+        # can only be written before the widget exists.
+        pending_selection = st.session_state.pop("_pending_trial_selection", None)
+        if pending_selection in st.session_state["active_trial_pool"]:
+            st.session_state["trial_selector"] = pending_selection
 
         selected_trial = trial_runner.render()
         rotation_editors.render(selected_trial)

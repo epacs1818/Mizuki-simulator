@@ -12,9 +12,11 @@ four tabs; every widget, table and panel lives here.
   editors.py      catalogue lookups for the sequence / rotation / trial editors
   cards.py        character cards and talent validation
   build_panel.py  save / load build panel
+  editor/         the ported trial editor (catalog, spec store, engine adapter,
+                  warnings, strip payloads, the strip widget and its screen)
   tabs/           one module per tab, each exposing render(); tab 3 is split into
                   trial_runner.py (selection + run) and rotation_editors.py
-                  (the [Advanced] editors)
+                  (the [Advanced] editors, which mount ui/editor)
 
 Modules are side-effect free at import time: the entry point must be able to call
 st.set_page_config() before any page content exists.
