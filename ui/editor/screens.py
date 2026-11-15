@@ -72,12 +72,14 @@ def _unique_labels(ids, labels) -> list:
     return out
 
 
-def _library(title: str, ids, labels: dict, current: str, key: str) -> str:
-    """Pick one id from a library.
+def _library(title: str, ids, labels: dict, current: str) -> str:
+    """Pick one id from the list, with the caller's state deciding what is shown.
 
-    The options are unique display strings mapped back to ids, never ids plus a
-    format_func: the widget keeps its state by id, and a value that comes back
-    for a different entry must not reach the buttons below it.
+    Deliberately unkeyed. A keyed selectbox keeps its own value and treats
+    ``index=`` as a first-render default (Streamlit makes the key the element's
+    main identity), so a list filtered by another widget would go on displaying
+    the old entry. Without a key the identity follows the options and the index:
+    a new list, or a new entry appended to it, renders what the caller asked for.
     """
     if not ids:
         st.info("Nothing here yet.")
@@ -85,14 +87,7 @@ def _library(title: str, ids, labels: dict, current: str, key: str) -> str:
     options = _unique_labels(ids, labels)
     mapping = dict(zip(options, ids))
     index = ids.index(current) if current in ids else 0
-    # A filter can change the options under a widget that already has a value; the
-    # stored string would then be one of the old entries, so drop it and let the
-    # index choose.
-    stored = st.session_state.get(key)
-    if stored is not None and stored not in options:
-        st.session_state.pop(key, None)
-    picked = st.selectbox(title, options, index=index, key=key,
-                          label_visibility="collapsed")
+    picked = st.selectbox(title, options, index=index, label_visibility="collapsed")
     return mapping.get(picked, current)
 
 
@@ -290,7 +285,7 @@ def trial_screen(spec: dict) -> None:
     labels = _trial_labels(spec, shown)
     left, right = st.columns([0.95, 1.5], gap="large")
     with left:
-        picked = _library("Trial", shown, labels, current, "ed_trial_list")
+        picked = _library("Trial", shown, labels, current)
         if picked and picked != current:
             store.select(picked)
             current = picked
@@ -435,7 +430,7 @@ def rotation_screen(spec: dict) -> None:
     labels = {rid: rotations[rid]["name"] for rid in shown}
     left, right = st.columns([0.95, 1.5], gap="large")
     with left:
-        picked = _library("Rotation", shown, labels, current, "ed_rotation_list")
+        picked = _library("Rotation", shown, labels, current)
         if picked and picked != current:
             store.select_rotation(picked)
             current = picked
@@ -598,7 +593,7 @@ def sequence_screen(spec: dict) -> None:
             if current:
                 store.select_sequence(current)
         labels = {sid: sequences[sid]["name"] for sid in mine}
-        picked = _library("Field sequence", mine, labels, current, "ed_sequence_list")
+        picked = _library("Field sequence", mine, labels, current)
         if picked and picked != current:
             store.select_sequence(picked)
             current = picked

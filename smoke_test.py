@@ -2812,6 +2812,39 @@ def _run_editor_ui_check() -> dict:
                     if names and names[-1] != record.get("name"):
                         problems.append("the name box shows %r, not %r"
                                         % (names[-1], record.get("name")))
+                    # The dropdown sits under a filter, so it has to follow it: the
+                    # options changed, so the shown entry must be the new first one.
+                    boxes = [box for box in app.selectbox if box.label == "Field sequence"]
+                    options = list(boxes[0].options) if boxes else []
+                    if options and boxes[0].value != options[0]:
+                        problems.append("the sequence picker kept showing %r, not %r"
+                                        % (boxes[0].value, options[0]))
+                    # A new sequence lands at the end of that character's list and has
+                    # to become the selection, or it is easy to miss entirely.
+                    buttons = [button for button in app.button
+                               if button.label == "New sequence"]
+                    if buttons:
+                        buttons[0].click()
+                        app.run()
+                        boxes = [box for box in app.selectbox
+                                 if box.label == "Field sequence"]
+                        options = list(boxes[0].options) if boxes else []
+                        if check("the New sequence button") and options:
+                            if boxes[0].value != options[-1]:
+                                problems.append("a new sequence is in the list but the picker "
+                                                "shows %r, not %r"
+                                                % (boxes[0].value, options[-1]))
+                            if len(options) > 2:
+                                # And a pick of your own must stick: the widget is
+                                # unkeyed, so the caller's state decides what it shows.
+                                boxes[0].select(options[1])
+                                app.run()
+                                boxes = [box for box in app.selectbox
+                                         if box.label == "Field sequence"]
+                                if boxes and boxes[0].value != options[1]:
+                                    problems.append("the picker snapped back to %r after "
+                                                    "choosing %r"
+                                                    % (boxes[0].value, options[1]))
     return {"problems": problems, "screens": seen}
 
 
