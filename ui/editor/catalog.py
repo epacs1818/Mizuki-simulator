@@ -91,6 +91,26 @@ def abilities_payload() -> dict:
     return out
 
 
+_CATEGORY_ORDER = {"skill": 0, "ultimate": 1, "basic": 2, "triggered": 3}
+
+
+def abilities_of(character: str) -> list:
+    """Ability ids belonging to one character, skills first.
+
+    A field sequence is one character's time on field, so an ability from somebody
+    else's kit can never belong in it: the sequence screen only offers these.
+    """
+    wanted = character_id(character)
+    rows = []
+    for names in ab.ABILITY_REGISTRY.values():
+        for ability in names.values():
+            if character_id(ability.character) != wanted:
+                continue
+            rows.append((_CATEGORY_ORDER.get(_category(ability), 9), ability.name,
+                         ability_id(ability.character, ability.name)))
+    return [ability_id for _order, _name, ability_id in sorted(rows)]
+
+
 def field_sequences_payload() -> dict:
     out = {}
     for seq in presets.FIELD_SEQUENCE_REGISTRY.values():

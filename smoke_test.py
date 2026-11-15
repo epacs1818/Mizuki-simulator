@@ -2521,6 +2521,17 @@ def _run_editor_port_check() -> dict:
     if not any(item["kind"] == "marker" for item in focus["items"]):
         problems.append(f"{sequence_key}: the swap markers are missing")
 
+    # A field sequence can only hold its own character's abilities, so the adder's
+    # list must be complete for that character and free of anybody else's.
+    mine = set(catalog.abilities_of("mizuki"))
+    expected = {ability_id for ability_id, ability in abilities.items()
+                if ability["character"] == "mizuki"}
+    if not mine:
+        problems.append("the catalogue offers no abilities for Mizuki")
+    elif mine != expected:
+        problems.append(f"Mizuki's ability list holds {len(mine - expected)} foreign and "
+                        f"misses {len(expected - mine)} of her {len(expected)} abilities")
+
     # The rotation table is measured inside the trial, so its rows must add up to
     # the trial total, cover every rotation played, and count every hit once.
     from ui.editor import results as editor_results
@@ -2774,6 +2785,13 @@ def _run_editor_ui_check() -> dict:
             if not check("the %s screen" % screen):
                 break
             seen.append((screen, len(app.metric)))
+        if len(seen) == 3:
+            # The character pills replace the options under the library selectbox.
+            # That swap is the one field-sequence interaction a headless check can
+            # reach: if it raised, the screen would be unusable after a click.
+            app.session_state["ed_sequence_owner"] = "mizuki"
+            app.run()
+            check("the character filter")
     return {"problems": problems, "screens": seen}
 
 
