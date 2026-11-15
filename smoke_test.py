@@ -2516,10 +2516,16 @@ def _run_editor_port_check() -> dict:
 
     sequence_key = next(iter(spec["field_seqs"]))
     focus = payloads.field_sequence_payload(spec, sequence_key)
-    if not any(item.get("draggable") for item in focus["items"]):
-        problems.append(f"{sequence_key}: the placements are not draggable")
     if not any(item["kind"] == "marker" for item in focus["items"]):
         problems.append(f"{sequence_key}: the swap markers are missing")
+
+    # The focus strip is display only, and its ability bars are faded so they never
+    # hide their own hit ticks: dragging is gone and the bars sit behind the hits.
+    if any(item.get("draggable") for item in focus["items"]):
+        problems.append(f"{sequence_key}: the focus strip still offers a drag target")
+    bars = [item for item in focus["items"] if item["kind"] == "band"]
+    if not bars or not all(item.get("soft") for item in bars):
+        problems.append(f"{sequence_key}: the ability bars are not soft behind their hits")
 
     # A field sequence can only hold its own character's abilities, so the adder's
     # list must be complete for that character and free of anybody else's.
@@ -2786,12 +2792,26 @@ def _run_editor_ui_check() -> dict:
                 break
             seen.append((screen, len(app.metric)))
         if len(seen) == 3:
-            # The character pills replace the options under the library selectbox.
-            # That swap is the one field-sequence interaction a headless check can
-            # reach: if it raised, the screen would be unusable after a click.
-            app.session_state["ed_sequence_owner"] = "mizuki"
+            # The pill is the owner selector, so it must take the whole screen with
+            # it: the sequence dropdown, and the name and field time of whatever it
+            # lands on. This is the one field-sequence interaction a headless check
+            # can reach; the strip itself is a canvas.
+            app.session_state["ed_sequence_owner"] = "faruzan"
             app.run()
-            check("the character filter")
+            if check("the character pills"):
+                document = app.session_state["trial_editor_spec"]
+                chosen = (app.session_state["trial_editor_sequence"]
+                          if "trial_editor_sequence" in app.session_state else "")
+                record = document["field_seqs"].get(chosen) or {}
+                owns = [sid for sid, sequence in document["field_seqs"].items()
+                        if sequence["character"] == "faruzan"]
+                if owns:
+                    if record.get("character") != "faruzan":
+                        problems.append("the character pill did not switch the sequence")
+                    names = [box.value for box in app.text_input if box.label == "Name"]
+                    if names and names[-1] != record.get("name"):
+                        problems.append("the name box shows %r, not %r"
+                                        % (names[-1], record.get("name")))
     return {"problems": problems, "screens": seen}
 
 

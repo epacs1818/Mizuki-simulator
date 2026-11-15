@@ -201,11 +201,14 @@ def field_sequence_payload(spec: dict, sequence_key: str, *, selected=None,
             "start": first,
             "end": first + last,
             "label": ability["name"],
-            "title": "%s  first hit %.2fs, last hit %.2fs  - drag to move" % (
+            "title": "%s  first hit %.2fs, last hit %.2fs" % (
                 ability["name"], first, first + last),
             "color": colour,
-            "draggable": True,
+            # Display only: the field time is set by the number box. The bar is the
+            # ability's runtime, so it is faded and sits behind its own hit ticks.
+            "draggable": False,
             "dim": False,
+            "soft": True,
             "minPx": 14,
             "tailFrom": field_time if residual else None,
             "selected": selected == ("placement", placement["id"]),
@@ -225,7 +228,7 @@ def field_sequence_payload(spec: dict, sequence_key: str, *, selected=None,
             })
     items.append({"kind": "marker", "t": 0.0, "label": "swap in", "kind2": "in", "draggable": False})
     items.append({"kind": "marker", "t": field_time, "label": "swap out %.1fs" % field_time,
-                  "kind2": "out", "draggable": True})
+                  "kind2": "out", "draggable": False})
     return {
         "tMax": max(field_time, 1.0) * 1.05,
         "rows": rows,

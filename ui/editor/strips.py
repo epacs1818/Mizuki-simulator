@@ -111,6 +111,9 @@ CSS = """
   font-weight: 600;
   box-sizing: border-box;
   border: 1px solid rgba(0, 0, 0, 0.18);
+  /* A band is the ability's runtime, not the point of interest: it stays behind
+     its own hit ticks so the ticks are never swallowed by it. */
+  z-index: 1;
 }
 .band .bl {
   display: block;
@@ -131,6 +134,7 @@ CSS = """
 .band.draggable { cursor: grab; }
 .band.draggable:active { cursor: grabbing; }
 .band.locked { cursor: pointer; }
+.band.soft { opacity: 0.55; }
 .band.dim { opacity: 0.35; }
 .band.selected { outline: 2px solid var(--st-primary-color, #7aa2f7); outline-offset: 1px; }
 .band .tail {
@@ -148,6 +152,7 @@ CSS = """
   border-radius: 1px;
   cursor: pointer;
   box-sizing: border-box;
+  z-index: 2;
 }
 .hit.crit { width: 6px; }
 .hit.off { opacity: 0.4; border: 1px solid currentColor; background: transparent !important; }
@@ -300,7 +305,7 @@ export default function (component) {
       // minimum width and move the label outside it.
       const w = Math.max(it.minPx || 3, X(it.end) - left);
       const cls = ["band", it.draggable ? "draggable" : "locked", it.dim ? "dim" : "",
-                   it.selected ? "selected" : ""].join(" ");
+                   it.soft ? "soft" : "", it.selected ? "selected" : ""].join(" ");
       let inner = (w > 46 ? '<span class="bl">' : '<span class="bl out">') + esc(it.label) + '</span>';
       if (it.tailFrom != null && it.tailFrom < it.end) {
         const off = Math.max(0, (it.tailFrom - it.start) * px);

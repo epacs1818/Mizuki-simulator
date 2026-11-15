@@ -43,11 +43,6 @@ def _apply(fn, success: str = "") -> None:
     st.rerun()
 
 
-def _owners_of_sequence(spec: dict, sequence_id: str) -> set:
-    sequence = spec["field_seqs"].get(sequence_id)
-    return {sequence["character"]} if sequence else set()
-
-
 def _party_visible(ids, owners) -> list:
     """The ids owned by the current party.
 
@@ -451,27 +446,11 @@ def rotation_screen(spec: dict) -> None:
         _rotation_preview(spec, current)
 
 
-SEQUENCE_FORM_KEYS = ("ed_seq_name", "ed_seq_time")
-SEQUENCE_PICK_KEYS = ("ed_add_placement_pick",)
-
-
-def _default_character(spec: dict) -> str:
-    characters = spec["catalog"]["characters"]
-    for cid in store.party_ids():
-        if cid in characters:
-            return cid
-    return next(iter(characters))
-
-
-def _sequence_actions(spec: dict, sequence_id: str, character_id: str = "") -> None:
-    """New / Duplicate / Delete, with the new sequence owned by the picked character."""
+def _sequence_actions(spec: dict, sequence_id: str, owner: str) -> None:
+    """New / Duplicate / Delete; a new sequence belongs to the character on the pills."""
     sequence = spec["field_seqs"].get(sequence_id) or {}
-    characters = spec["catalog"]["characters"]
-    owner = character_id or sequence.get("character") or _default_character(spec)
-    owner_name = characters.get(owner, {}).get("name", "")
     columns = st.columns(3)
-    if columns[0].button("New sequence", key="ed_new_sequence", use_container_width=True,
-                         help=("A new sequence for %s." % owner_name) if owner_name else None):
+    if columns[0].button("New sequence", key="ed_new_sequence", use_container_width=True):
         def make() -> None:
             store.select_sequence(mutations.new_sequence(spec, "New sequence", owner))
         _apply(make, "Field sequence created.")
@@ -487,23 +466,24 @@ def _sequence_actions(spec: dict, sequence_id: str, character_id: str = "") -> N
 
 
 def _sequence_form(spec: dict, sequence_id: str) -> None:
-    """Name and field time. Nothing is written until Apply, which sits below the
-    ability list: the two halves are one set of settings."""
+    """Name and field time, with widget keys of their own per sequence.
+
+    A keyed widget keeps its own value and ignores ``value=``, so two sequences
+    sharing a key is exactly how one sequence's name ends up shown for another.
+    Per-sequence keys make that impossible and need no resynchronising.
+    """
     sequence = spec["field_seqs"].get(sequence_id)
     if sequence is None:
         return
     locked = bool(sequence.get("preset"))
     if locked:
         st.caption("Preset - read-only. Duplicate it to edit.")
-    _sync_owner(("field_seqs", sequence_id), SEQUENCE_FORM_KEYS + SEQUENCE_PICK_KEYS)
-    characters = spec["catalog"]["characters"]
-    st.caption("Owner: %s" % characters.get(sequence["character"], {}).get(
-        "name", sequence["character"]))
-    st.text_input("Name", value=sequence["name"], key="ed_seq_name", disabled=locked)
+    st.text_input("Name", value=sequence["name"], key="ed_seq_name_" + sequence_id,
+                  disabled=locked)
     st.number_input("Field time (s)", min_value=0.1, max_value=300.0, step=0.1,
-                    value=float(sequence["field_time"]), key="ed_seq_time",
+                    value=float(sequence["field_time"]), key="ed_seq_time_" + sequence_id,
                     disabled=locked,
-                    help="Swap-in to swap-out. The strip handle changes the same value.")
+                    help="Swap-in to swap-out. The number box is the only way to set it.")
 
 
 def _sequence_apply(spec: dict, sequence_id: str) -> None:
@@ -516,8 +496,9 @@ def _sequence_apply(spec: dict, sequence_id: str) -> None:
 
     def apply() -> None:
         mutations.set_sequence_text(spec, sequence_id,
-                                    name=st.session_state["ed_seq_name"])
-        mutations.set_field_time(spec, sequence_id, st.session_state["ed_seq_time"])
+                                    name=st.session_state["ed_seq_name_" + sequence_id])
+        mutations.set_field_time(spec, sequence_id,
+                                 st.session_state["ed_seq_time_" + sequence_id])
     _apply(apply, "Field sequence updated.")
 
 
@@ -561,13 +542,15 @@ def _placement_list(spec: dict, sequence_id: str) -> None:
     picked = picker.selectbox("Add ability", options,
                               format_func=lambda a: "%s - %s" % (abilities[a]["name"],
                                                                  abilities[a]["category"]),
-                              key="ed_add_placement_pick", label_visibility="collapsed")
+                              key="ed_add_placement_pick_" + sequence_id,
+                              label_visibility="collapsed")
     if adder.button("Add", key="ed_add_placement", use_container_width=True):
         _try(lambda: mutations.add_placement(spec, sequence_id, picked))
         st.rerun(scope="fragment")
 
 
 def _sequence_preview(spec: dict, sequence_id: str) -> None:
+    """The strip is a picture: the field time is set by the number box only."""
     sequence = spec["field_seqs"].get(sequence_id)
     if sequence is None:
         return
@@ -577,86 +560,48 @@ def _sequence_preview(spec: dict, sequence_id: str) -> None:
     payload = payloads.field_sequence_payload(spec, sequence_id, selected=selected,
                                               px_per_sec=0)
     strips.render(payload, key=SEQUENCE_STRIP)
-
     pick = strips.event("select", key=SEQUENCE_STRIP)
     if pick and pick.get("kind") == "placement" and pick.get("id"):
         st.session_state[SELECTION_KEY] = ("placement", pick["id"])
-
-    changed = False
-    moved = strips.event("moved", key=SEQUENCE_STRIP)
-    if moved and moved.get("kind") == "placement":
-        target = next((p for p in sequence["placements"] if p["id"] == moved.get("id")), None)
-        if target and abs(float(target["first_hit"]) - float(moved["value"])) > 1e-6:
-            _try(lambda: mutations.move_placement(spec, sequence_id,
-                                                  moved["id"], moved["value"]))
-            # That row's number_input is keyed, so on the next run it would hand the
-            # old time straight back and undo the drag: drop the key instead.
-            st.session_state.pop("ed_place_time_" + moved["id"], None)
-            changed = True
-    retimed = strips.event("retimed", key=SEQUENCE_STRIP)
-    if retimed and abs(float(sequence["field_time"]) - float(retimed["value"])) > 1e-6:
-        _try(lambda: mutations.set_field_time(spec, sequence_id, retimed["value"]))
-        st.session_state.pop("ed_seq_time", None)
-        changed = True
-    if changed:
-        st.rerun(scope="fragment")
-
-    hits = 0
-    for placement in sequence["placements"]:
-        ability = spec["catalog"]["abilities"].get(placement["ability"]) or {}
-        hits += len(ability.get("hits") or ())
-    st.caption("%d placement(s), %d hit(s), %.2fs on field"
-               % (len(sequence["placements"]), hits, float(sequence["field_time"])))
     results.render_issues(validate.sequence_issues(spec, sequence_id))
 
 
-def _character_pills(spec: dict, sequences: dict, shown: list, current: str) -> str:
-    """Pick whose sequences to show; returns the character id, or "" for all.
+def _character_pills(spec: dict, current: str) -> str:
+    """The owner selector: one pill per party slot, one of them always selected.
 
-    The options are the party slots in team order - the same list the rest of the
-    app works with - plus whoever owns the sequence on screen, so a sequence from
-    outside the party is never hidden by a filter about something else. Clicking
-    the selected pill again clears the filter.
+    The pill decides whose sequences the screen is about, so it is required - a
+    click on the selected pill does nothing - and it starts on the first slot.
     """
     characters = spec["catalog"]["characters"]
-    order = [cid for cid in store.party_ids() if cid in characters]
-    for sid in shown:
-        cid = sequences[sid]["character"]
-        if cid in characters and cid not in order:
-            order.append(cid)
-    if current in sequences:
-        cid = sequences[current]["character"]
-        if cid in characters and cid not in order:
-            order.append(cid)
-    if len(order) < 2:
-        return ""
-    stored = st.session_state.get("ed_sequence_owner")
-    if stored is not None and stored not in order:
+    slots = [cid for cid in store.party_ids() if cid in characters]
+    if not slots:
+        owner = (spec["field_seqs"].get(current) or {}).get("character")
+        slots = [owner] if owner in characters else [next(iter(characters))]
+    if st.session_state.get("ed_sequence_owner") not in slots:
         st.session_state.pop("ed_sequence_owner", None)
-    picked = st.pills("Character", order, selection_mode="single", default=None,
-                      format_func=lambda cid: characters[cid]["name"],
+    picked = st.pills("Character", slots, selection_mode="single", required=True,
+                      default=slots[0], format_func=lambda cid: characters[cid]["name"],
                       key="ed_sequence_owner", label_visibility="collapsed")
-    return picked or ""
+    return picked or slots[0]
 
 
 def sequence_screen(spec: dict) -> None:
     sequences = spec["field_seqs"]
-    shown = _party_visible(list(sequences), lambda sid: _owners_of_sequence(spec, sid))
     current = store.active_sequence(spec)
-    if current and current not in shown:
-        shown = [current] + shown
     left, right = st.columns([0.9, 1.7], gap="large")
     with left:
-        owner = _character_pills(spec, sequences, shown, current)
-        if owner:
-            shown = [sid for sid in shown if sequences[sid]["character"] == owner]
-        labels = {sid: sequences[sid]["name"] for sid in shown}
-        picked = _library("Field sequence", shown, labels, current, "ed_sequence_list")
+        owner = _character_pills(spec, current)
+        mine = [sid for sid in sequences if sequences[sid]["character"] == owner]
+        if current not in mine:
+            # The pill owns the screen: the sequence follows it, never the other way.
+            current = mine[0] if mine else ""
+            if current:
+                store.select_sequence(current)
+        labels = {sid: sequences[sid]["name"] for sid in mine}
+        picked = _library("Field sequence", mine, labels, current, "ed_sequence_list")
         if picked and picked != current:
             store.select_sequence(picked)
             current = picked
-        elif not shown:
-            current = ""
         _sequence_actions(spec, current, owner)
         _sequence_form(spec, current)
         _placement_list(spec, current)
