@@ -113,12 +113,29 @@ def new_trial(spec: dict, name: str, rotation_id: str | None = None) -> str:
     return new_id
 
 
-def new_rotation(spec: dict, name: str) -> str:
+def new_rotation(spec: dict, name: str, party=None) -> str:
+    """A new, empty rotation, owned by *party*.
+
+    A rotation belongs to the team it was built for, so it is tagged with *party*
+    here: the rotation list only offers loops that team can actually play.
+    """
     new_id = unique_id(spec["rotations"], catalog.slug(name) or "rotation")
-    spec["rotations"][new_id] = {"id": new_id,
-                                 "name": (name or "New rotation").strip() or "New rotation",
-                                 "blocks": [], "repeat": 1, "preset": False}
+    characters = spec["catalog"]["characters"]
+    spec["rotations"][new_id] = {
+        "id": new_id,
+        "name": (name or "New rotation").strip() or "New rotation",
+        "blocks": [], "repeat": 1, "preset": False,
+        "required_party": [cid for cid in (party or []) if cid in characters],
+    }
     return new_id
+
+
+def set_rotation_party(spec: dict, rotation_id: str, ids) -> None:
+    """Pin a rotation to a team; an empty list means "whoever its blocks belong to"."""
+    rotation = _item(spec, "rotations", rotation_id)
+    _writable(rotation)
+    characters = spec["catalog"]["characters"]
+    rotation["required_party"] = [cid for cid in ids if cid in characters]
 
 
 def new_sequence(spec: dict, name: str, character: str) -> str:

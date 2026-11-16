@@ -106,13 +106,22 @@ def render_issues(issues: list, *, limit: int = 8, key: str = "issues",
             st.rerun()
 
 
-def metrics(totals: dict) -> None:
-    """Damage, DPS, duration, hits - the only numbers the editor shows."""
-    columns = st.columns(4)
-    columns[0].metric("Damage", format(totals["damage"], ",.0f"))
-    columns[1].metric("DPS", format(totals["dps"], ",.0f"))
-    columns[2].metric("Duration", "%.2f s" % totals["duration"])
-    columns[3].metric("Hits", totals["hits"])
+METRICS = (("damage", "Damage", lambda value: format(value, ",.0f")),
+           ("dps", "DPS", lambda value: format(value, ",.0f")),
+           ("duration", "Duration", lambda value: "%.2f s" % value),
+           ("hits", "Hits", lambda value: value))
+
+
+def metrics(totals: dict, *, fields=("damage", "dps", "duration", "hits")) -> None:
+    """The metric row, or the subset a screen asks for.
+
+    A rotation's damage depends on where it sits in a trial, so its own screen
+    shows the loop's duration and hits only; damage belongs to the trial view.
+    """
+    chosen = [entry for entry in METRICS if entry[0] in fields]
+    columns = st.columns(len(chosen))
+    for column, (name, label, show) in zip(columns, chosen):
+        column.metric(label, show(totals[name]))
 
 
 def loop_totals(spec: dict, rotation_id: str, preview: dict) -> dict:
@@ -211,7 +220,11 @@ def occurrence_rows(spec: dict, result: dict, rotation_id: str) -> list:
 
 def render_rotation_table(spec: dict, result: dict, *,
                           key: str = "editor_rotation_table") -> None:
-    """Sortable per-rotation numbers for the whole trial, with the ramp per pass."""
+    """Sortable per-rotation numbers for the whole trial, with the ramp per pass.
+
+    Kept off the rotation screen on purpose: a rotation's damage only exists inside
+    a trial, so this belongs next to the trial's own numbers.
+    """
     rows = rotation_rows(spec, result)
     if not rows:
         st.caption("This trial has no rotations yet.")

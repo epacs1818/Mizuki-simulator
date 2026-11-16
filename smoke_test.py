@@ -2514,6 +2514,12 @@ def _run_editor_port_check() -> dict:
     elif not dimmed_loop:
         problems.append(f"{rotation_key}: no hit is dimmed, the off-field cue is flat")
 
+    # A rotation bar is a whole field sequence, so it is faded and sits behind its
+    # hits: the ticks of a five-hit ability must not be flattened into one bar.
+    loop_bars = [item for item in loop["items"] if item["kind"] == "band"]
+    if not loop_bars or not all(item.get("soft") for item in loop_bars):
+        problems.append(f"{rotation_key}: the rotation bars are not soft behind their hits")
+
     sequence_key = next(iter(spec["field_seqs"]))
     focus = payloads.field_sequence_payload(spec, sequence_key)
     if not any(item["kind"] == "marker" for item in focus["items"]):
@@ -2748,10 +2754,12 @@ def _run_editor_ui_check() -> dict:
     import presets
     from streamlit.testing.v1 import AppTest
 
+    from ui.editor import catalog
     from ui.editor import results as editor_results
 
     problems = []
     seen = []
+    party = {catalog.character_id(name) for name in presets.DEFAULT_PARTY}
     app = AppTest.from_file("streamlit_app.py", default_timeout=300)
     app.session_state["party_created"] = True
     app.session_state["enemy_confirmed"] = True
@@ -2785,12 +2793,55 @@ def _run_editor_ui_check() -> dict:
                 problems.append("the hit log rendered no table")
             elif editor_results.COLUMNS not in columns:
                 problems.append("the hit log columns are %s" % (columns,))
-        for screen in ("Rotation", "Field sequence"):
-            app.session_state["editor_screen"] = screen
-            app.run()
-            if not check("the %s screen" % screen):
-                break
-            seen.append((screen, len(app.metric)))
+        app.session_state["editor_screen"] = "Rotation"
+        app.run()
+        if check("the Rotation screen"):
+            seen.append(("Rotation", len(app.metric)))
+            # Only the loop's own numbers: a rotation's damage depends on where it
+            # sits in a trial, so the rotation screen shows duration and hits.
+            if len(app.metric) != 2:
+                problems.append("the rotation screen shows %d metrics, expected 2"
+                                % len(app.metric))
+            document = app.session_state["trial_editor_spec"]
+            boxes = [box for box in app.selectbox if box.label == "Rotation"]
+            options = list(boxes[0].options) if boxes else []
+            playable = [rotation_id for rotation_id, rotation in document["rotations"].items()
+                        if {document["field_seqs"][block]["character"]
+                            for block in rotation["blocks"]
+                            if block in document["field_seqs"]} <= party]
+            if len(options) != len(playable):
+                problems.append("the rotation list offers %d of the %d loops this party "
+                                "can play" % (len(options), len(playable)))
+            if any("One loop takes" in caption.value for caption in app.caption):
+                problems.append("the loop-duration caption is still on the rotation screen")
+            if any(box.label == "Default repeats" for box in app.number_input):
+                problems.append("the default-repeats input is still there")
+            if any(toggle.label.startswith("Rotation table") for toggle in app.toggle):
+                problems.append("the rotation table is still under the strip")
+            # A new rotation belongs to this party, and it is appended to the end.
+            buttons = [button for button in app.button if button.label == "New rotation"]
+            if buttons:
+                buttons[0].click()
+                app.run()
+                document = app.session_state["trial_editor_spec"]
+                chosen = (app.session_state["trial_editor_rotation"]
+                          if "trial_editor_rotation" in app.session_state else "")
+                tags = set((document["rotations"].get(chosen) or {}).get("required_party")
+                           or ())
+                if tags != party:
+                    problems.append("a new rotation is tagged %r, not this party %r"
+                                    % (sorted(tags), sorted(party)))
+                boxes = [box for box in app.selectbox if box.label == "Rotation"]
+                options = list(boxes[0].options) if boxes else []
+                if check("the New rotation button") and options:
+                    if boxes[0].value != options[-1]:
+                        problems.append("a new rotation is in the list but the picker "
+                                        "shows %r, not %r"
+                                        % (boxes[0].value, options[-1]))
+        app.session_state["editor_screen"] = "Field sequence"
+        app.run()
+        if check("the Field sequence screen"):
+            seen.append(("Field sequence", len(app.metric)))
         if len(seen) == 3:
             # The pill is the owner selector, so it must take the whole screen with
             # it: the sequence dropdown, and the name and field time of whatever it
@@ -4215,8 +4266,8 @@ def run(verbose: bool = True) -> None:
     editor_ui_failures = [msg for ok, msg in editor_ui_checks if not ok]
     failures.extend(editor_ui_failures)
     if not editor_ui_failures and verbose:
-        print("[OK] editor UI: tab 3 mounts, the 3 screens switch, 4 metrics, "
-              "7-column hit log")
+        print("[OK] editor UI: tab 3 mounts, the 3 screens switch, trial 4 metrics / "
+              "rotation 2, 7-column hit log, rotation list scoped to the party")
 
 
     # 2p. Trial duration accounting.

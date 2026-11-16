@@ -155,7 +155,10 @@ def rotation_payload(spec: dict, rotation_id: str, preview: dict, *, selected=No
             "label": "",
             "title": "%s  %.2fs - %.2fs" % (sequence.get("name", ""), block["start"], block["end"]),
             "color": colour,
+            # A band here is a whole field sequence: fade it and let its hits sit on
+            # top, so the ticks stay readable across the runtime.
             "draggable": False,
+            "soft": True,
             "selected": selected == ("block", block["id"]),
         })
     items.extend(_hit_items(spec, hits, selected))

@@ -44,7 +44,7 @@ def _apply(fn, success: str = "") -> None:
 
 
 def _party_visible(ids, owners) -> list:
-    """The ids owned by the current party.
+    """Ids the current party has a stake in (the trial list uses this).
 
     An entry nobody owns is always visible; with no party at all nothing is hidden,
     because the party is the thing being configured elsewhere.
@@ -52,7 +52,12 @@ def _party_visible(ids, owners) -> list:
     party = set(store.party_ids())
     if not party:
         return list(ids)
-    return [item_id for item_id in ids if owners(item_id) & party]
+    out = []
+    for item_id in ids:
+        owned = owners(item_id)
+        if not owned or owned & party:
+            out.append(item_id)
+    return out
 
 
 def _unique_labels(ids, labels) -> list:
@@ -72,7 +77,8 @@ def _unique_labels(ids, labels) -> list:
     return out
 
 
-def _library(title: str, ids, labels: dict, current: str) -> str:
+def _library(title: str, ids, labels: dict, current: str,
+             *, empty: str = "Nothing here yet.") -> str:
     """Pick one id from the list, with the caller's state deciding what is shown.
 
     Deliberately unkeyed. A keyed selectbox keeps its own value and treats
@@ -82,7 +88,7 @@ def _library(title: str, ids, labels: dict, current: str) -> str:
     a new list, or a new entry appended to it, renders what the caller asked for.
     """
     if not ids:
-        st.info("Nothing here yet.")
+        st.info(empty)
         return ""
     options = _unique_labels(ids, labels)
     mapping = dict(zip(options, ids))
@@ -163,7 +169,7 @@ def _trial_form(spec: dict, trial_id: str) -> None:
                    format_func=lambda cid: characters[cid]["name"],
                    key="ed_trial_party", disabled=locked,
                    help="Empty means any team. Otherwise the runner only offers this trial to that team.")
-    if not locked and st.button("Apply trial settings", key="ed_apply_trial",
+    if not locked and st.button("Apply changes", key="ed_apply_trial",
                                use_container_width=True):
         def apply() -> None:
             mutations.set_trial_text(spec, trial_id,
@@ -296,20 +302,21 @@ def trial_screen(spec: dict) -> None:
         _trial_preview(spec, current)
 
 
-ROTATION_FORM_KEYS = ("ed_rot_name", "ed_rot_repeat")
-
-
 def _rotation_actions(spec: dict, rotation_id: str) -> None:
+    """New / Duplicate / Delete; either way the result belongs to this party."""
     rotation = spec["rotations"].get(rotation_id) or {}
+    party = store.party_ids()
     columns = st.columns(3)
     if columns[0].button("New rotation", key="ed_new_rotation", use_container_width=True):
         def make() -> None:
-            store.select_rotation(mutations.new_rotation(spec, "New rotation"))
+            store.select_rotation(mutations.new_rotation(spec, "New rotation", party))
         _apply(make, "Rotation created.")
     if columns[1].button("Duplicate", key="ed_dup_rotation", use_container_width=True,
                          disabled=not rotation):
         def twin() -> None:
-            store.select_rotation(mutations.duplicate(spec, "rotations", rotation_id))
+            new_id = mutations.duplicate(spec, "rotations", rotation_id)
+            mutations.set_rotation_party(spec, new_id, party)
+            store.select_rotation(new_id)
         _apply(twin, "Rotation duplicated.")
     if columns[2].button("Delete", key="ed_del_rotation", use_container_width=True,
                          disabled=bool(rotation.get("preset", True))):
@@ -317,25 +324,29 @@ def _rotation_actions(spec: dict, rotation_id: str) -> None:
 
 
 def _rotation_form(spec: dict, rotation_id: str) -> None:
+    """The name, with a key of its own per rotation. Apply sits below the blocks:
+    the two halves are one set of settings."""
     rotation = spec["rotations"].get(rotation_id)
     if rotation is None:
         return
     locked = bool(rotation.get("preset"))
     if locked:
         st.caption("Preset - read-only. Duplicate it to edit.")
-    _sync_owner(("rotations", rotation_id), ROTATION_FORM_KEYS)
-    st.text_input("Name", value=rotation["name"], key="ed_rot_name", disabled=locked)
-    st.number_input("Default repeats", min_value=1, max_value=999,
-                    value=int(rotation.get("repeat", 1)), key="ed_rot_repeat",
-                    disabled=locked,
-                    help="Used when this rotation is added to a trial.")
-    if not locked and st.button("Apply rotation settings", key="ed_apply_rotation",
-                               use_container_width=True):
-        def apply() -> None:
-            mutations.set_rotation_text(spec, rotation_id,
-                                        name=st.session_state["ed_rot_name"],
-                                        repeat=st.session_state["ed_rot_repeat"])
-        _apply(apply, "Rotation updated.")
+    st.text_input("Name", value=rotation["name"], key="ed_rot_name_" + rotation_id,
+                  disabled=locked)
+
+
+def _rotation_apply(spec: dict, rotation_id: str) -> None:
+    rotation = spec["rotations"].get(rotation_id)
+    if rotation is None or rotation.get("preset"):
+        return
+    if not st.button("Apply changes", key="ed_apply_rotation", use_container_width=True):
+        return
+
+    def apply() -> None:
+        mutations.set_rotation_text(spec, rotation_id,
+                                    name=st.session_state["ed_rot_name_" + rotation_id])
+    _apply(apply, "Rotation updated.")
 
 
 def _block_list(spec: dict, rotation_id: str) -> None:
@@ -350,31 +361,43 @@ def _block_list(spec: dict, rotation_id: str) -> None:
         st.caption("Empty loop - add a field sequence below.")
     for index, block_id in enumerate(blocks):
         sequence = sequences.get(block_id) or {"name": "(missing sequence)"}
-        columns = st.columns([0.52, 0.08, 0.08, 0.08, 0.08])
+        columns = st.columns([0.61, 0.09, 0.09, 0.09])
         columns[0].markdown("%d. %s" % (index + 1, sequence["name"]))
         if columns[1].button("\u2191", key="ed_block_up_%d_%s" % (index, block_id),
                              disabled=locked or index == 0):
             _try(lambda: mutations.move_block(spec, rotation_id, index, -1))
+            # The rows were drawn before this click, so redraw the editor only.
+            st.rerun(scope="fragment")
         if columns[2].button("\u2193", key="ed_block_down_%d_%s" % (index, block_id),
                              disabled=locked or index == len(blocks) - 1):
             _try(lambda: mutations.move_block(spec, rotation_id, index, 1))
-        if columns[3].button("\u29c9", key="ed_block_dup_%d_%s" % (index, block_id),
-                             disabled=locked, help="Duplicate this block"):
-            _try(lambda: mutations.add_block(spec, rotation_id, block_id, at=index + 1))
-        if columns[4].button("\u2715", key="ed_block_del_%d_%s" % (index, block_id),
+            st.rerun(scope="fragment")
+        if columns[3].button("\u2715", key="ed_block_del_%d_%s" % (index, block_id),
                              disabled=locked):
             _try(lambda: mutations.remove_block(spec, rotation_id, index))
+            st.rerun(scope="fragment")
     if locked or not sequences:
         return
-    options = list(sequences)
+    party = set(store.party_ids())
+
+    def label(sequence_id: str) -> str:
+        sequence = sequences[sequence_id]
+        character = spec["catalog"]["characters"].get(sequence["character"], {})
+        return "%s (%s)" % (sequence["name"], character.get("name", "?"))
+
+    # A rotation belongs to a party, so only that party's sequences can go in it.
+    options = [sequence_id for sequence_id in sequences
+               if not party or sequences[sequence_id]["character"] in party]
+    if not options:
+        st.caption("This party has no field sequences yet.")
+        return
     picker, adder = st.columns([0.7, 0.3])
-    picked = picker.selectbox("Add field sequence", options,
-                              format_func=lambda s: "%s (%s)" % (sequences[s]["name"],
-                                                                spec["catalog"]["characters"][sequences[s]["character"]]["name"]),
-                              key="ed_add_block_pick", label_visibility="collapsed")
+    picked = picker.selectbox("Add field sequence", options, format_func=label,
+                              key="ed_add_block_pick_" + rotation_id,
+                              label_visibility="collapsed")
     if adder.button("Add", key="ed_add_block", use_container_width=True):
         _try(lambda: mutations.add_block(spec, rotation_id, picked))
-    st.caption("One loop takes %.2fs" % payloads.rotation_seconds(spec, rotation_id))
+        st.rerun(scope="fragment")
 
 
 def _rotation_preview(spec: dict, rotation_id: str) -> None:
@@ -382,61 +405,72 @@ def _rotation_preview(spec: dict, rotation_id: str) -> None:
         st.info("Pick your team in **Team & Gear Setup** first: the preview runs the "
                 "loop against that party.")
         return
+    if not rotation_id:
+        st.caption("Create a rotation for this party to see its loop here.")
+        return
     try:
         preview = store.rotation_result(rotation_id)
     except Exception as exc:
         st.error("The preview could not run: %s" % exc)
         return
-    payload = payloads.rotation_payload(spec, rotation_id, preview, px_per_sec=PIXELS_PER_SEC)
+    # Fitted to the column like the field-sequence strip: a fixed 14px/s drew a
+    # three second loop 42px wide.
+    payload = payloads.rotation_payload(spec, rotation_id, preview, px_per_sec=0)
     strips.render(payload, key=ROTATION_STRIP)
     pick = strips.event("select", key=ROTATION_STRIP)
     if pick and pick.get("kind") == "block" and pick.get("id"):
         block = next((item for item in preview["blocks"] if item["id"] == pick["id"]), None)
         if block is not None and block["field_seq"] in spec["field_seqs"]:
             store.focus(("fs", block["field_seq"]))
-            st.rerun()
-    results.metrics(results.loop_totals(spec, rotation_id, preview))
+            st.rerun(scope="fragment")
+    # A rotation's damage depends on where it sits in a trial, so only the loop's
+    # own two numbers are shown here; damage belongs to the trial view.
+    results.metrics(results.loop_totals(spec, rotation_id, preview),
+                    fields=("duration", "hits"))
     # A preview the engine refused (a cooldown clash on the second loop) would
     # otherwise draw an empty strip with no explanation, so its issues are shown.
     results.render_issues(validate.rotation_issues(spec, rotation_id)
                           + preview.get("warnings", []), key="ed_rotation_issues")
-    # The trial-wide table costs one cached simulation, so it is behind a switch:
-    # the loop numbers above are always free.
-    trial_id = store.active_trial(spec)
-    trial_name = (spec["trials"].get(trial_id) or {}).get("name", "the active trial")
-    if st.toggle("Rotation table of \u201c%s\u201d" % trial_name, key="ed_rotation_table",
-                 help="Every rotation of that trial, with the damage it deals inside it."):
-        try:
-            trial_result = store.result(trial_id)
-        except Exception as exc:
-            st.error("The trial table could not run: %s" % exc)
-        else:
-            results.render_rotation_table(spec, trial_result)
+
+
+def _rotation_party(spec: dict, rotation: dict) -> set:
+    """The team a rotation belongs to: its own tag, or whoever its blocks belong to."""
+    tagged = set(rotation.get("required_party") or [])
+    if tagged:
+        return tagged
+    out = set()
+    for block in rotation.get("blocks") or []:
+        sequence = spec["field_seqs"].get(block)
+        if sequence:
+            out.add(sequence["character"])
+    return out
 
 
 def rotation_screen(spec: dict) -> None:
     rotations = spec["rotations"]
-    def owners(rotation_id: str) -> set:
-        out = set()
-        for block in rotations[rotation_id]["blocks"]:
-            sequence = spec["field_seqs"].get(block)
-            if sequence:
-                out.add(sequence["character"])
-        return out
-    shown = _party_visible(list(rotations), owners)
+    party = set(store.party_ids())
+    # A rotation is authored for a team, so only the loops this team can play are
+    # offered: tagged with its own required_party, or owned by its blocks.
+    shown = [rotation_id for rotation_id in rotations
+             if not party or _rotation_party(spec, rotations[rotation_id]) <= party]
     current = store.active_rotation(spec)
-    if current and current not in shown:
-        shown = [current] + shown
+    if current not in shown:
+        current = shown[0] if shown else ""
+        if current:
+            store.select_rotation(current)
     labels = {rid: rotations[rid]["name"] for rid in shown}
-    left, right = st.columns([0.95, 1.5], gap="large")
+    left, right = st.columns([0.9, 1.7], gap="large")
     with left:
-        picked = _library("Rotation", shown, labels, current)
+        picked = _library("Rotation", shown, labels, current,
+                          empty="No rotation is authored for this party yet - "
+                                "create one below.")
         if picked and picked != current:
             store.select_rotation(picked)
             current = picked
         _rotation_actions(spec, current)
         _rotation_form(spec, current)
         _block_list(spec, current)
+        _rotation_apply(spec, current)
     with right:
         _rotation_preview(spec, current)
 
@@ -476,16 +510,16 @@ def _sequence_form(spec: dict, sequence_id: str) -> None:
     st.text_input("Name", value=sequence["name"], key="ed_seq_name_" + sequence_id,
                   disabled=locked)
     st.number_input("Field time (s)", min_value=0.1, max_value=300.0, step=0.1,
-                    value=float(sequence["field_time"]), key="ed_seq_time_" + sequence_id,
+                    value=float(sequence["field_time"]), format="%0.3f", key="ed_seq_time_" + sequence_id,
                     disabled=locked,
-                    help="Swap-in to swap-out. The number box is the only way to set it.")
+                    help="Swap-in to swap-out.")
 
 
 def _sequence_apply(spec: dict, sequence_id: str) -> None:
     sequence = spec["field_seqs"].get(sequence_id)
     if sequence is None or sequence.get("preset"):
         return
-    if not st.button("Apply sequence settings", key="ed_apply_sequence",
+    if not st.button("Apply changes", key="ed_apply_sequence",
                      use_container_width=True):
         return
 
@@ -503,7 +537,7 @@ def _placement_list(spec: dict, sequence_id: str) -> None:
         return
     locked = bool(sequence.get("preset"))
     abilities = spec["catalog"]["abilities"]
-    st.markdown("**Abilities in the window**")
+    st.markdown("**Abilities list. Adjust when their first hit lands.**")
     placements = list(sequence["placements"])
     if not placements:
         st.caption("Nothing placed yet - add an ability below.")
@@ -513,10 +547,12 @@ def _placement_list(spec: dict, sequence_id: str) -> None:
         columns[0].markdown("%s <span style='opacity:.6'>%d hit(s)</span>"
                             % (ability["name"], len(ability.get("hits") or ())),
                             unsafe_allow_html=True)
-        when = columns[1].number_input("t", min_value=0.0, max_value=300.0, step=0.01,
+        when = columns[1].number_input("First hit time (s)", min_value=0.0, max_value=300.0, step=0.01,
                                        value=float(placement["first_hit"]),
+                                       format="%0.3f",
                                        key="ed_place_time_" + placement["id"],
-                                       label_visibility="collapsed", disabled=locked)
+                                       label_visibility="collapsed", disabled=locked,
+                                       help="Adjust when the first hit lands.")
         if abs(when - float(placement["first_hit"])) > 1e-9:
             _try(lambda: mutations.move_placement(spec, sequence_id,
                                                   placement["id"], when))
