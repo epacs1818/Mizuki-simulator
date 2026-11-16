@@ -69,16 +69,18 @@ def loop_totals(spec: dict, rotation_id: str, preview: dict) -> dict:
 
 
 def rotation_rows(spec: dict, result: dict) -> list:
-    """One row per rotation, measured *inside the trial* - never from a loop alone.
+    """One row per *pass* through a rotation - one per repetition, one per slot use.
 
-    Damage comes from ``by_block`` and the window from the blocks the trial actually
-    ran, so a rotation the trial truncated is reported truncated. Rows come back in
-    the order the trial played them, which is what a log reads like.
+    A trial plays a slot ``repeat`` times, and the same rotation can sit in several
+    slots: every one of those passes is its own row, in playing order. Damage comes
+    from ``by_block`` and the window from the blocks that pass actually ran, so a
+    pass the trial truncated is reported truncated, and the column still adds up to
+    the trial's total.
     """
     rows: dict = {}
     for block in result.get("blocks") or []:
-        row = rows.setdefault(block["rotation"], {
-            "id": block["rotation"],
+        row = rows.setdefault(block["occurrence"], {
+            "id": block["occurrence"],
             "name": (spec["rotations"].get(block["rotation"]) or {}).get(
                 "name", block["rotation_name"]),
             "start": float(block["start"]),
@@ -87,9 +89,10 @@ def rotation_rows(spec: dict, result: dict) -> list:
         row["start"] = min(row["start"], float(block["start"]))
         row["damage"] += result["by_block"].get(block["id"], 0.0)
         row["duration"] += max(0.0, float(block["end"]) - float(block["start"]))
-    rotation_of = {block["id"]: block["rotation"] for block in result.get("blocks") or []}
+    occurrence_of = {block["id"]: block["occurrence"]
+                     for block in result.get("blocks") or []}
     for hit in result.get("hits") or []:
-        row = rows.get(rotation_of.get(hit["block"]))
+        row = rows.get(occurrence_of.get(hit["block"]))
         if row is not None:
             row["hits"] += 1
     out = sorted(rows.values(), key=lambda row: row["start"])

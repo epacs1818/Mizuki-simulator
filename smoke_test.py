@@ -2582,10 +2582,10 @@ def _run_editor_port_check() -> dict:
     table = editor_results.rotation_rows(spec, result)
     if abs(sum(row["damage"] for row in table) - result["totals"]["damage"]) > 1e-3:
         problems.append(f"{sample}: the rotation table does not add up to the trial total")
-    played = {block["rotation"] for block in result["blocks"]}
+    played = {block["occurrence"] for block in result["blocks"]}
     if {row["id"] for row in table} != played:
-        problems.append(f"{sample}: the rotation table lists {len(table)} of "
-                        f"{len(played)} rotations")
+        problems.append(f"{sample}: the rotation log lists {len(table)} of "
+                        f"{len(played)} passes")
     if sum(row["hits"] for row in table) != len(result["hits"]):
         problems.append(f"{sample}: the rotation table counts "
                         f"{sum(row['hits'] for row in table)} of {len(result['hits'])} hits")
