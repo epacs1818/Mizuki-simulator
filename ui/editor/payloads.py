@@ -113,17 +113,42 @@ def rotation_seconds(spec: dict, rotation_id: str) -> float:
                for block in rotation.get("blocks", []) if block in spec["field_seqs"])
 
 
+def _tail_slack(spec: dict, rotation: dict) -> float:
+    """How long after the seam the last hit of this loop can still land."""
+    abilities = spec["catalog"]["abilities"]
+    sequences = spec["field_seqs"]
+    slack = 0.0
+    for block in rotation.get("blocks") or []:
+        sequence = sequences.get(block)
+        if sequence is None:
+            continue
+        end = float(sequence["field_time"])
+        for placement in sequence["placements"]:
+            ability = abilities.get(placement["ability"]) or {}
+            last = max((hit["offset"] for hit in ability.get("hits") or ()), default=0.0)
+            slack = max(slack, float(placement["first_hit"]) + last - end)
+    return max(slack, 0.0) + 0.5
+
+
 def rotation_preview(spec: dict, rotation_id: str, party: dict, enemy: dict) -> dict:
-    """Simulate one rotation twice: the second pass exposes the loop seam."""
+    """Simulate one loop, in a window long enough for its tails to resolve.
+
+    Playing the loop twice (as this used to) made the engine reject every loop
+    shorter than its own cooldowns: the second pass re-casts each ability inside
+    its cooldown and CooldownError threw the whole preview away, so only the
+    longest loop ever worked. One play is what a loop is; the extended window
+    keeps the hits that land after the seam.
+    """
     rotation = spec["rotations"][rotation_id]
+    loop_time = rotation_seconds(spec, rotation_id)
     probe = {
         "id": "__preview__",
         "name": rotation["name"] + " (preview)",
         "description": "",
-        "end_mode": "last_swap",
-        "end_time": 0.0,
+        "end_mode": "time",
+        "end_time": round(loop_time + _tail_slack(spec, rotation), 3),
         "required_party": [],
-        "slots": [{"id": "__preview__~0", "rotation": rotation_id, "repeat": 2}],
+        "slots": [{"id": "__preview__~0", "rotation": rotation_id, "repeat": 1}],
         "preset": True,
     }
     scratch = dict(spec)
@@ -155,10 +180,11 @@ def rotation_payload(spec: dict, rotation_id: str, preview: dict, *, selected=No
             "label": "",
             "title": "%s  %.2fs - %.2fs" % (sequence.get("name", ""), block["start"], block["end"]),
             "color": colour,
-            # A band here is a whole field sequence: fade it and let its hits sit on
-            # top, so the ticks stay readable across the runtime.
+            # A band here is a whole field sequence: it fills the lane, faded, with
+            # its hits on top, so the ticks stay readable across the runtime.
             "draggable": False,
             "soft": True,
+            "fill": True,
             "selected": selected == ("block", block["id"]),
         })
     items.extend(_hit_items(spec, hits, selected))

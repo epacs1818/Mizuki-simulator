@@ -2519,6 +2519,33 @@ def _run_editor_port_check() -> dict:
     loop_bars = [item for item in loop["items"] if item["kind"] == "band"]
     if not loop_bars or not all(item.get("soft") for item in loop_bars):
         problems.append(f"{rotation_key}: the rotation bars are not soft behind their hits")
+    if not all(item.get("fill") for item in loop_bars):
+        problems.append(f"{rotation_key}: the rotation bars do not fill their lane")
+
+    # A loop shorter than one of its own cooldowns used to be unplayable here: the
+    # probe played the loop twice, so the second pass tripped the engine's cooldown
+    # check and the preview came back empty. One play with a tail window is clean.
+    short_loops = []
+    for rotation_id, rotation in spec["rotations"].items():
+        loop_time = payloads.rotation_seconds(spec, rotation_id)
+        longest = 0.0
+        for block in rotation["blocks"]:
+            sequence = spec["field_seqs"].get(block)
+            if sequence is None:
+                continue
+            for placement in sequence["placements"]:
+                ability = abilities.get(placement["ability"]) or {}
+                longest = max(longest, float(ability.get("cooldown") or 0.0))
+        if loop_time and longest > loop_time:
+            short_loops.append(rotation_id)
+    if not short_loops:
+        problems.append("no rotation is shorter than its cooldowns, the probe is untested")
+    for rotation_id in short_loops[:3]:
+        fresh = payloads.rotation_preview(spec, rotation_id, party, {})
+        errors = [issue for issue in fresh["warnings"] if issue["severity"] == "error"]
+        if errors:
+            problems.append(f"{rotation_id}: one play of the loop still fails - "
+                            f"{errors[0]['message']}")
 
     sequence_key = next(iter(spec["field_seqs"]))
     focus = payloads.field_sequence_payload(spec, sequence_key)
@@ -2812,6 +2839,16 @@ def _run_editor_ui_check() -> dict:
             if len(options) != len(playable):
                 problems.append("the rotation list offers %d of the %d loops this party "
                                 "can play" % (len(options), len(playable)))
+            # One pick, one run: the picker used to be drawn with the previous
+            # index, so the first pick snapped back and had to be repeated.
+            if len(options) > 2:
+                boxes[0].select(options[1])
+                app.run()
+                boxes = [box for box in app.selectbox if box.label == "Rotation"]
+                if check("the rotation pick") and boxes and boxes[0].value != options[1]:
+                    problems.append("the rotation picker still needs a second pick: it "
+                                    "shows %r after choosing %r"
+                                    % (boxes[0].value, options[1]))
             if any("One loop takes" in caption.value for caption in app.caption):
                 problems.append("the loop-duration caption is still on the rotation screen")
             if any(box.label == "Default repeats" for box in app.number_input):

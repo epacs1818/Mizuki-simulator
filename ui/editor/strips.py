@@ -135,6 +135,7 @@ CSS = """
 .band.draggable:active { cursor: grabbing; }
 .band.locked { cursor: pointer; }
 .band.soft { opacity: 0.55; }
+.band.fill { border-radius: 4px; }
 .band.dim { opacity: 0.35; }
 .band.selected { outline: 2px solid var(--st-primary-color, #7aa2f7); outline-offset: 1px; }
 .band .tail {
@@ -305,7 +306,12 @@ export default function (component) {
       // minimum width and move the label outside it.
       const w = Math.max(it.minPx || 3, X(it.end) - left);
       const cls = ["band", it.draggable ? "draggable" : "locked", it.dim ? "dim" : "",
-                   it.soft ? "soft" : "", it.selected ? "selected" : ""].join(" ");
+                   it.soft ? "soft" : "", it.fill ? "fill" : "",
+                   it.selected ? "selected" : ""].join(" ");
+      // A "fill" band is a whole field sequence: it spans its lane instead of
+      // sitting as a thin bar in the middle of it.
+      const top = it.fill ? rowTop : rowTop + 5;
+      const height = it.fill ? "height:" + ROW_H + "px;" : "";
       let inner = (w > 46 ? '<span class="bl">' : '<span class="bl out">') + esc(it.label) + '</span>';
       if (it.tailFrom != null && it.tailFrom < it.end) {
         const off = Math.max(0, (it.tailFrom - it.start) * px);
@@ -314,8 +320,8 @@ export default function (component) {
       out += '<div class="' + cls + '" data-id="' + esc(it.id) + '" data-ref="' + esc(it.refKind) +
              '" data-start="' + it.start + '" data-draggable="' + (it.draggable ? 1 : 0) + '"' +
              ' title="' + esc(it.title || it.label) + '"' +
-             ' style="left:' + left + 'px;width:' + w + 'px;top:' + (rowTop + 5) +
-             'px;background:' + it.color + '">' + inner + '</div>';
+             ' style="left:' + left + 'px;width:' + w + 'px;top:' + top + 'px;' + height +
+             'background:' + it.color + '">' + inner + '</div>';
     } else if (it.kind === "hit") {
       const cls = ["hit", it.crit ? "crit" : "", it.off ? "off" : "",
                    it.dim ? "dim" : "", it.selected ? "selected" : ""].join(" ");
