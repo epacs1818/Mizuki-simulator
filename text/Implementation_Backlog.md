@@ -15,7 +15,7 @@ but not yet verified
 | Mizuki | Anemo | C0-C6 | ✔ | C2 verified (shred + flat-EM PHEC bonus); C6 verified (party stellar crit + flat-EM crit) |
 | Aether | Cryo | C4-C6 | ✔ | C6 verified (Frostglow / Aether C6 stellar) |
 | Odette | Cryo | C0-C6 | ✔ | C1 extra stellar proc (+4.500 MV @0.010s) and 6-stack/2-per-second Marvelous; C2 shred + 7% ATK per stack; C4 SSD shares 50% with the OTHERS and adds a 0.990 MV stellar proc (3.5s trigger CD); C6 party elevation 0.25 / self 0.45 and she keeps her stacks off-field. C3/C5 only change talent levels (user-entered) |
-| Anastasya | Cryo | C0-C6 | ✔ | Burst party stellar_bonus (**0.354 @ B13**, 20s — nerfed from 0.575), **Accolades** (12% crit DMG for the whole party, 20s, inclusive on the skill Cast hit; once sealed the OTHERS get her share → 16% and she gets 0 at C0; C1 → 48%/36% + 60%/240 ATK/EM, C4 → 68.8%/51.6% + 86%/344), A4 reaction-only jubilee (+0.15) + Lv2 vortices, Jubilee passive, **Triumph** (15s after the seal, on her next swap-in, hit delay 0.010), conditional extra stellar beat, **C2 Love** (0.60 stellar CD for 30s + permanent 0.05 elevation), **C6** (Love +0.10 elevation, C6 Triumph 2.5x MV on every ally swap-in, 15s per-character CD) |
+| Anastasya | Cryo | C0-C6 | ✔ | Burst party stellar_bonus (**0.354 @ B13**, 20s — nerfed from 0.575), **Accolades** (12% crit DMG for the whole party, 20s, inclusive on the skill Cast hit; once sealed the OTHERS get her share → 16% and she gets 0 at C0; C1 → 48%/36% + 60%/240 ATK/EM, C4 → 68.8%/51.6% + 86%/344), A4 reaction-only jubilee (+0.10) + Lv2 vortices, Jubilee passive, **Triumph** (15s after the seal, on her next swap-in, hit delay 0.010), conditional extra stellar beat, **C2 Love** (0.50 stellar CD for 30s + permanent 0.05 elevation), **C6** (Love +0.10 elevation, C6 Triumph 2.0x MV on every ally swap-in, 15s per-character CD) |
 | Faruzan | Anemo | C6 | ✔ | C6 CD buff + Anemo shred verified; her Skill Cast and the triggered Pressurized Collapse are separate abilities (collapse delay + 3.0s CD live in abilities.py) |
 | Sucrose | Anemo | C0-C6 | ✔ | A1/A4/C6 verified (scope, magnitude and window) |
 | Diona | Cryo | C6 | ✔ | Choice Treasures (20s state from either skill hit) → Icy Paw volley 0.270s after ANY Stellar Swirl (3.5s CD from the trigger); C6 burst-cast buff (+200 EM / +0.40 stellar) on the ACTIVE character for the whole burst (11.75s) |
@@ -279,27 +279,41 @@ rule is verified independently of the rotation spacing.
   (`anastasya_accolades_unsealed_state` / `..._shared_state`) so they can never
   double-count; `anastasya_accolades_state` is the display column.
 
-**Love (C2)**: 30s party `stellar_crit_dmg = 0.60`, cast with the skill (refreshed by
+**Love (C2)**: 30s party `stellar_crit_dmg = 0.50`, cast with the skill (refreshed by
 each cast, independent of Accolades), plus a **permanent** `0.05 elevation_mult` with
 no window (`always_on`, C2+). At C6 Love also gives another `0.10 elevation_mult`
 (total 0.15) and unlocks the **C6 Triumph**: every OTHER character's swap-in while
-Love is up fires `anastasya_c6_triumph` (2.5× the talent-scaled Triumph MV —
-835 vs 334 base — credited to her, 15s per-character CD, so up to 2 per Love window).
+Love is up fires `anastasya_c6_triumph` (2.0× the talent-scaled Triumph MV —
+668 vs 334 base — credited to her, 15s per-character CD, so up to 2 per Love window).
 
-## Calibration baseline (after the Anastasya Accolades round)
+## Calibration baseline (after the Anastasya nerf round)
+
+Nerfs in this round: A4 reaction jubilee 0.15 → 0.10, C2 Love stellar CD 0.60 →
+0.50, C6 Triumph 2.5× → 2.0× the talent-scaled Triumph MV (835 → 668 base) and her
+burst cooldown 15.0 → 17.1s. The ascension stat also moved from crit rate to crit DMG
+(0.146/0.194/0.242 CR → 0.692/0.788/0.884 CD).
+
+The 17.1s burst cooldown made two Sucrose presets illegal: they cast her EQ twice per
+loop, ~15.9s apart. Both standards now split her kit across three visits built from the
+existing sequences - `Anastasya E`, `Anastasya Q` (burst only), `Anastasya E` - so the
+burst rides its own visit. A burst on either skill visit does not work: her tap shares
+the 15s floor and the two Odette/Aether windows are ~17.2s / ~16.6s, so a burst there
+either breaks the other burst's 15s cooldown or needs ~1.6s of idle field time. This
+layout keeps Accolades refreshed twice per loop, Odette's two QEs, Aether's two ECQs,
+Sucrose's QN1-into-pull-out order, and adds no new field sequence.
 
 The standard 30s trial (DEFAULT_PARTY, Mizuki C0/C1/C2/C6):
 1087457.8 / 1212982.7 / 1275225.0 / 1476757.9  (unchanged — that party has no Anastasya)
 
 Anastasya 6x preset, per constellation:
-**4,350,677.6 (C0) / 6,269,037.8 (C1) / 7,221,345.2 (C2) / 8,675,730.1 (C4) /
-11,415,775.5 (C6)** — C3 = C2 and C5 = C4, because those constellations only change
+**4,295,223.8 (C0) / 6,148,253.3 (C1) / 6,893,371.7 (C2) / 8,271,155.7 (C4) /
+10,296,137.5 (C6)** — C3 = C2 and C5 = C4, because those constellations only change
 talent levels (user-entered).
 
 At C0 the Accolades rewrite is a tiny gain over the old flat A1 (+1,049): the cast hit is
 inclusive and she keeps 12% for the first, still-unsealed window, while the OTHERS keep
 their 16%. From C1 the OTHERS jump 16% → 48% crit DMG (+60% ATK / 240 EM) for the shared
-part of every loop — that is the +44% at C1. C2 adds Love (0.60 stellar CD + 0.05
+part of every loop — that is the +44% at C1. C2 adds Love (0.50 stellar CD + 0.05
 elevation), C4 replaces the 300% tier with 430%, and C6 adds the 0.10 elevation plus the
 C6 Triumph procs (18 in the 6-loop preset).
 
@@ -453,7 +467,7 @@ the Sac-Frag proc variant having `cooldown = 0`.
 | Diona Icy Paws | `diona_choice_treasures` (Ability, 3 x 41.92% skill) | ANY character's Stellar Swirl while her Choice Treasures state (20s) is up | **0.270 / 0.360 / 0.360** | 3.5s **from the trigger** |
 | Anastasya extra stellar | `anastasya_extra_stellar` (Ability, 16.8% burst) | her Palestar Crown Stellar beat while her burst window is up | **0.010** | - |
 | Anastasya Triumph | `anastasya_triumph` (Ability, 334% burst) | her swap-in (trigger = SWAP_IN), armed by the SEAL (burst + swap-out) | **0.010**, on the swap-in that is ≥ `ANASTASYA_UNSEAL_DELAY` (15s) after the seal | once per seal |
-| Anastasya C6 Triumph | `anastasya_c6_triumph` (Ability, 2.5x Triumph's talent-scaled MV) | ANY other character's swap-in while Love is up (C6) | **0.010** | 15s **per character**, from the trigger |
+| Anastasya C6 Triumph | `anastasya_c6_triumph` (Ability, 2.0x Triumph's talent-scaled MV) | ANY other character's swap-in while Love is up (C6) | **0.010** | 15s **per character**, from the trigger |
 | Odette C1 extra stellar | `odette_c1_stellar_hit` (bare Hit, 450% ATK) | her Recast's `Skill_Stellar` hit (C1+) | **0.010** | - (once per recast) |
 | Odette C4 extra stellar | `odette_c4_stellar_hit` (bare Hit, 99% ATK) | ANY party `STELLAR_DMG` hit while Snow Swan's Dream is up (C4+) | **0.010** | 3.5s **from the trigger** (`ODETTE_C4_PROC_CD`) |
 

@@ -153,7 +153,7 @@ CONDITIONAL_CONSTANT_BUFFS = {
     # C2 "Love": party stellar crit DMG for 30s, cast with the skill (independent of
     # Accolades). Its elevation part is permanent and has no window.
     "Anastasya Love":{
-        "stellar_crit_dmg": 0.60,
+        "stellar_crit_dmg": 0.50,
     },
     "Anastasya Love Elevation":{         # C2: always on, party-wide
         "elevation_mult": 0.05,
@@ -161,10 +161,12 @@ CONDITIONAL_CONSTANT_BUFFS = {
     "Anastasya Love Elevation C6":{      # C6: stacks on top of the C2 part
         "elevation_mult": 0.10,
     },
-    # A4: while she is in the party, STELLAR SWIRL REACTION damage gains +0.15
-    # jubilee (a separate key: stellar DMG is unaffected).
+    # A4: while she is in the party, STELLAR SWIRL REACTION damage gains +0.10
+    # jubilee (a separate key: stellar DMG is unaffected). This is her party-wide
+    # stellar multiplier at every constellation; her ATK-scaled Jubilee passive
+    # ("Anastasya_jubilee") is a different buff and is not part of this value.
     "Anastasya A4":{
-        "reaction_jubilee_mult": 0.15,
+        "reaction_jubilee_mult": 0.10,
     },
 
     #Diona

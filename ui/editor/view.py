@@ -27,7 +27,7 @@ def body() -> None:
     error = store.take_error()
     if error:
         st.error(error)
-    picked = st.segmented_control("Screen", list(SCREENS), default=SCREENS[0],
+    picked = st.segmented_control("Screen", list(SCREENS), default=SCREENS[0], required=True,
                                   key=SCREEN_KEY, label_visibility="collapsed")
     if picked == "Rotation":
         screens.rotation_screen(spec)

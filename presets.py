@@ -280,9 +280,14 @@ STANDARD_ROTATIONS = {
         description="Sucrose E -> Aether ECQ -> Odette EE -> Sucrose E -> Mizuki (3 nukes) "
                     "-> Sucrose E -> Aether ECQ -> Odette EE -> Sucrose QN1 -> Mizuki burst (4 nukes)."
     ),
-    # Anastasya variant: her EQ replaces Aether's EN1/ECQ, but it is 0.78s SHORTER
-    # (2.851s vs 3.631s), which would re-cast her 15s skill/burst at 14.84s. Odette's
-    # QE (+1.08s per visit) buys the missing time and clears the cooldown.
+    # Anastasya variant: her visits replace Aether's EN1/ECQ, but they are SHORTER
+    # (a plain E is 1.23s vs 3.631s), which would re-cast her skill at 14.84s. Odette's
+    # QE (+1.08s per visit) buys the missing time and clears it. Her own burst is now
+    # 17.1s and neither of her two skill visits can host it: the skill tap is 15s too,
+    # and the two Odette windows are only ~17.2s / ~16.6s apart, so a burst on either
+    # visit would either break Odette's 15s burst or need 1.6s of dead field time.
+    # She therefore takes THREE visits - skill, burst-only (`Anastasya Q`), skill -
+    # which keeps both 15s windows legal and Accolades refreshed twice per loop.
     "sucrose_starter_anastasya": Rotation(
         name="Sucrose Starter",
         sequences=[
@@ -298,19 +303,21 @@ STANDARD_ROTATIONS = {
         name="Sucrose Standard",
         sequences=[
             STANDARD_FIELD_SEQUENCES["Sucrose E"],
-            STANDARD_FIELD_SEQUENCES["Anastasya EQ"],
+            STANDARD_FIELD_SEQUENCES["Anastasya E"],
             STANDARD_FIELD_SEQUENCES["Odette QE"],
             STANDARD_FIELD_SEQUENCES["Sucrose E"],
             STANDARD_FIELD_SEQUENCES["Mizuki E (3 nukes)"],
+            STANDARD_FIELD_SEQUENCES["Anastasya Q"],
             STANDARD_FIELD_SEQUENCES["Sucrose E"],
-            STANDARD_FIELD_SEQUENCES["Anastasya EQ"],
+            STANDARD_FIELD_SEQUENCES["Anastasya E"],
             STANDARD_FIELD_SEQUENCES["Odette QE"],
             STANDARD_FIELD_SEQUENCES["Sucrose QN1"],
             STANDARD_FIELD_SEQUENCES["Mizuki EQ (4 nukes)"]
         ],
         repetitions=1,
-        description="Sucrose E -> Anastasya EQ -> Odette QE -> Sucrose E -> Mizuki (3 nukes) "
-                    "-> Sucrose E -> Anastasya EQ -> Odette QE -> Sucrose QN1 -> Mizuki burst (4 nukes)."
+        description="Sucrose E -> Anastasya E -> Odette QE -> Sucrose E -> Mizuki (3 nukes) "
+                    "-> Anastasya Q (burst-only visit) -> Sucrose E -> Anastasya E -> "
+                    "Odette QE -> Sucrose QN1 -> Mizuki burst (4 nukes)."
     ),
 
     # --- Triple Cryo --------------------------------------------------------
@@ -367,19 +374,21 @@ STANDARD_ROTATIONS = {
         sequences=[
             STANDARD_FIELD_SEQUENCES["Sucrose E"],
             STANDARD_FIELD_SEQUENCES["Aether ECQ"],
-            STANDARD_FIELD_SEQUENCES["Anastasya EQ"],
+            STANDARD_FIELD_SEQUENCES["Anastasya E"],
             STANDARD_FIELD_SEQUENCES["Sucrose E"],
             STANDARD_FIELD_SEQUENCES["Mizuki E (3 nukes)"],
+            STANDARD_FIELD_SEQUENCES["Anastasya Q"],
             STANDARD_FIELD_SEQUENCES["Sucrose E"],
             STANDARD_FIELD_SEQUENCES["Aether ECQ"],
-            STANDARD_FIELD_SEQUENCES["Anastasya EQ"],
+            STANDARD_FIELD_SEQUENCES["Anastasya E"],
             STANDARD_FIELD_SEQUENCES["Sucrose QN1"],
             STANDARD_FIELD_SEQUENCES["Mizuki EQ (4 nukes)"]
         ],
         repetitions=1,
-        description="UNVERIFIED draft. Sucrose E -> Aether ECQ -> Anastasya EQ -> "
-                    "Sucrose E -> Mizuki (3 nukes) -> Sucrose E -> Aether ECQ -> "
-                    "Anastasya EQ -> Sucrose QN1 -> Mizuki burst (4 nukes)."
+        description="UNVERIFIED draft. Sucrose E -> Aether ECQ -> Anastasya E -> "
+                    "Sucrose E -> Mizuki (3 nukes) -> Anastasya Q (burst-only visit) -> "
+                    "Sucrose E -> Aether ECQ -> Anastasya E -> Sucrose QN1 -> "
+                    "Mizuki burst (4 nukes)."
     ),
     "aether_anastasya_mizuki_loop": Rotation(
         name="Aether-Anastasya Mizuki Loop",

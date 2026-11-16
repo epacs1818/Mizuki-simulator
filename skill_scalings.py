@@ -195,9 +195,9 @@ CHARACTER_SKILLS = {
                 "scaling": get_scaled_list(334.0, "Elemental 1"),
             },
             # C6: the stronger Triumph triggered by the OTHER characters' swap-ins
-            # while Love is up. Same talent curve, 2.5x the value (334 -> 835).
+            # while Love is up. Same talent curve, 2.0x the value (334 -> 668).
             "C6 Triumph Stellar Swirl DMG": {
-                "scaling": get_scaled_list(835.0, "Elemental 1"),
+                "scaling": get_scaled_list(668.0, "Elemental 1"),
             }
         }
     }

@@ -613,7 +613,7 @@ anastasya_tap = Ability(
 anastasya_burst = Ability(
     name="To the New World",
     character="Anastasya",
-    cooldown=15.0,
+    cooldown=17.1,
     talent_level=13,
     talent_type="burst_talent",
     hits=[
@@ -647,7 +647,7 @@ anastasya_extra_stellar = Ability(
 )
 
 # TRIGGERED ABILITY (C6). While her Love is up, EVERY other character's swap-in
-# fires this stronger Triumph (2.5x the talent-scaled value); 15s per-character CD.
+# fires this stronger Triumph (2.0x the talent-scaled value); 15s per-character CD.
 anastasya_c6_triumph = Ability(
     name="C6 Triumph",
     character="Anastasya",
