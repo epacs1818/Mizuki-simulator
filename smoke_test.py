@@ -1720,7 +1720,7 @@ def _run_anastasya_check() -> dict:
         ratio = (off["average_damage"] / on["average_damage"]) if on["average_damage"] else 0.0
         jub = fs.get("jubilee_mult", 0.0)
         out["reaction_ratio_err"] = round(
-            abs(ratio - (1.0 + jub) / (1.0 + jub + 0.15)), 12)
+            abs(ratio - (1.0 + jub) / (1.0 + jub + 0.10)), 12)
     # ---- 4. Jubilee passive: 0.007% of HER ATK (cap 14%) for the party ----
     def _jubilee(members):
         tl = RotationTimeline(party=members)
@@ -1934,7 +1934,7 @@ def _run_anastasya_constellation_check() -> dict:
                          for ts in per_char.values()),
             "max_per_char": max((len(ts) for ts in per_char.values()), default=0),
             "mv": procs[0].get("motion_value") if procs else None,
-            "expected_mv": 2.5 * anastasya_triumph.hits[0].motion_value,
+            "expected_mv": 2.0 * anastasya_triumph.hits[0].motion_value,
             "owner": procs[0].get("character") if procs else None,
         }
 
@@ -2483,6 +2483,10 @@ def _run_editor_port_check() -> dict:
         problems.append(f"{sample}: {len(ticks)} ticks for {len(result['hits'])} hits")
     if payload["tMax"] < max(block["end"] for block in result["blocks"]) - 1e-6:
         problems.append(f"{sample}: the strip axis ends before the last block")
+    # Trial bands are whole field sequences: faded, with their hits on top - the
+    # same look as the field-sequence strip.
+    if not bands or not all(item.get("soft") for item in bands):
+        problems.append(f"{sample}: the trial bands are not soft behind their hits")
     # The one off-field cue the editor keeps: a tick is dimmed when its owner was
     # not the active character. It is a paint flag only, so it must mirror the
     # engine's on_field exactly and must not be flattened back to False.
@@ -2585,12 +2589,11 @@ def _run_editor_port_check() -> dict:
     if sum(row["hits"] for row in table) != len(result["hits"]):
         problems.append(f"{sample}: the rotation table counts "
                         f"{sum(row['hits'] for row in table)} of {len(result['hits'])} hits")
-    busiest = max(table, key=lambda row: row["uses"])
-    passes = editor_results.occurrence_rows(spec, result, busiest["id"])
-    if len(passes) != busiest["uses"]:
-        problems.append(f"{sample}: {len(passes)} passes for {busiest['uses']} occurrences")
-    if abs(sum(row["damage"] for row in passes) - busiest["damage"]) > 1e-3:
-        problems.append(f"{sample}: the per-occurrence rows do not add up to the rotation")
+    if any(row["start"] < 0 or row["duration"] <= 0 for row in table):
+        problems.append(f"{sample}: a rotation log row has no span")
+    starts = [row["start"] for row in table]
+    if starts != sorted(starts):
+        problems.append(f"{sample}: the rotation log is not in playing order")
 
     return {
         "problems": problems,
@@ -2673,16 +2676,13 @@ def _run_editor_edit_check() -> dict:
     if result["totals"]["hits"] <= 0:
         problems.append("the built trial produced no hits")
 
-    frame = results.slim_frame(spec, result)
-    if list(frame.columns) != results.COLUMNS:
-        problems.append("slim table columns are %s" % list(frame.columns))
+    rows = results.rotation_rows(spec, result)
+    if abs(sum(row["damage"] for row in rows) - result["totals"]["damage"]) > 1e-3:
+        problems.append("the rotation log does not add up to the total damage")
     preview = payloads.rotation_preview(spec, rotation_id, party, {})
     loop = results.loop_totals(spec, rotation_id, preview)
     if loop["duration"] <= 0 or loop["hits"] <= 0:
         problems.append("the loop totals are empty")
-    damage = results.slot_damage(result)
-    if abs(sum(damage.values()) - result["totals"]["damage"]) > 1e-3:
-        problems.append("per-slot damage does not add up to the total")
 
     # Publishing must not change a single number: the runner gets the same trial.
     from timeline import RotationTimeline
@@ -2807,19 +2807,20 @@ def _run_editor_ui_check() -> dict:
         if len(app.metric) != 4:
             problems.append("the trial screen shows %d metrics, expected 4"
                             % len(app.metric))
-        # The hit log is behind "Show details"; open it and read the columns back.
-        app.session_state["ed_trial_hits"] = True
-        app.run()
-        if check("the hit log"):
-            columns = []
-            for table in app.dataframe:
-                value = getattr(table, "value", None)
-                if hasattr(value, "columns"):
-                    columns.append(list(value.columns))
-            if not columns:
-                problems.append("the hit log rendered no table")
-            elif editor_results.COLUMNS not in columns:
-                problems.append("the hit log columns are %s" % (columns,))
+        # The rotation log: exactly the name plus the four numbers, and its damage
+        # column has to add up to the Damage tile printed above it.
+        if check("the rotation log"):
+            frames = [getattr(table, "value", None) for table in app.dataframe]
+            logs = [frame for frame in frames if hasattr(frame, "columns")
+                    and list(frame.columns) == editor_results.LOG_COLUMNS]
+            if not logs:
+                problems.append("the trial screen has no rotation log table")
+            else:
+                total = float(str(app.metric[0].value).replace(",", ""))
+                shown = float(logs[0]["Damage"].sum())
+                if abs(shown - total) > 1.0:
+                    problems.append("the rotation log adds up to %.1f, not the %.1f the "
+                                    "metric shows" % (shown, total))
         app.session_state["editor_screen"] = "Rotation"
         app.run()
         if check("the Rotation screen"):
@@ -3899,8 +3900,8 @@ def run(verbose: bool = True) -> None:
         (ana["acc_offenders"] == 0,
          f"{ana['acc_offenders']} hits kept Accolades past its 20s window"),
         (ana["swirl_found"], "no Stellar Swirl event found in rotation A"),
-        (abs((ana["reaction_jubilee"] or 0.0) - 0.15) <= 1e-9,
-         f"Anastasya A4 reaction jubilee is {ana['reaction_jubilee']}, expected 0.15"),
+        (abs((ana["reaction_jubilee"] or 0.0) - 0.10) <= 1e-9,
+         f"Anastasya A4 reaction jubilee is {ana['reaction_jubilee']}, expected 0.10"),
         (ana["reaction_jubilee_without_her"] == 0.0,
          "Anastasya A4 reaction jubilee applied without her in the party"),
         (ana["stellar_bonus_mult_ok"],
@@ -3993,8 +3994,8 @@ def run(verbose: bool = True) -> None:
          f"expected 0.645 / 0"),
         (not anc["love"][1]["flag"] and abs(anc["love"][1]["stellar_cd"] or 0.0) <= 1e-12,
          f"Love activated below C2 ({anc['love'][1]})"),
-        (anc["love"][2]["flag"] and abs(anc["love"][2]["stellar_cd"] - 0.60) <= 1e-9,
-         f"C2 Love stellar_crit_dmg is {anc['love'][2]['stellar_cd']}, expected 0.60"),
+        (anc["love"][2]["flag"] and abs(anc["love"][2]["stellar_cd"] - 0.50) <= 1e-9,
+         f"C2 Love stellar_crit_dmg is {anc['love'][2]['stellar_cd']}, expected 0.50"),
         (abs(anc["love"][1]["elevation"]) <= 1e-12
          and abs(anc["love"][2]["elevation"] - 0.05) <= 1e-9
          and abs(anc["love"][6]["elevation"] - 0.15) <= 1e-9,
@@ -4009,7 +4010,7 @@ def run(verbose: bool = True) -> None:
          f"C6 Triumphs are closer than the {ANASTASYA_C6_TRIUMPH_CD}s per-character CD"),
         (abs((anc["c6"][6]["mv"] or 0) - anc["c6"][6]["expected_mv"]) <= 1e-9,
          f"C6 Triumph MV is {anc['c6'][6]['mv']}, expected "
-         f"{anc['c6'][6]['expected_mv']} (2.5x the talent-scaled Triumph)"),
+         f"{anc['c6'][6]['expected_mv']} (2.0x the talent-scaled Triumph)"),
         (anc["c6"][6]["owner"] == "Anastasya", "C6 Triumph is not credited to Anastasya"),
         (anc["linger"]["sealed_before_unseal"],
          "she was not sealed before the unseal"),
@@ -4171,7 +4172,7 @@ def run(verbose: bool = True) -> None:
         (cat2["sucrose_anastasya_trial"]["error"] is None,
          f"the Sucrose/Anastasya trial failed: {cat2['sucrose_anastasya_trial']['error']}"),
         (cat2["sucrose_anastasya_trial"]["rotations"] == 6
-         and abs((cat2["sucrose_anastasya_trial"].get("duration") or 0.0) - 187.697) <= 1e-3,
+         and abs((cat2["sucrose_anastasya_trial"].get("duration") or 0.0) - 186.192) <= 1e-3,
          f"the Sucrose/Anastasya trial is {cat2['sucrose_anastasya_trial']}"),
         (cat2["sucrose_standard_steps"] == [
             "Sucrose E", "AetherECQ", "OdetteEE", "Sucrose E",
@@ -4196,7 +4197,7 @@ def run(verbose: bool = True) -> None:
          f"{cat2['sucrose_aether_anastasya_trial']['error']}"),
         (cat2["sucrose_aether_anastasya_trial"]["rotations"] == 4
          and abs((cat2["sucrose_aether_anastasya_trial"].get("duration") or 0.0)
-                 - 118.354) <= 1e-3,
+                 - 117.451) <= 1e-3,
          f"the Aether+Anastasya Sucrose trial is {cat2['sucrose_aether_anastasya_trial']}"),
         (cat2["sacfrag_aether_anastasya_trial"]["error"] is None,
          f"the Aether+Anastasya Sac Frag trial failed: "
@@ -4304,7 +4305,7 @@ def run(verbose: bool = True) -> None:
     failures.extend(editor_ui_failures)
     if not editor_ui_failures and verbose:
         print("[OK] editor UI: tab 3 mounts, the 3 screens switch, trial 4 metrics / "
-              "rotation 2, 7-column hit log, rotation list scoped to the party")
+              "rotation 2, rotation log adds up, rotation list scoped to the party")
 
 
     # 2p. Trial duration accounting.

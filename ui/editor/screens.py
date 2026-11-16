@@ -13,7 +13,9 @@ from ui.editor import (catalog, mutations, payloads, publish, results, store,
                         strips, validate)
 from ui.state import toast
 
-PIXELS_PER_SEC = 14.0
+# The trial strip is the one that scrolls: a whole trial is far too long to fit, so
+# it is drawn at a fixed, readable density instead (0.1s is about 12px wide).
+TRIAL_PX_PER_SEC = 120.0
 TRIAL_STRIP = "editor_trial_strip"
 ROTATION_STRIP = "editor_rotation_strip"
 SEQUENCE_STRIP = "editor_sequence_strip"
@@ -43,20 +45,22 @@ def _apply(fn, success: str = "") -> None:
     st.rerun()
 
 
-def _party_visible(ids, owners) -> list:
-    """Ids the current party has a stake in (the trial list uses this).
+def _trials_for_party(spec: dict, ids) -> list:
+    """Trials this party can run.
 
-    An entry nobody owns is always visible; with no party at all nothing is hidden,
-    because the party is the thing being configured elsewhere.
+    A trial belongs to a team: its ``required_party`` has to be part of the current
+    one (empty means any team). The editor is only reachable with a party chosen, so
+    everything listed here is a trial for that party - which is why the form has no
+    party picker of its own.
     """
     party = set(store.party_ids())
     if not party:
         return list(ids)
     out = []
-    for item_id in ids:
-        owned = owners(item_id)
-        if not owned or owned & party:
-            out.append(item_id)
+    for trial_id in ids:
+        required = set(spec["trials"][trial_id].get("required_party") or [])
+        if required <= party:
+            out.append(trial_id)
     return out
 
 
@@ -124,30 +128,21 @@ def _trial_labels(spec: dict, ids) -> dict:
     return labels
 
 
-TRIAL_FORM_KEYS = ("ed_trial_name", "ed_trial_desc", "ed_trial_mode",
-                    "ed_trial_time", "ed_trial_party")
-
-
-def _sync_owner(owner, keys) -> None:
-    """Point the form widgets at *owner* so a stale value cannot leak across items."""
-    if st.session_state.get("ed_owner") != owner:
-        st.session_state["ed_owner"] = owner
-        for key in keys:
-            st.session_state.pop(key, None)
-
-
 def _trial_actions(spec: dict, trial_id: str) -> None:
     trial = spec["trials"].get(trial_id) or {}
+    party = store.party_ids()
     columns = st.columns(4)
     if columns[0].button("New trial", key="ed_new_trial", use_container_width=True):
         def make() -> None:
             store.select(mutations.new_trial(spec, "New trial",
-                                             next(iter(spec["rotations"]), None)))
+                                             next(iter(spec["rotations"]), None), party))
         _apply(make, "Trial created.")
     if columns[1].button("Duplicate", key="ed_dup_trial", use_container_width=True,
                          disabled=not trial):
         def twin() -> None:
-            store.select(mutations.duplicate(spec, "trials", trial_id))
+            new_id = mutations.duplicate(spec, "trials", trial_id)
+            mutations.set_trial_party(spec, new_id, party)
+            store.select(new_id)
         _apply(twin, "Trial duplicated.")
     if columns[2].button("Delete", key="ed_del_trial", use_container_width=True,
                          disabled=bool(trial.get("preset", True))):
@@ -160,39 +155,49 @@ def _trial_actions(spec: dict, trial_id: str) -> None:
 
 
 def _trial_form(spec: dict, trial_id: str) -> None:
+    """Name, description and end condition, each keyed per trial.
+
+    A keyed widget keeps its own value, so two trials sharing a key is exactly how
+    one trial's text ends up under another. Per-trial keys make that impossible;
+    the Apply button sits below the rotation list, because it is one set of settings.
+    """
     trial = spec["trials"].get(trial_id)
     if trial is None:
         return
     locked = bool(trial.get("preset"))
     if locked:
         st.caption("Preset - read-only. Duplicate it to edit.")
-    _sync_owner(("trials", trial_id), TRIAL_FORM_KEYS)
-    st.text_input("Name", value=trial["name"], key="ed_trial_name", disabled=locked)
+    suffix = "_" + trial_id
+    st.text_input("Name", value=trial["name"], key="ed_trial_name" + suffix,
+                  disabled=locked)
     st.text_input("Description", value=trial.get("description", ""),
-                  key="ed_trial_desc", disabled=locked)
+                  key="ed_trial_desc" + suffix, disabled=locked)
     mode = st.radio("End", ["time", "last_swap"],
                     index=0 if trial.get("end_mode") == "time" else 1,
                     format_func=lambda m: "Fixed duration" if m == "time" else "At the last swap",
-                    horizontal=True, key="ed_trial_mode", disabled=locked)
+                    horizontal=True, key="ed_trial_mode" + suffix, disabled=locked)
     st.number_input("Duration (s)", min_value=1.0, max_value=3600.0, step=1.0,
-                    value=float(trial.get("end_time") or 30.0), key="ed_trial_time",
+                    value=float(trial.get("end_time") or 30.0),
+                    key="ed_trial_time" + suffix,
                     disabled=locked or mode != "time")
-    characters = spec["catalog"]["characters"]
-    st.multiselect("Required party", list(characters),
-                   default=[cid for cid in trial.get("required_party") or [] if cid in characters],
-                   format_func=lambda cid: characters[cid]["name"],
-                   key="ed_trial_party", disabled=locked,
-                   help="Empty means any team. Otherwise the runner only offers this trial to that team.")
-    if not locked and st.button("Apply changes", key="ed_apply_trial",
-                               use_container_width=True):
-        def apply() -> None:
-            mutations.set_trial_text(spec, trial_id,
-                                     name=st.session_state["ed_trial_name"],
-                                     description=st.session_state["ed_trial_desc"])
-            mutations.set_trial_end(spec, trial_id, st.session_state["ed_trial_mode"],
-                                    st.session_state["ed_trial_time"])
-            mutations.set_trial_party(spec, trial_id, st.session_state["ed_trial_party"])
-        _apply(apply, "Trial updated.")
+
+
+def _trial_apply(spec: dict, trial_id: str) -> None:
+    trial = spec["trials"].get(trial_id)
+    if trial is None or trial.get("preset"):
+        return
+    if not st.button("Apply changes", key="ed_apply_trial", use_container_width=True):
+        return
+    suffix = "_" + trial_id
+
+    def apply() -> None:
+        mutations.set_trial_text(spec, trial_id,
+                                 name=st.session_state["ed_trial_name" + suffix],
+                                 description=st.session_state["ed_trial_desc" + suffix])
+        mutations.set_trial_end(spec, trial_id,
+                                st.session_state["ed_trial_mode" + suffix],
+                                st.session_state["ed_trial_time" + suffix])
+    _apply(apply, "Trial updated.")
 
 
 def _slot_list(spec: dict, trial_id: str) -> None:
@@ -218,35 +223,32 @@ def _slot_list(spec: dict, trial_id: str) -> None:
         if columns[2].button("\u2191", key="ed_slot_up_" + slot["id"],
                              disabled=locked or index == 0):
             _try(lambda: mutations.move_slot(spec, trial_id, slot["id"], -1))
+            st.rerun(scope="fragment")
         if columns[3].button("\u2193", key="ed_slot_down_" + slot["id"],
                              disabled=locked or index == len(slots) - 1):
             _try(lambda: mutations.move_slot(spec, trial_id, slot["id"], 1))
+            st.rerun(scope="fragment")
         if columns[4].button("\u2715", key="ed_slot_del_" + slot["id"], disabled=locked):
             _try(lambda: mutations.remove_slot(spec, trial_id, slot["id"]))
+            st.rerun(scope="fragment")
     if locked:
         return
-    options = list(rotations)
+    party = set(store.party_ids())
+    # A trial belongs to a party, so only loops this party can play belong in it.
+    options = [rotation_id for rotation_id in rotations
+               if not party or _rotation_party(spec, rotations[rotation_id]) <= party]
     if not options:
-        st.caption("No rotations in the library yet.")
+        st.caption("No rotation is authored for this party yet - create one on the "
+                   "Rotation screen.")
         return
     picker, adder = st.columns([0.7, 0.3])
     picked = picker.selectbox("Add rotation", options,
                               format_func=lambda r: rotations[r]["name"],
-                              key="ed_add_slot_pick", label_visibility="collapsed")
+                              key="ed_add_slot_pick_" + trial_id,
+                              label_visibility="collapsed")
     if adder.button("Add", key="ed_add_slot", use_container_width=True):
         _try(lambda: mutations.add_slot(spec, trial_id, picked))
-
-
-def _jump_label(spec: dict, where) -> str:
-    """The button label for a click-through target."""
-    kind, item_id = where
-    if kind == "fs":
-        name = (spec["field_seqs"].get(item_id) or {}).get("name", "field sequence")
-    elif kind == "rotation":
-        name = (spec["rotations"].get(item_id) or {}).get("name", "rotation")
-    else:
-        name = (spec["trials"].get(item_id) or {}).get("name", "trial")
-    return "\u2197 %s" % name
+        st.rerun(scope="fragment")
 
 
 def _block_of_hit(result: dict, pick: dict):
@@ -274,7 +276,7 @@ def _trial_preview(spec: dict, trial_id: str) -> None:
     st.markdown("#### " + trial["name"])
     if trial.get("description"):
         st.caption(trial["description"])
-    payload = payloads.trial_payload(spec, trial_id, result, px_per_sec=PIXELS_PER_SEC)
+    payload = payloads.trial_payload(spec, trial_id, result, px_per_sec=TRIAL_PX_PER_SEC)
     strips.render(payload, key=TRIAL_STRIP)
     pick = strips.event("select", key=TRIAL_STRIP)
     if pick:
@@ -282,37 +284,38 @@ def _trial_preview(spec: dict, trial_id: str) -> None:
         block = next((item for item in result["blocks"] if item["id"] == block_id), None)
         if block is not None and block["rotation"] in spec["rotations"]:
             store.focus(("rotation", block["rotation"]))
-            st.rerun()
+            st.rerun(scope="fragment")
     results.metrics(result["totals"])
-    lines = results.slot_damage_lines(spec, trial, result)
-    if len(lines) > 1:
-        st.caption("Per rotation: " + "  |  ".join(lines))
     issues = validate.trial_issues(spec, trial_id, store.party_ids()) + result["warnings"]
-    results.render_issues(issues, key="ed_trial_issues", on_jump=store.focus,
-                          label=lambda where: _jump_label(spec, where))
-    if st.toggle("Show details", key="ed_trial_hits",
-                 help="The hit log of this trial: time, who was on field, owner, action, "
-                      "application, reaction, damage."):
-        results.render_hits(spec, result, key="editor_hits_trial")
+    results.render_issues(issues)
+    # The trial's own numbers, rotation by rotation. Every truncation the trial
+    # applied is already in these values, and the damage column adds up to the
+    # total the metric row printed above.
+    results.render_rotation_log(spec, result)
 
 
 def trial_screen(spec: dict) -> None:
     trials = spec["trials"]
-    shown = _party_visible(list(trials), lambda tid: set(trials[tid]["required_party"]))
+    shown = _trials_for_party(spec, list(trials))
     current = store.active_trial(spec)
-    if current and current not in shown:
-        shown = [current] + shown
+    if current not in shown:
+        current = shown[0] if shown else ""
+        if current:
+            store.select(current)
     labels = _trial_labels(spec, shown)
-    left, right = st.columns([0.95, 1.5], gap="large")
+    left, right = st.columns([0.9, 1.7], gap="large")
     with left:
         picked = _library("Trial", shown, labels, current, key="ed_trial_list",
-                          on_pick=store.select)
+                          on_pick=store.select,
+                          empty="No trial is authored for this party yet - create one "
+                                "below.")
         if picked and picked != current:
             store.select(picked)
             current = picked
         _trial_actions(spec, current)
         _trial_form(spec, current)
         _slot_list(spec, current)
+        _trial_apply(spec, current)
     with right:
         _trial_preview(spec, current)
 
@@ -445,7 +448,7 @@ def _rotation_preview(spec: dict, rotation_id: str) -> None:
     # A preview the engine refused (a cooldown clash on the second loop) would
     # otherwise draw an empty strip with no explanation, so its issues are shown.
     results.render_issues(validate.rotation_issues(spec, rotation_id)
-                          + preview.get("warnings", []), key="ed_rotation_issues")
+                          + preview.get("warnings", []))
 
 
 def _rotation_party(spec: dict, rotation: dict) -> set:

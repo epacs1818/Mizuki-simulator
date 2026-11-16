@@ -94,6 +94,9 @@ def trial_payload(spec: dict, trial_id: str, result: dict, *, selected=None,
             "color": colour,
             "draggable": False,
             "dim": duration > 0 and block["start"] > duration + 1e-9,
+            # A band is a whole field sequence: faded, with its hits drawn on top,
+            # the same look the field-sequence strip uses.
+            "soft": True,
             "selected": selected == ("block", block["id"]),
         })
     items.extend(_hit_items(spec, hits, selected))

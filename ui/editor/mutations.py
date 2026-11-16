@@ -95,18 +95,21 @@ def delete(spec: dict, section: str, item_id: str) -> None:
         spec["active_trial"] = next(iter(spec["trials"]))
 
 
-def new_trial(spec: dict, name: str, rotation_id: str | None = None) -> str:
+def new_trial(spec: dict, name: str, rotation_id: str | None = None,
+              party=None) -> str:
+    """A new trial, pinned to *party*: a trial belongs to the team it was built for."""
     new_id = unique_id(spec["trials"], catalog.slug(name) or "trial")
     slots = []
     if rotation_id:
         slots.append({"id": new_id + "~0", "rotation": rotation_id, "repeat": 1})
+    characters = spec["catalog"]["characters"]
     spec["trials"][new_id] = {
         "id": new_id,
         "name": (name or "New trial").strip() or "New trial",
         "description": "",
         "end_mode": "time",
         "end_time": 30.0,
-        "required_party": [],
+        "required_party": [cid for cid in (party or []) if cid in characters],
         "slots": slots,
         "preset": False,
     }
