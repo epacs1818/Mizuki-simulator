@@ -81,19 +81,19 @@ def _unique_labels(ids, labels) -> list:
     return out
 
 
-def _library(title: str, ids, labels: dict, current: str, *, key: str,
+def _library(title: str, ids, labels: dict, current: str, *, base: str,
              on_pick=None, empty: str = "Nothing here yet.") -> str:
     """Pick one id from the list, with the caller's state deciding what is shown.
 
-    The widget is keyed and the pick is written through ``on_change``: Streamlit
-    runs callbacks before the body, so by the time the widget is drawn the caller's
-    target already equals the pick and its index agrees with it. Without that, the
-    element is rendered with the *previous* index and visibly snaps back until the
-    run after - which is why a pick used to need doing twice.
+    The widget key *is* what the widget displays: the target id plus its label. An
+    element's identity is what Streamlit keys its state by (with a fixed key the
+    control keeps its own old label and ignores ``index``), so making the key follow
+    the target means a new entry, a delete or a rename produces a fresh element that
+    shows exactly the entry the caller asked for.
 
-    The key is dropped only when the app itself moved the target (a new entry, a
-    delete, a party change), so the widget re-reads the index then. A pick by hand
-    never trips that, because its callback has already set the target.
+    The pick itself is written through ``on_change``, which runs before the body: on
+    the run that follows, the target already equals the pick, the key matches it, and
+    nothing snaps back to the previous entry.
     """
     if not ids:
         st.info(empty)
@@ -101,15 +101,13 @@ def _library(title: str, ids, labels: dict, current: str, *, key: str,
     options = _unique_labels(ids, labels)
     mapping = dict(zip(options, ids))
     index = ids.index(current) if current in ids else 0
+    key = "%s::%s::%s" % (base, current, options[index])
 
     def remember() -> None:
         picked = st.session_state.get(key)
         if on_pick is not None and picked in mapping:
             on_pick(mapping[picked])
 
-    stored = st.session_state.get(key)
-    if stored is not None and stored != options[index]:
-        st.session_state.pop(key, None)
     picked = st.selectbox(title, options, index=index, key=key, on_change=remember,
                           label_visibility="collapsed")
     return mapping.get(picked, current)
@@ -305,7 +303,7 @@ def trial_screen(spec: dict) -> None:
     labels = _trial_labels(spec, shown)
     left, right = st.columns([0.9, 1.7], gap="large")
     with left:
-        picked = _library("Trial", shown, labels, current, key="ed_trial_list",
+        picked = _library("Trial", shown, labels, current, base="ed_trial_list",
                           on_pick=store.select,
                           empty="No trial is authored for this party yet - create one "
                                 "below.")
@@ -479,7 +477,7 @@ def rotation_screen(spec: dict) -> None:
     labels = {rid: rotations[rid]["name"] for rid in shown}
     left, right = st.columns([0.9, 1.7], gap="large")
     with left:
-        picked = _library("Rotation", shown, labels, current, key="ed_rotation_list",
+        picked = _library("Rotation", shown, labels, current, base="ed_rotation_list",
                           on_pick=store.select_rotation,
                           empty="No rotation is authored for this party yet - "
                                 "create one below.")
@@ -648,7 +646,7 @@ def sequence_screen(spec: dict) -> None:
             if current:
                 store.select_sequence(current)
         labels = {sid: sequences[sid]["name"] for sid in mine}
-        picked = _library("Field sequence", mine, labels, current, key="ed_sequence_list",
+        picked = _library("Field sequence", mine, labels, current, base="ed_sequence_list",
                           on_pick=store.select_sequence)
         if picked and picked != current:
             store.select_sequence(picked)

@@ -2523,8 +2523,6 @@ def _run_editor_port_check() -> dict:
     loop_bars = [item for item in loop["items"] if item["kind"] == "band"]
     if not loop_bars or not all(item.get("soft") for item in loop_bars):
         problems.append(f"{rotation_key}: the rotation bars are not soft behind their hits")
-    if not all(item.get("fill") for item in loop_bars):
-        problems.append(f"{rotation_key}: the rotation bars do not fill their lane")
 
     # A loop shorter than one of its own cooldowns used to be unplayable here: the
     # probe played the loop twice, so the second pass tripped the engine's cooldown
@@ -2563,6 +2561,19 @@ def _run_editor_port_check() -> dict:
     bars = [item for item in focus["items"] if item["kind"] == "band"]
     if not bars or not all(item.get("soft") for item in bars):
         problems.append(f"{sequence_key}: the ability bars are not soft behind their hits")
+
+    # The field-sequence strip is the reference: all three draw a band the same way -
+    # faded, named, with a minimum width, and never filling the whole lane.
+    for tag, items in (("trial", payload["items"]), ("rotation", loop["items"]),
+                       ("focus", focus["items"])):
+        tagged = [item for item in items if item["kind"] == "band"]
+        if not tagged:
+            problems.append(f"{tag}: no bands to compare")
+        elif any(item.get("fill") for item in tagged):
+            problems.append(f"{tag}: a band still fills its lane")
+        elif not all(item.get("soft") and item.get("minPx") and item.get("label")
+                     for item in tagged):
+            problems.append(f"{tag}: a band is missing the shared soft/label/minPx look")
 
     # A field sequence can only hold its own character's abilities, so the adder's
     # list must be complete for that character and free of anybody else's.
@@ -2876,6 +2887,21 @@ def _run_editor_ui_check() -> dict:
                         problems.append("a new rotation is in the list but the picker "
                                         "shows %r, not %r"
                                         % (boxes[0].value, options[-1]))
+            # A rename has to reach the picker as well: a widget whose identity does
+            # not change keeps its own old label, so this used to show the old name.
+            name_boxes = [box for box in app.text_input if box.label == "Name"]
+            if name_boxes:
+                name_boxes[-1].set_value("Renamed loop")
+                app.run()
+                applies = [button for button in app.button
+                           if button.label == "Apply changes"]
+                if applies:
+                    applies[0].click()
+                    app.run()
+                    boxes = [box for box in app.selectbox if box.label == "Rotation"]
+                    if check("the rotation rename") and boxes[0].value != "Renamed loop":
+                        problems.append("the rotation picker still shows %r after a rename"
+                                        % (boxes[0].value,))
         app.session_state["editor_screen"] = "Field sequence"
         app.run()
         if check("the Field sequence screen"):

@@ -87,16 +87,17 @@ def trial_payload(spec: dict, trial_id: str, result: dict, *, selected=None,
             "refKind": "block",
             "start": block["start"],
             "end": block["end"],
-            "label": "",
+            "label": sequence.get("name", ""),
             "title": "%s / %s  %.2fs - %.2fs" % (
                 block["rotation_name"], sequence.get("name", ""),
                 block["start"], block["end"]),
             "color": colour,
             "draggable": False,
             "dim": duration > 0 and block["start"] > duration + 1e-9,
-            # A band is a whole field sequence: faded, with its hits drawn on top,
-            # the same look the field-sequence strip uses.
+            # Same band as the field-sequence strip: a faded bar with its name in it
+            # and a minimum width, never a lane-filling block.
             "soft": True,
+            "minPx": 14,
             "selected": selected == ("block", block["id"]),
         })
     items.extend(_hit_items(spec, hits, selected))
@@ -180,14 +181,15 @@ def rotation_payload(spec: dict, rotation_id: str, preview: dict, *, selected=No
             "refKind": "block",
             "start": block["start"],
             "end": block["end"],
-            "label": "",
+            "label": sequence.get("name", ""),
             "title": "%s  %.2fs - %.2fs" % (sequence.get("name", ""), block["start"], block["end"]),
             "color": colour,
-            # A band here is a whole field sequence: it fills the lane, faded, with
-            # its hits on top, so the ticks stay readable across the runtime.
+            # Display only: the field time is set by the number box. The bar is the
+            # ability's runtime, so it is faded and sits behind its own hit ticks.
             "draggable": False,
+            "dim": False,
             "soft": True,
-            "fill": True,
+            "minPx": 14,
             "selected": selected == ("block", block["id"]),
         })
     items.extend(_hit_items(spec, hits, selected))

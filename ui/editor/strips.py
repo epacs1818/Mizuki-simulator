@@ -104,15 +104,17 @@ CSS = """
   position: absolute;
   border-radius: 3px;
   font-size: 10px;
-  line-height: 14px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
   padding: 0 4px;
   white-space: nowrap;
   color: #10131a;
   font-weight: 600;
   box-sizing: border-box;
   border: 1px solid rgba(0, 0, 0, 0.18);
-  /* A band is the ability's runtime, not the point of interest: it stays behind
-     its own hit ticks so the ticks are never swallowed by it. */
+  /* A band is the runtime of what it draws, not the point of interest: it stays
+     behind its own hit ticks so the ticks are never swallowed by it. */
   z-index: 1;
 }
 .band .bl {
@@ -135,7 +137,6 @@ CSS = """
 .band.draggable:active { cursor: grabbing; }
 .band.locked { cursor: pointer; }
 .band.soft { opacity: 0.55; }
-.band.fill { border-radius: 4px; }
 .band.dim { opacity: 0.35; }
 .band.selected { outline: 2px solid var(--st-primary-color, #7aa2f7); outline-offset: 1px; }
 .band .tail {
@@ -209,6 +210,9 @@ CSS = """
 
 JS = """
 const ROW_H = 24, ROW_GAP = 2, RULER_H = 22, PAD = 10, SNAP = 0.05;
+// One geometry for every strip: a band is the runtime of whatever it draws, and a
+// hit is a tick that pokes out of it top and bottom, so ticks are never swallowed.
+const BAND_H = 20, HIT_H = 22;
 
 function esc(s) {
   return String(s == null ? "" : s)
@@ -306,12 +310,8 @@ export default function (component) {
       // minimum width and move the label outside it.
       const w = Math.max(it.minPx || 3, X(it.end) - left);
       const cls = ["band", it.draggable ? "draggable" : "locked", it.dim ? "dim" : "",
-                   it.soft ? "soft" : "", it.fill ? "fill" : "",
-                   it.selected ? "selected" : ""].join(" ");
-      // A "fill" band is a whole field sequence: it spans its lane instead of
-      // sitting as a thin bar in the middle of it.
-      const top = it.fill ? rowTop : rowTop + 5;
-      const height = it.fill ? "height:" + ROW_H + "px;" : "";
+                   it.soft ? "soft" : "", it.selected ? "selected" : ""].join(" ");
+      const top = rowTop + (ROW_H - BAND_H) / 2;
       let inner = (w > 46 ? '<span class="bl">' : '<span class="bl out">') + esc(it.label) + '</span>';
       if (it.tailFrom != null && it.tailFrom < it.end) {
         const off = Math.max(0, (it.tailFrom - it.start) * px);
@@ -320,14 +320,15 @@ export default function (component) {
       out += '<div class="' + cls + '" data-id="' + esc(it.id) + '" data-ref="' + esc(it.refKind) +
              '" data-start="' + it.start + '" data-draggable="' + (it.draggable ? 1 : 0) + '"' +
              ' title="' + esc(it.title || it.label) + '"' +
-             ' style="left:' + left + 'px;width:' + w + 'px;top:' + top + 'px;' + height +
-             'background:' + it.color + '">' + inner + '</div>';
+             ' style="left:' + left + 'px;width:' + w + 'px;top:' + top +
+             'px;height:' + BAND_H + 'px;background:' + it.color + '">' + inner + '</div>';
     } else if (it.kind === "hit") {
       const cls = ["hit", it.crit ? "crit" : "", it.off ? "off" : "",
                    it.dim ? "dim" : "", it.selected ? "selected" : ""].join(" ");
       out += '<div class="' + cls + '" data-id="' + esc(it.id) + '" data-t="' + it.t + '"' +
              ' title="' + esc(it.title || "") + '"' +
-             ' style="left:' + (X(it.t) - 2 + (it.dx || 0)) + 'px;top:' + (rowTop + 4) + 'px;height:16px;' +
+             ' style="left:' + (X(it.t) - 2 + (it.dx || 0)) + 'px;top:' +
+             (rowTop + (ROW_H - HIT_H) / 2) + 'px;height:' + HIT_H + 'px;' +
              'background:' + it.color + ';color:' + it.color + '"></div>';
     } else if (it.kind === "seg") {
       const w = Math.max(2, X(it.end) - X(it.start));
