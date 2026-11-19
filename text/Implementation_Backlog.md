@@ -12,7 +12,7 @@ but not yet verified
 
 | Character | Element | Constellations offered | Status | Notes |
 | --- | --- | --- | --- | --- |
-| Mizuki | Anemo | C0-C6 | ✔ | C2 verified (shred + flat-EM PHEC bonus); C6 verified (party stellar crit + flat-EM crit) |
+| Mizuki | Anemo | C0-C6 | ✔ | C2 verified (shred + flat-EM PHEC bonus); C6 verified (party stellar crit + flat-EM crit). Her skill is ONE ability per in-game FORM (`[Pullout]` / `[Standard]`), cut by her own swap-out - the field-sequence window decides the tick count |
 | Aether | Cryo | C4-C6 | ✔ | C6 verified (Frostglow / Aether C6 stellar) |
 | Odette | Cryo | C0-C6 | ✔ | C1 extra stellar proc (+4.500 MV @0.010s) and 6-stack/2-per-second Marvelous; C2 shred + 7% ATK per stack; C4 SSD shares 50% with the OTHERS and adds a 0.990 MV stellar proc (3.5s trigger CD); C6 party elevation 0.25 / self 0.45 and she keeps her stacks off-field. C3/C5 only change talent levels (user-entered) |
 | Anastasya | Cryo | C0-C6 | ✔ | Burst party stellar_bonus (**0.354 @ B13**, 20s — nerfed from 0.575), **Accolades** (12% crit DMG for the whole party, 20s, inclusive on the skill Cast hit; once sealed the OTHERS get her share → 16% and she gets 0 at C0; C1 → 48%/36% + 60%/240 ATK/EM, C4 → 68.8%/51.6% + 86%/344), A4 reaction-only jubilee (+0.10) + Lv2 vortices, Jubilee passive, **Triumph** (15s after the seal, on her next swap-in, hit delay 0.010), conditional extra stellar beat, **C2 Love** (0.50 stellar CD for 30s + permanent 0.05 elevation), **C6** (Love +0.10 elevation, C6 Triumph 2.0x MV on every ally swap-in, 15s per-character CD) |
@@ -24,7 +24,7 @@ but not yet verified
 
 | Weapon | Type | Status |
 | --- | --- | --- |
-| Sacrificial Fragments | Catalyst | ✔ |
+| Sacrificial Fragments | Catalyst | ✔ (permanent EM + guaranteed skill-CD reset proc, ICD 30/26/22/19/16, own audit row) |
 | New Bough | Sword | ✔ (1 stack/s to 3 inside a 12s skill-opened window) |
 | Silver Light | Sword | ✔ |
 | Exaiphanes Blade | Sword | ✔ |
@@ -42,7 +42,7 @@ but not yet verified
 | Finale Of The Deep | Sword | ✔ (15s ATK% window, 10s CD) |
 | Azurelight | Sword | ✔ (permanent ATK% only) |
 | Aquila Favonia | Sword | ✔ (permanent ATK% only) |
-| Sacrificial Bow | Bow | ✔ (base ATK + ER, no description) |
+| Sacrificial Bow | Bow | ✔ (base ATK + ER + the same guaranteed skill-CD reset passive) |
 | Breezeborne Refrain | Bow | ✔ (permanent ER + 3 sigils → party stellar_bonus 12s) |
 | Elegy for the End | Bow | ✔ (permanent EM + 4 sigils → party ATK%/EM, 20s lockout) |
 | Silverdawn | Bow | ✔ (6s self ATK%/stellar crit, +3s per swirl/stellar hit) |
@@ -452,6 +452,11 @@ allowed by the engine. A `cooldown_key` field on `Ability` would fix it; it was 
 out because it changes how rotations are validated and the current presets rely on
 the Sac-Frag proc variant having `cooldown = 0`.
 
+*Superseded:* the four variants were merged into the two skill forms in the "Mizuki
+skill forms and the swap-out interrupt" round below. Cooldowns are still keyed per
+ability (the two forms do not share one yet), so the `cooldown_key` question is still
+open - it is now only about the two forms, not four variants.
+
 
 ---
 
@@ -506,4 +511,150 @@ two entries, like Faruzan's `Skill Cast` (active) and `Pressurized Collapse` (tr
 Proof the refactor itself is neutral: with `FARUZAN_COLLAPSE_CD` temporarily set to
 3.72 (the old "CD from the hit" rule) the current engine reproduces the old Anastasya
 total **exactly** (4,628,073.7), so every remaining difference comes from the CD rule.
+
+
+## Sacrificial weapons round (guaranteed skill-CD reset)
+
+`Sacrificial Fragments` and `Sacrificial Bow` no longer rely on the old "give the
+skill talent CD 0" workaround: the passive is modelled.
+
+* **Model**: SKILL damage (only standard damage carries attack types, so the type
+  alone is the test) dealt by the **on-field holder** ends that holder's elemental
+  skill cooldown. The proc is **guaranteed** - the app runs no RNG, and a rotation
+  that depends on the roll is only worth authoring when it procs - and its own
+  internal cooldown is **30 / 26 / 22 / 19 / 16 s for R1-R5**, measured **from the
+  proc**.
+* **Data**: `weapons.WEAPON_STATS[...]["skill_cd_reset"]` (`{"icd": [...],
+  "label": ...}`) read through `weapons.get_skill_cd_reset(weapon, refinement)`. The
+  block is nested and non-numeric, so `build_initial_stats` never folds it into a
+  snapshot (asserted in the smoke test).
+* **Trigger and row**: `timeline._skill_cd_reset_plan()` walks the scheduled events
+  *before* the evaluator mutates them. It (a) re-checks the holder's casts - their
+  eager check in `add_field_sequence` is deferred, because a proc can legally end the
+  CD between two casts - and (b) places one **`WEAPON_PROC`** row per proc right after
+  the hit that caused it: `Action` = "Sac Frag proc" / "Sac Bow proc", `Owner` and
+  `Active` = the holder, no damage fields and no buff column (the passive changes
+  cooldowns, not stats).
+* **Every skill hit counts, not only the cast hit**: a long pull-out that keeps
+  ticking past the weapon's ICD consumes the proc on a late tick. The next rotation's
+  cast then has no reset available and the engine reports the cooldown clash - the
+  "the tail stole my Sac proc" error. The smoke test pins it (procs at 0.301 and
+  16.869 -> the 21.5s cast is legal, the 23.0s cast is refused until 36.5s).
+* **Reset scope**: a proc ends every `skill_talent` ability of the holder (both of
+  Mizuki's skill forms, Sucrose's Skill, Diona tap/hold, ...). Ability cooldowns stay
+  keyed on `(character, ability name)` as before - see the `cooldown_key` limitation
+  above - so alternating two forms inside one CD is still allowed.
+* **Editor pre-flight**: `ui/editor/validate.cooldown_issues()` accepts the party's
+  gear (`trial_issues()` takes the party dict or an id list) and treats a skill cast
+  as a guaranteed proc at its own cast time, so the warning list cannot contradict
+  the engine. The engine still re-checks with per-tick precision.
+* **Not modelled**: engine-injected skill hits (Faruzan's own Pressurized Collapse
+  after her burst) are not proc sources. Diona's Icy Paws are off-field and could not
+  proc anyway.
+* **Presets**: no stat changes, so the pinned totals did not move (30s trial C2
+  `1,275,225.0`, Anastasya 6x `4,295,223.8`). The 30s trial now also shows the two
+  procs at 5.312s and 25.014s. Once the real skill cooldowns are typed in, the
+  Sucrose rounds (`sucrose_standard` family: three Sucrose skill casts per ~33.5s
+  loop) and any R1-R3 Sac rotation will start failing **by design**; Mizuki's
+  catalogue is R4/R5 only, which keeps the 6x Mizuki loop legal.
+
+## Mizuki skill forms and the swap-out interrupt
+
+Her skill used to be authored as four separate abilities (`[2/5/9/13 Ticks]`) because the
+engine could not interrupt it. In game it is ONE skill: the field-sequence window is what
+decides how many ticks land.
+
+* **Two hand-written forms**: `mizuki_skill_pullout` ("Mizuki Skill [Pullout]", the form
+  every preset plays) and `mizuki_skill_standard` ("Mizuki Skill [Standard]", a catalogue
+  stand-in with the same hits and the pull-out offset removed). Both set
+  `Ability.interrupt_on_swap_out`; her burst does not.
+* **Interrupt rule** (`models.interrupted_hit_count`, applied by
+  `timeline.add_field_sequence`): every hit at or before the swap-out lands, the FIRST hit
+  after it still lands (that tick is already in the air, so it resolves off field) and
+  every later hit is never scheduled. The in-air tick needs no special casing: after the
+  swap-out `active_character` is the next character (or None), so DDS, Faruzan's quill and
+  every `Active`-scoped buff are already off for it.
+* **Windows replace the variants** (same `swap_out_time` as before):
+
+  | sequence | window | hits kept | last hit | in-air tick |
+  | --- | --- | --- | --- | --- |
+  | Skill Pullout 1 Nuke | 1.750 | 3 | 1.920 | Tick2 |
+  | Skill Pullout 2 Nukes | 4.101 | 6 | 4.291 | Tick5 |
+  | Skill Pullout 3 Nukes | 7.100 | 10 | 7.290 | Tick9 |
+  | Skill Pullout 4 Nukes | 10.000 | 14 | 10.170 | Tick13 |
+  | Burst Pullout 4 Nukes | 9.300 | 13 | 9.480 | Tick12 |
+
+  The first four are hit-for-hit identical to the old `[2]/[5]/[9]/[13] Ticks` abilities.
+  The burst window loses the Tick13 it used to keep after the swap-out (10.170 s): in the
+  triple-cryo trial that is 3 skill ticks plus the 3 Stellar Swirls those ticks applied
+  (808 -> 802 hits). The DEFAULT_PARTY calibration totals do not move.
+* **Standard form timings**: the pull-out tech delays the 3rd tick's Anemo application
+  until after the 2.5 s nuke-prep cooldown (Tick3 at 2.639 s), which is what buys the extra
+  early VBTD nuke. The standard form removes that offset: Tick2 stays at 1.619 s, Tick3
+  becomes 1.619 + 0.810 = 2.429 s and the whole tail moves with it (-0.210 s per hit), so
+  the tail's own gaps survive. Of the game's alternating 0.69 / 0.81 cadence, 0.810 is the
+  one that keeps the ability's mean gap closest to the ~0.750 s players expect
+  (9.659 / 13 = 0.743, versus 0.734 for 0.69). Its 3rd application (2.429 s) now lands
+  before the nuke-prep cooldown refreshes, so it misses the extra early nuke - the intended
+  penalty for not using the tech.
+
+* **Editor**: the picker offers the two forms; the focus strip draws only the hits that
+  land (the in-air tick dimmed), the placement caption reads "3 of 14 hit(s) - cut by the
+  1.75s swap-out", `sequence_issues()` reports the interruption as INFO, and auto-placing
+  the next ability clears the in-air tick instead of the full hit table.
+* **Not changed**: cooldowns stay keyed per ability, so the two forms do not share one yet
+  (the `cooldown_key` follow-up above). The Sacrificial reset already ends both forms'
+  cooldowns because it clears every `skill_talent` ability.
+* **Smoke test**: `_run_skill_interrupt_check` pins the catalogue, both hit tables, the
+  application ticks, the mean gap, the 2.5 s nuke-prep sides, the rule itself and the
+  per-window counts / last hit / off-field state.
+
+## Results table & time formatting
+
+* The audit table (`ui/table.py`) is built from NUMBERS: floats for the stats,
+  multipliers and damage columns, nullable `boolean` for the ON/OFF flags and nullable
+  `Int64` for the stack counters; only Active / Owner / Action / Reaction stay text.
+  It used to be strings, so clicking a header sorted "1,000" before "900".
+* Empty cells follow ONE rule now: the engine's "-" / "None" / "" sentinels become real
+  missing values in `ui/table.py`, and `st.dataframe(..., placeholder="-")` renders
+  them (the `placeholder` parameter is the dataframe's own "text for missing values";
+  without it Streamlit prints the literal string "None"). A literal "-" string used to
+  render brighter than a placeholder, which is why identical-looking cells looked
+  inconsistent.
+* `ui/style.py` paints only two things: the per-owner row tint, and the STACK counter
+  columns (grey at 0 / empty, green + bold with at least one stack). The boolean flags
+  are grid-drawn checkboxes and are left completely unstyled - a Styler colour cannot
+  reach a checkbox cell (it only ever added a dead `color` entry). `_is_inactive()`
+  handles numpy scalars: pandas hands row values back as `numpy.bool_` / `numpy.int64`,
+  which are NOT Python `bool`/`int` instances.
+* The display layer is one simple literal dict, `ui/style.AUDIT_COLUMN_CONFIG`, in the
+  same shape as the Streamlit `column_config` docs: one `st.column_config.NumberColumn
+  ("name", format=..., help=...)` line per fixed column ("%.2f U" on the Aura gauge,
+  "%.0f U" on Elemental App, "%d" for the stats, 3-decimal time, 1/3-decimal numbers),
+  `TextColumn` for the four identity columns, and `pinned=True` on **Action** (the 4th
+  column) so the row's action stays visible while the wide audit table is scrolled
+  sideways. Every entry carries a one-line `help=` header tooltip. Columns that are not
+  listed (the buff columns) keep the type Streamlit infers from their dtype: a checkbox
+  for the boolean flags, a plain number for the stack counters.
+  Streamlit gives column_config precedence over pandas.Styler formatting, so the Styler
+  now paints colours only and the native cell value (which the frontend sorts on) is
+  never touched. `ui/tabs/results.py` filters the dict to the columns actually shown,
+  because the compact view only keeps a subset.
+* The checkbox accent is the app theme's `primaryColor`, now **white**
+  (`.streamlit/config.toml`). The grid draws checkboxes on a canvas, so the theme is
+  the only lever - a Styler colour cannot reach them. The same accent drives buttons,
+  sliders, focus rings and the strip cursor.
+* Every time shown in the UI is **3 decimals**: audit table, results metrics, the
+  trial breakdown and its step line, the editor metrics + rotation log, the strip
+  ruler and its tooltips ("loop end", "swap out", hit tooltips), cooldown and
+  validation messages and the interruption notes. The strip ruler switches to
+  `m:ss.mmm` past 60s, and its step threshold moved from 56px to 64px so 3-decimal
+  labels do not touch.
+* `smoke_test._run_table_format_check` pins the dtypes, that every audit column sorts
+  by value, that the empty sentinels never reach the table as text, the
+  `placeholder="-"` contract, the stack-only painting, the `column_config` formats /
+  pinned Action column / tooltips, and that no 1- or 2-decimal time format is left
+  anywhere in `ui/`.
+
+
 

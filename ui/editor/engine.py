@@ -228,7 +228,7 @@ def simulate(spec: dict, trial_id: str, party: dict, enemy: dict | None = None) 
         timeline.evaluate_timeline()
     except CooldownError as exc:
         message = (f"{exc.character} {exc.ability_name} is on cooldown "
-                   f"until {exc.until:.2f}s.")
+                   f"until {exc.until:.3f}s.")
         return _empty(blocks, [_issue("error", message, ("trial", trial_id))])
     index = _placement_index(blocks, spec, abilities)
     hits = _hits(timeline.global_events, blocks, index)

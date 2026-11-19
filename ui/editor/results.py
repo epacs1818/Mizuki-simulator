@@ -27,7 +27,7 @@ def render_issues(issues: list, *, limit: int = 8) -> None:
 
 METRICS = (("damage", "Damage", lambda value: format(value, ",.0f")),
            ("dps", "DPS", lambda value: format(value, ",.0f")),
-           ("duration", "Duration", lambda value: "%.2f s" % value),
+           ("duration", "Duration", lambda value: "%.3f s" % value),
            ("hits", "Hits", lambda value: value))
 
 
@@ -115,8 +115,8 @@ def render_rotation_log(spec: dict, result: dict, *,
         return
     frame = pd.DataFrame([{
         "Rotation": row["name"],
-        "Starts": round(float(row["start"]), 2),
-        "Duration": round(float(row["duration"]), 2),
+        "Starts": round(float(row["start"]), 3),
+        "Duration": round(float(row["duration"]), 3),
         "Damage": round(float(row["damage"]), 1),
         "DPS": round(float(row["dps"]), 1),
     } for row in rows], columns=LOG_COLUMNS)
@@ -124,8 +124,8 @@ def render_rotation_log(spec: dict, result: dict, *,
         frame, key=key, hide_index=True, width="stretch", height=height,
         column_config={
             "Rotation": st.column_config.TextColumn("Rotation", width="large"),
-            "Starts": st.column_config.NumberColumn("Starts", format="%.2f s", width="small"),
-            "Duration": st.column_config.NumberColumn("Duration", format="%.2f s", width="small"),
+            "Starts": st.column_config.NumberColumn("Starts", format="%.3f s", width="small"),
+            "Duration": st.column_config.NumberColumn("Duration", format="%.3f s", width="small"),
             "Damage": st.column_config.NumberColumn("Damage", format="localized", width="small"),
             "DPS": st.column_config.NumberColumn("DPS", format="localized", width="small"),
         },

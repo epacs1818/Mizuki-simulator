@@ -11,6 +11,7 @@ import streamlit as st
 
 from ui.editor import (catalog, mutations, payloads, publish, results, store,
                         strips, validate)
+from models import interrupted_hit_count
 from ui.state import toast
 
 # The trial strip is the one that scrolls: a whole trial is far too long to fit, so
@@ -284,7 +285,7 @@ def _trial_preview(spec: dict, trial_id: str) -> None:
             store.focus(("rotation", block["rotation"]))
             st.rerun(scope="fragment")
     results.metrics(result["totals"])
-    issues = validate.trial_issues(spec, trial_id, store.party_ids()) + result["warnings"]
+    issues = validate.trial_issues(spec, trial_id, store.current_party()) + result["warnings"]
     results.render_issues(issues)
     # The trial's own numbers, rotation by rotation. Every truncation the trial
     # applied is already in these values, and the damage column adds up to the
@@ -560,9 +561,17 @@ def _placement_list(spec: dict, sequence_id: str) -> None:
         st.caption("Nothing placed yet - add an ability below.")
     for placement in placements:
         ability = abilities.get(placement["ability"]) or {"name": "(missing ability)", "hits": []}
+        hits = ability.get("hits") or ()
+        kept = len(hits)
+        if ability.get("interrupt_on_swap_out"):
+            times = [float(placement["first_hit"]) + float(hit["offset"]) for hit in hits]
+            kept = interrupted_hit_count(times, float(sequence["field_time"]))
         columns = st.columns([0.5, 0.24, 0.12])
-        columns[0].markdown("%s <span style='opacity:.6'>%d hit(s)</span>"
-                            % (ability["name"], len(ability.get("hits") or ())),
+        columns[0].markdown("%s <span style='opacity:.6'>%s</span>"
+                            % (ability["name"],
+                               "%d hit(s)" % kept if kept == len(hits) else
+                               "%d of %d hit(s) - cut by the %.3fs swap-out"
+                               % (kept, len(hits), float(sequence["field_time"]))),
                             unsafe_allow_html=True)
         when = columns[1].number_input("First hit time (s)", min_value=0.0, max_value=300.0, step=0.01,
                                        value=float(placement["first_hit"]),

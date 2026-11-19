@@ -34,6 +34,24 @@ Checks:
      trigger + that delay, and respects its trigger-based cooldown.
  12. The Anastasya kit values (50.4% stellar swirl base, 0.354 burst bonus at B13)
      are pinned as literals, so an accidental drift cannot pass silently.
+ 13. Sacrificial Fragments / Bow: SKILL damage by the ON-FIELD holder ends the
+     holder's elemental skill cooldown (guaranteed proc, ICD 30/26/22/19/16 by
+     refinement, measured from the proc), audited as its own non-damage row. A
+     recast inside the ability cooldown is legal while a proc covers it; a late
+     skill tick that eats the ICD leaves the next rotation without a reset and is
+     reported as a cooldown clash.
+ 14. Mizuki's skill: one ability per FORM (Pullout / Standard), cut by her own
+     swap-out (every hit up to the first hit after the swap-out lands, that one off
+     field; the rest never happen), so the field-sequence window decides the tick
+     count (3 / 6 / 10 / 14, and 13 in the 9.3s burst window). The Standard form's
+     retimed early ticks put the 3rd Anemo application before the 2.5s nuke-prep
+     cooldown, which is why it misses the extra early nuke the pull-out tech buys.
+ 15. The results audit table is numeric: floats, nullable booleans for the ON/OFF
+     flags and nullable Int64 for the stack counters, so a header click sorts by
+     value. Empty cells come from the dataframe's `placeholder="-"`; the display
+     formats, the pinned Action column and the header tooltips come from
+     `st.column_config` (`ui.style.AUDIT_COLUMN_CONFIG`), and only the stack counters
+     are painted. Every time shown in the UI is 3 decimals (ruler included).
 """
 from pathlib import Path
 
@@ -45,8 +63,9 @@ from timeline import (
 )
 from abilities import (
     aether_n1, aether_skill, sucrose_skill, sucrose_burst,
-    # The 13-tick skill is what the pre-existing Mizuki checks exercise.
-    mizuki_pullout_13 as mizuki_skill,
+    # The pullout form is what the pre-existing Mizuki checks exercise (her single
+    # skill ability; the field-sequence window decides how many ticks land).
+    mizuki_skill_pullout as mizuki_skill,
 )
 # Field sequences live in presets.py (abilities.py holds only immutable Ability data).
 from presets import aether_en1, odette_qe, sucrose_eq
@@ -765,6 +784,354 @@ def _run_weapon_phase3_check() -> dict:
     return out
 
 
+def _run_sacrificial_check() -> dict:
+    """Sacrificial Fragments / Bow: guaranteed elemental-skill CD reset.
+
+    The passive: SKILL-typed damage (only standard damage carries attack types)
+    dealt by the ON-FIELD holder ends the holder's elemental skill cooldown, once per
+    [30, 26, 22, 19, 16]s (R1..R5) measured FROM THE PROC. It is modelled as
+    GUARANTEED, so a rotation may recast inside its ability cooldown as long as a
+    proc covers it. Pinned here:
+
+      * the ICD table, the per-weapon row label and "no stat leaks into a snapshot",
+      * a recast inside the ability CD is legal (and the clash is reported once the
+        ICD is spent),
+      * refinement matters: a proc inside R4's 19s ICD is outside R5's 16s,
+      * only skill-typed damage by the ON-FIELD holder procs, while the holder's
+        non-skill casts are still cooldown-checked,
+      * the ICD-stealing TAIL: a late skill tick can consume the proc, so the next
+        rotation has no reset left and the engine reports it (the error the user
+        wants surfaced),
+      * the audit row shape (own row, no damage, right after the skill hit).
+    """
+    import abilities as ab
+    from characters import CHARACTER_BASE_STATS
+    from stats_calc import build_initial_stats
+    from timeline import CooldownError
+    from weapons import get_skill_cd_reset
+
+    out = {}
+    out["frag_icds"] = [get_skill_cd_reset("Sacrificial Fragments", r)[0]
+                        for r in range(1, 6)]
+    out["bow_icds"] = [get_skill_cd_reset("Sacrificial Bow", r)[0]
+                       for r in range(1, 6)]
+    out["frag_label"] = get_skill_cd_reset("Sacrificial Fragments", 5)[1]
+    out["bow_label"] = get_skill_cd_reset("Sacrificial Bow", 4)[1]
+    out["other_weapon"] = get_skill_cd_reset("Silver Light", 5)
+
+    # The passive must stay out of the stat snapshot: it changes cooldowns only.
+    frag_stats = build_initial_stats("Mizuki", 90, "Sacrificial Fragments",
+                                     "2p/2p EM", {}, {}, refinement=5)
+    out["no_stat_leak"] = "skill_cd_reset" not in frag_stats
+    out["frag_atk"] = round(frag_stats["base_atk"]
+                            - CHARACTER_BASE_STATS["Mizuki"]["base_atk"][3], 3)
+    out["frag_em"] = round(frag_stats["em"]
+                           - CHARACTER_BASE_STATS["Mizuki"]["em"][3] - 160.0, 3)
+
+    def party_of(refinement=5, weapon="Sacrificial Fragments"):
+        return {"Mizuki": {"constellation": 2, "level": 90, "refinement": refinement,
+                           "weapon": weapon, "artifact_set": "2p/2p EM",
+                           "talents": "10/13/13"}}
+
+    skill13 = copy.deepcopy(ab.mizuki_skill_pullout)
+    skill13.cooldown = 15.0
+
+    def run_probe(steps, party, end_time=45.0):
+        """steps = [(ability, cast offset, field time), ...] chained in order."""
+        seqs = []
+        for ability, cast, field in steps:
+            seq = FieldSequence("Sac Probe", "Mizuki", swap_out_time=field)
+            seq.add_ability(cast, ability)
+            seqs.append(seq)
+        timeline = RotationTimeline(party=party)
+        timeline.add_trial(Trial(name="sac probe", end_mode="time", end_time=end_time,
+                                 rotations=[Rotation(name="r", sequences=seqs,
+                                                     repetitions=1)]))
+        return timeline
+
+    def error_of(timeline):
+        try:
+            timeline.evaluate_timeline()
+        except CooldownError as exc:
+            return (exc.character, exc.ability_name, round(exc.until, 3))
+        return None
+
+    # --- 1. A proc ends the skill CD: recast at 2.051s is legal (the CD is 15s) ---
+    reset = run_probe([(skill13, 0.301, 1.75), (skill13, 0.301, 1.75)], party_of())
+    out["recast_error"] = error_of(reset)
+    procs = [e for e in reset.global_events if e.get("event_type") == "WEAPON_PROC"]
+    out["proc_count"] = len(procs)
+    out["proc_times"] = [round(e["global_time"], 3) for e in procs]
+    first = procs[0] if procs else {}
+    out["proc_label"] = first.get("action")
+    out["proc_owner"] = first.get("character")
+    out["proc_active"] = first.get("active_character")
+    out["proc_weapon"] = first.get("weapon")
+    out["proc_no_damage"] = (first.get("non_crit") is None
+                             and first.get("average_damage") is None)
+    # Each proc row must follow a skill hit of its own owner at the same timestamp.
+    follows = True
+    for index, event in enumerate(reset.global_events):
+        if event.get("event_type") != "WEAPON_PROC":
+            continue
+        earlier = [ev for ev in reset.global_events[:index]
+                   if ev.get("event_type") == "HIT"
+                   and ev.get("character") == event.get("character")
+                   and ev.get("attack_type") == AttackType.SKILL
+                   and abs(ev["global_time"] - event["global_time"]) < 1e-9]
+        if not earlier:
+            follows = False
+    out["proc_follows_skill_hit"] = follows
+
+    # --- 2. The same rotation without the weapon keeps the eager check ---
+    plain = RotationTimeline(party=party_of(weapon="The Widsith (Average)"))
+    plain_seq = FieldSequence("Plain", "Mizuki", swap_out_time=1.75)
+    plain_seq.add_ability(0.301, skill13)
+    try:
+        plain.add_trial(Trial(name="plain", end_mode="time", end_time=20.0,
+                              rotations=[Rotation(name="r", sequences=[plain_seq, plain_seq],
+                                                  repetitions=1)]))
+        out["no_weapon_error"] = None
+    except CooldownError as exc:
+        out["no_weapon_error"] = (exc.character, round(exc.until, 3))
+
+    # --- 3. ICD spent: a third cast at 3.801s has no reset -> error until 17.051 ---
+    out["third_cast_error"] = error_of(
+        run_probe([(skill13, 0.301, 1.75)] * 3, party_of()))
+
+    # --- 4. Refinement: a proc 17.801s after the first is inside R4's 19s ICD but
+    #        outside R5's 16s, so only R4 lacks a reset for the 19.0s cast. (The
+    #        third cast is placed before the pull-out's 19.42s tick, which would
+    #        otherwise steal R4's ICD and legalise it again.) ---
+    def refinement_case(refinement):
+        timeline = run_probe([(skill13, 0.301, 17.5), (skill13, 0.301, 1.5),
+                              (skill13, 0.0, 1.0)], party_of(refinement))
+        error = error_of(timeline)
+        return error, [round(e["global_time"], 3) for e in timeline.global_events
+                       if e.get("event_type") == "WEAPON_PROC"]
+
+    out["r5_error"], out["r5_procs"] = refinement_case(5)
+    out["r4_error"], out["r4_procs"] = refinement_case(4)
+
+    # --- 5. Off-field skill damage never procs (the holder has already swapped) ---
+    off = run_probe([(skill13, 0.5, 0.2)], party_of())
+    out["offfield_error"] = error_of(off)
+    out["offfield_procs"] = len([e for e in off.global_events
+                                 if e.get("event_type") == "WEAPON_PROC"])
+
+    # --- 6. Burst damage is not skill damage: no proc, but the burst CD is checked ---
+    burst = run_probe([(ab.mizuki_burst, 0.301, 1.75),
+                       (ab.mizuki_burst, 0.301, 1.75)], party_of())
+    out["burst_error"] = error_of(burst)
+    out["burst_procs"] = len([e for e in burst.global_events
+                              if e.get("event_type") == "WEAPON_PROC"])
+
+    # --- 7. The ICD-stealing tail: the 13-tick pull-out cast at 7.0s keeps ticking
+    #        to 16.869s, past the 16.301s ICD, so its LAST tick procs. That proc is
+    #        what makes the 21.5s cast legal (its own CD would end at 22.0) and it
+    #        leaves nothing for a 23.0s cast, which the engine then reports. ---
+    tail_steps = [(skill13, 0.301, 7.0), (skill13, 0.0, 10.0), (skill13, 4.5, 5.0)]
+    tail_ok = run_probe(tail_steps, party_of())
+    out["tail_error"] = error_of(tail_ok)
+    out["tail_procs"] = [round(e["global_time"], 3) for e in tail_ok.global_events
+                         if e.get("event_type") == "WEAPON_PROC"]
+    out["tail_next_error"] = error_of(
+        run_probe(tail_steps + [(skill13, 1.0, 1.75)], party_of()))
+
+    # --- 8. The Bow's row label, from a Diona hold (five skill hits) ---
+    diona = {"Diona": {"constellation": 6, "level": 90, "refinement": 5,
+                       "weapon": "Sacrificial Bow", "artifact_set": "Noblesse Oblige",
+                       "talents": "1/13/13"}}
+    hold = FieldSequence("Diona Hold", "Diona", swap_out_time=1.41)
+    hold.add_ability(0.66, ab.diona_skill_hold)
+    diona_timeline = RotationTimeline(party=diona)
+    diona_timeline.add_trial(Trial(name="bow probe", end_mode="time", end_time=5.0,
+                                   rotations=[Rotation(name="r", sequences=[hold],
+                                                       repetitions=1)]))
+    diona_timeline.evaluate_timeline()
+    bow_rows = [e for e in diona_timeline.global_events
+                if e.get("event_type") == "WEAPON_PROC"]
+    out["bow_rows"] = len(bow_rows)
+    out["bow_row_label"] = bow_rows[0]["action"] if bow_rows else None
+    out["bow_row_owner"] = bow_rows[0]["character"] if bow_rows else None
+
+    return out
+
+
+def _run_skill_interrupt_check() -> dict:
+    """Mizuki's skill: one ability per FORM, cut by her own swap-out.
+
+    Her skill is ONE ability in game; the field-sequence window decides how many ticks
+    land. ``Ability.interrupt_on_swap_out`` keeps every hit up to and including the FIRST
+    hit after the swap-out (that tick is already in the air, so it resolves off field)
+    and purges the rest. Pinned here:
+
+      * the catalogue (pullout + standard + burst + N1 / charged, nothing else),
+      * the standard form's retimed early ticks (the pull-out offset removed from Tick3,
+        every later tick moving with it) and the 3rd Anemo application landing before the
+        2.5s nuke-prep cooldown, while the pullout's lands after it - the extra early
+        nuke the pull-out tech buys,
+      * the per-window hit counts that replace the old [2/5/9/13 Ticks] abilities:
+        1/2/3/4 nukes = 3 / 6 / 10 / 14 hits, and the 9.3s burst window = 13 (its
+        unintended Tick13 is gone),
+      * the in-air tick resolving off field, and a long window keeping every hit.
+    """
+    import abilities as ab
+    from models import interrupted_hit_count
+    from timeline import RotationTimeline
+
+    out = {}
+    pull = ab.mizuki_skill_pullout
+    standard = ab.mizuki_skill_standard
+    out["abilities"] = sorted(ab.abilities_for("Mizuki"))
+    out["pullout_name"] = pull.name
+    out["standard_name"] = standard.name
+    out["both_interruptible"] = pull.interrupt_on_swap_out and standard.interrupt_on_swap_out
+    out["burst_not_interruptible"] = not ab.mizuki_burst.interrupt_on_swap_out
+    out["pullout_delays"] = [h.relative_delay for h in pull.hits]
+    out["standard_delays"] = [h.relative_delay for h in standard.hits]
+    out["same_app_ticks"] = ([h.name for h in pull.hits if h.elemental_app]
+                             == [h.name for h in standard.hits if h.elemental_app])
+
+    # The pull-out offset: Tick3 is the anomalous gap; the standard form removes it and
+    # the whole tail moves with it, so the tail's own gaps survive.
+    out["pullout_tick3"] = round(pull.hits[3].relative_delay, 3)        # 2.639
+    out["standard_tick3"] = round(standard.hits[3].relative_delay, 3)   # 2.429
+    shift = standard.hits[3].relative_delay - pull.hits[3].relative_delay
+    out["tail_shift"] = round(shift, 3)
+    out["standard_tail_shifted"] = all(
+        abs((s.relative_delay - p.relative_delay) - shift) < 1e-9
+        for p, s in zip(pull.hits[4:], standard.hits[4:]))
+    out["standard_mean_gap"] = round(standard.hits[-1].relative_delay
+                                     / (len(standard.hits) - 1), 4)     # 0.743
+    out["standard_tick3_before_prep"] = standard.hits[3].relative_delay < 2.5
+    out["pullout_tick3_after_prep"] = pull.hits[3].relative_delay >= 2.5
+
+    # The rule itself.
+    times = [0.0, 1.0, 2.0, 3.0]
+    out["rule"] = [interrupted_hit_count(times, w) for w in (0.5, 1.5, 2.5, 9.0)]
+
+    # Per-window hit counts straight from the engine, using the presets' own sequences.
+    def skill_hits(sequence, end_time=25.0):
+        timeline = RotationTimeline(party=presets.DEFAULT_PARTY)
+        timeline.add_trial(Trial(name="interrupt probe", end_mode="time",
+                                 end_time=end_time,
+                                 rotations=[Rotation(name="r", sequences=[sequence],
+                                                     repetitions=1)]))
+        timeline.evaluate_timeline()
+        return [e for e in timeline.global_events
+                if e.get("event_type") == "HIT" and e.get("character") == "Mizuki"
+                and e.get("ability_name") == pull.name]
+
+    out["windows"] = {}
+    for label, sequence in (("1 nuke", presets.mizuki_pullout_1_nuke),
+                            ("2 nukes", presets.mizuki_pullout_2_nukes),
+                            ("3 nukes", presets.mizuki_pullout_3_nukes),
+                            ("4 nukes", presets.mizuki_pullout_4_nukes),
+                            ("burst", presets.mizuki_pullout_burst_4_nukes)):
+        hits = skill_hits(sequence)
+        out["windows"][label] = {
+            "count": len(hits),
+            "last": round(hits[-1]["global_time"], 3) if hits else None,
+            "last_off_field": bool(hits) and hits[-1].get("active_character") != "Mizuki",
+        }
+
+    # A window past the last hit keeps everything: the rule only cuts what is left.
+    long_seq = FieldSequence("Long", "Mizuki", swap_out_time=14.0)
+    long_seq.add_ability(0.301, pull)
+    out["long_window_hits"] = len(skill_hits(long_seq))
+
+    # The standard form is a catalogue entry only: no preset plays it yet.
+    out["standard_used_by_preset"] = any(
+        call.ability is standard
+        for sequence in presets.FIELD_SEQUENCE_REGISTRY.values()
+        for call in sequence.calls)
+    return out
+
+
+def _run_table_format_check() -> dict:
+    """The audit table is numeric (headers sort by value) and formatted for display.
+
+    It used to be built out of strings, so st.dataframe sorted it as TEXT ("1,000"
+    before "900"). Now every numeric column is a real number - float, nullable
+    boolean for the ON/OFF flags, nullable Int64 for the stack counters - and
+    column_config owns the display formats (display-only), so the native value is
+    what the frontend sorts on.
+
+    Empty cells follow ONE rule: the engine's "-" / "None" / "" sentinels become real
+    missing values, and the dataframe's own ``placeholder="-"`` renders them, so a
+    missing cell looks the same in every column (a literal "-" string would render
+    brighter than a placeholder).
+
+    Only stack counters are painted (grey at 0, green + bold above); the boolean flags
+    are grid-drawn checkboxes and get no Styler colour at all.
+    """
+    import pandas as pd
+
+    from timeline import RotationTimeline
+    from ui.style import AUDIT_COLUMN_CONFIG, _cell_css, _is_inactive
+    from ui.table import EMPTY_TEXT, build_timeline_dataframe
+
+    timeline = RotationTimeline(party=copy.deepcopy(presets.DEFAULT_PARTY))
+    timeline.add_trial(presets.TEST_TRIAL_30S)
+    timeline.evaluate_timeline()
+    frame = build_timeline_dataframe(timeline.global_events, presets.DEFAULT_PARTY)
+
+    text_columns = ["Active", "Owner", "Action", "Reaction"]
+    core = set(AUDIT_COLUMN_CONFIG) | set(text_columns)
+    buff_columns = [column for column in frame.columns if column not in core]
+    assert_columns = [column for column in frame.columns if column not in text_columns]
+    source = _ui_source()
+    config = AUDIT_COLUMN_CONFIG
+
+    background = "#123456"
+    base_css = _cell_css("Owner", "Mizuki", background, set())
+
+    out = {
+        "rows": len(frame),
+        "time_dtype": str(frame["Time (s)"].dtype),
+        "dmg_dtype": str(frame["Average DMG"].dtype),
+        "aura_dtype": str(frame["Aura"].dtype),
+        "app_dtype": str(frame["Elemental App"].dtype),
+        "text_columns": [column for column in frame.columns
+                         if str(frame[column].dtype) == "object"],
+        "text_numeric": [column for column in assert_columns
+                         if str(frame[column].dtype) == "object"],
+        "buff_dtypes": sorted({str(frame[column].dtype) for column in buff_columns}),
+        "sortable": all(frame[column].dropna().sort_values().is_monotonic_increasing
+                        for column in assert_columns),
+        # The engine's placeholders must not reach the table as strings.
+        "empty_text": [(column, int(frame[column].astype(str)
+                                    .isin(EMPTY_TEXT).sum()))
+                       for column in text_columns
+                       if int(frame[column].astype(str).isin(EMPTY_TEXT).sum())],
+        "placeholder": 'placeholder="-"' in source,
+        "inactive_rule": [_is_inactive(value) for value in
+                          (None, pd.NA, True, False, 0, 3, 0.0, float("nan"), "-")],
+        "base_css": base_css,
+        "stack_zero_css": _cell_css("Aether Frostglow", 0, background,
+                                    {"Aether Frostglow"}),
+        "stack_on_css": _cell_css("Aether Frostglow", 2, background,
+                                  {"Aether Frostglow"}),
+        "flag_css": _cell_css("Mizuki DDS", True, background, set()),
+        # Display layer: column_config owns the formats and the header tooltips.
+        "time_format": config["Time (s)"]["type_config"]["format"],
+        "aura_format": config["Aura"]["type_config"]["format"],
+        "app_format": config["Elemental App"]["type_config"]["format"],
+        "action_pinned": config["Action"].get("pinned") is True,
+        "pinned": [column for column in frame.columns
+                   if config.get(column, {}).get("pinned")],
+        "help_columns": sorted(column for column, spec in config.items()
+                               if spec.get("help")),
+        # No 1- or 2-decimal time may survive anywhere in the UI (ruler included).
+        "time_leftovers": [pattern for pattern in
+                           ("%.1fs", "%.2fs", "%.1f s", "%.2f s", ":.1f}s", ":.2f}s",
+                            "Math.round(t * 10) / 10")
+                           if pattern in source],
+    }
+    return out
+
+
 def _run_artifact_stat_check() -> dict:
     """Artifact sets may grant ANY stat (element bonuses, stellar_bonus,
     skill/burst/charged_bonus, crit_*, er...).
@@ -1438,15 +1805,19 @@ def _run_hit_catalogue_check() -> dict:
             seen.setdefault(key, f"{module.__name__}.{attr}")
     out["duplicates"] = duplicates
 
-    # Informational: the engine keeps late hits (off-field damage is a feature here), so
-    # this is not an error - it just lists sequences whose field ends before the last hit.
+    # Informational: an ability that is NOT interruptible keeps its late hits (off-field
+    # damage is a feature here), so a sequence whose field ends before them is listed.
+    # An interruptible skill form is cut by the swap-out on purpose (only the in-air tick
+    # survives), so those abilities are left out of this scan.
     late_hits = []
     for name, seq in presets.FIELD_SEQUENCE_REGISTRY.items():
         last_hit = 0.0
         for call in seq.calls:
+            if call.ability.interrupt_on_swap_out:
+                continue
             for hit in call.ability.hits:
                 last_hit = max(last_hit, call.start_time + hit.relative_delay)
-        if seq.calls and seq.swap_out_time < last_hit - 1e-9:
+        if last_hit and seq.calls and seq.swap_out_time < last_hit - 1e-9:
             late_hits.append(name)
     out["late_hit_sequences"] = sorted(late_hits)
 
@@ -3610,6 +3981,171 @@ def run(verbose: bool = True) -> None:
         print("[OK] weapons phase 3: permanents + Whitelake/Finale/Breeze/Elegy/"
               "NewBough/Silverdawn/RainBow behave")
 
+    # 3j2. Sacrificial weapons: guaranteed element skill-CD reset + its audit row.
+    sac = _run_sacrificial_check()
+    sacrificial_checks = [
+        (sac["frag_icds"] == [30.0, 26.0, 22.0, 19.0, 16.0],
+         f"Sacrificial Fragments ICDs are {sac['frag_icds']}"),
+        (sac["bow_icds"] == [30.0, 26.0, 22.0, 19.0, 16.0],
+         f"Sacrificial Bow ICDs are {sac['bow_icds']}"),
+        (sac["frag_label"] == "Sac Frag proc",
+         f"Sacrificial Fragments row label is {sac['frag_label']!r}"),
+        (sac["bow_label"] == "Sac Bow proc",
+         f"Sacrificial Bow row label is {sac['bow_label']!r}"),
+        (sac["other_weapon"] == (None, None),
+         f"a non-Sacrificial weapon reports a reset passive: {sac['other_weapon']}"),
+        (sac["no_stat_leak"], "the skill-CD reset block leaked into initial_stats"),
+        (abs(sac["frag_atk"] - 454.0) <= 1e-6,
+         f"Sacrificial Fragments base ATK is {sac['frag_atk']}, expected 454"),
+        (abs(sac["frag_em"] - 221.0) <= 1e-6,
+         f"Sacrificial Fragments EM is {sac['frag_em']}, expected 221"),
+        (sac["recast_error"] is None,
+         f"a proc did not allow the recast inside the skill CD: {sac['recast_error']}"),
+        (sac["proc_count"] == 1,
+         f"{sac['proc_count']} proc rows for one cast, expected 1"),
+        (sac["proc_times"] == [0.301],
+         f"proc landed at {sac['proc_times']}, expected [0.301]"),
+        (sac["proc_label"] == "Sac Frag proc" and sac["proc_owner"] == "Mizuki"
+         and sac["proc_active"] == "Mizuki",
+         f"proc row shape is {sac['proc_label']!r}/{sac['proc_owner']!r}/"
+         f"{sac['proc_active']!r}"),
+        (sac["proc_weapon"] == "Sacrificial Fragments",
+         f"proc row names the weapon {sac['proc_weapon']!r}"),
+        (sac["proc_no_damage"], "the proc row carries damage numbers"),
+        (sac["proc_follows_skill_hit"],
+         "a proc row is not placed after the skill hit that caused it"),
+        (sac["no_weapon_error"] == ("Mizuki", 15.301),
+         f"without the weapon the clash is {sac['no_weapon_error']}, expected 15.301"),
+        (sac["third_cast_error"] == ("Mizuki", "Mizuki Skill [Pullout]", 17.051),
+         f"the third cast reports {sac['third_cast_error']}, expected 17.051"),
+        (sac["r5_error"] is None,
+         f"R5 should cover the 30.301s cast: {sac['r5_error']}"),
+        (sac["r5_procs"] == [0.301, 17.801],
+         f"R5 procs are {sac['r5_procs']}, expected [0.301, 17.801]"),
+        (sac["r4_error"] == ("Mizuki", "Mizuki Skill [Pullout]", 32.801),
+         f"R4's 19s ICD should miss the 17.801s proc: {sac['r4_error']}"),
+        (sac["r4_procs"] == [],
+         f"the refused R4 run still placed proc rows: {sac['r4_procs']}"),
+        (sac["offfield_error"] is None,
+         f"the off-field probe refused to evaluate: {sac['offfield_error']}"),
+        (sac["offfield_procs"] == 0,
+         f"an off-field skill hit produced {sac['offfield_procs']} proc rows"),
+        (sac["burst_error"] == ("Mizuki", "Mizuki Burst", 15.301),
+         f"a burst cast is not cooldown-checked: {sac['burst_error']}"),
+        (sac["burst_procs"] == 0,
+         f"a burst produced {sac['burst_procs']} proc rows (burst is not skill damage)"),
+        (sac["tail_error"] is None,
+         f"the tail proc did not legalise the 21.5s cast: {sac['tail_error']}"),
+        (sac["tail_procs"] == [0.301, 16.869],
+         f"tail procs are {sac['tail_procs']}, expected [0.301, 16.869]"),
+        (sac["tail_next_error"] == ("Mizuki", "Mizuki Skill [Pullout]", 36.5),
+         "a tail tick that eats the ICD must leave the next rotation without a "
+         f"reset (got {sac['tail_next_error']})"),
+        (sac["bow_rows"] == 1 and sac["bow_row_label"] == "Sac Bow proc"
+         and sac["bow_row_owner"] == "Diona",
+         f"Sacrificial Bow rows are {sac['bow_rows']}/{sac['bow_row_label']!r}/"
+         f"{sac['bow_row_owner']!r}"),
+    ]
+    sacrificial_failures = [msg for ok, msg in sacrificial_checks if not ok]
+    failures.extend(sacrificial_failures)
+    if not sacrificial_failures and verbose:
+        print("[OK] Sacrificial weapons: guaranteed skill-CD reset, ICD table, "
+              "on-field/skill gating and the ICD-stealing tail behave")
+
+    # 3j3. Mizuki's skill: one ability per form, cut by her own swap-out.
+    intr = _run_skill_interrupt_check()
+    window_counts = {key: value["count"] for key, value in intr["windows"].items()}
+    window_lasts = {key: value["last"] for key, value in intr["windows"].items()}
+    interrupt_checks = [
+        (intr["abilities"] == ["Charged Attack", "Mizuki Burst",
+                               "Mizuki Skill [Pullout]", "Mizuki Skill [Standard]", "N1"],
+         f"Mizuki's abilities are {intr['abilities']}"),
+        (intr["both_interruptible"],
+         "a skill form is not flagged interrupt_on_swap_out"),
+        (intr["burst_not_interruptible"], "the burst is flagged interruptible"),
+        (intr["pullout_delays"] == [0.0, 0.929, 1.619, 2.639, 3.3, 3.99, 4.8, 5.49,
+                                    6.269, 6.989, 7.679, 8.489, 9.179, 9.869],
+         f"the pullout timings moved: {intr['pullout_delays']}"),
+        (intr["standard_delays"] == [0.0, 0.929, 1.619, 2.429, 3.09, 3.78, 4.59, 5.28,
+                                     6.059, 6.779, 7.469, 8.279, 8.969, 9.659],
+         f"the standard timings are {intr['standard_delays']}"),
+        (intr["same_app_ticks"], "the two forms apply Anemo on different hits"),
+        (intr["standard_tail_shifted"],
+         "the standard's tail did not move with its Tick3"),
+        (abs(intr["standard_mean_gap"] - 0.743) <= 2e-3,
+         f"the standard's mean gap is {intr['standard_mean_gap']}, expected ~0.743"),
+        (intr["standard_tick3_before_prep"] and intr["pullout_tick3_after_prep"],
+         "the 3rd Anemo application is not on the expected side of the 2.5s nuke CD"),
+        (intr["rule"] == [2, 3, 4, 4],
+         f"interrupted_hit_count is {intr['rule']}, expected [2, 3, 4, 4]"),
+        (window_counts == {"1 nuke": 3, "2 nukes": 6, "3 nukes": 10,
+                           "4 nukes": 14, "burst": 13},
+         f"per-window hit counts are {window_counts}"),
+        (window_lasts == {"1 nuke": 1.92, "2 nukes": 4.291, "3 nukes": 7.29,
+                          "4 nukes": 10.17, "burst": 9.48},
+         f"the windows' last hits are {window_lasts}"),
+        (all(value["last_off_field"] for value in intr["windows"].values()),
+         "a window's last hit was resolved on field (it is the in-air tick)"),
+        (intr["long_window_hits"] == 14,
+         f"a 14s window kept {intr['long_window_hits']} hits, expected all 14"),
+        (not intr["standard_used_by_preset"],
+         "a preset sequence plays the standard form (it is a catalogue stand-in)"),
+    ]
+    interrupt_failures = [msg for ok, msg in interrupt_checks if not ok]
+    failures.extend(interrupt_failures)
+    if not interrupt_failures and verbose:
+        print("[OK] Mizuki skill forms: pullout/standard timings, swap-out interrupt, "
+              "per-window hit counts (3/6/10/14, burst 13) and the in-air tick")
+
+    # 3j4. The results audit table: numeric values (headers sort by value) + display.
+    tbl = _run_table_format_check()
+    table_checks = [
+        (tbl["time_dtype"] == "float64" and tbl["dmg_dtype"] == "float64",
+         f"audit dtypes are time={tbl['time_dtype']}, damage={tbl['dmg_dtype']}"),
+        (tbl["aura_dtype"] == "float64" and tbl["app_dtype"] == "float64",
+         f"the aura / app gauges are {tbl['aura_dtype']} / {tbl['app_dtype']}"),
+        (tbl["text_columns"] == ["Active", "Owner", "Action", "Reaction"],
+         f"the identity columns are {tbl['text_columns']}"),
+        (not tbl["text_numeric"],
+         f"numeric audit columns are still text: {tbl['text_numeric']}"),
+        (tbl["buff_dtypes"] == ["Int64", "boolean"],
+         f"buff column dtypes are {tbl['buff_dtypes']}"),
+        (tbl["sortable"], "an audit column does not sort by value"),
+        (not tbl["empty_text"],
+         "the engine's '-'/'None' sentinels still reach the table as text: "
+         + ", ".join("%s=%d" % pair for pair in tbl["empty_text"])),
+        (tbl["placeholder"],
+         "the results table no longer sets placeholder='-' (the one rule that "
+         "renders every missing cell)"),
+        (tbl["inactive_rule"] == [True, True, False, True, True, False, True, True, True],
+         f"the stack on/off rule misclassifies values: {tbl['inactive_rule']}"),
+        (tbl["stack_zero_css"].endswith("color: #64748b"),
+         f"an empty stack is not greyed: {tbl['stack_zero_css']!r}"),
+        (tbl["stack_on_css"].endswith("color: #86efac; font-weight: 600"),
+         f"a filled stack is not highlighted: {tbl['stack_on_css']!r}"),
+        (tbl["flag_css"] == tbl["base_css"],
+         f"a boolean flag is still painted: {tbl['flag_css']!r}"),
+        (tbl["time_format"] == "%.3f",
+         f"the audit time format is {tbl['time_format']!r}, expected '%.3f'"),
+        (tbl["aura_format"] == "%.2f U" and tbl["app_format"] == "%.0f U",
+         f"the gauge formats are {tbl['aura_format']!r} / {tbl['app_format']!r}"),
+        (tbl["action_pinned"] and tbl["pinned"] == ["Action"],
+         f"the pinned columns are {tbl['pinned']} (expected only Action)"),
+        ({"Time (s)", "Aura", "CV", "Base DMG", "Quills", "Elev Mult",
+          "Effective Avg DMG"} <= set(tbl["help_columns"]),
+         f"missing header tooltips: {tbl['help_columns']}"),
+        (not tbl["time_leftovers"],
+         "1- or 2-decimal time formats are still in the UI: "
+         + ", ".join(tbl["time_leftovers"])),
+    ]
+    table_failures = [msg for ok, msg in table_checks if not ok]
+    failures.extend(table_failures)
+    if not table_failures and verbose:
+        print(f"[OK] audit table: {tbl['rows']} rows, numeric dtypes sort by value, "
+              f"missing cells come from placeholder='-', only stack counters are "
+              f"painted; column_config formats the fixed columns, pins Action and "
+              f"documents {len(tbl['help_columns'])} headers")
+
     # 3k. Artifact rare stats: data + damage yes, card no.
     art = _run_artifact_stat_check()
     artifact_checks = [
@@ -4281,12 +4817,15 @@ def run(verbose: bool = True) -> None:
     port_checks = [
         (port["counts_match"],
          "the editor catalog does not cover every registry entry"),
-        (port["character_count"] == 7 and port["ability_count"] == 30,
+        (port["character_count"] == 7 and port["ability_count"] == 28,
          f"catalog has {port['character_count']} characters / {port['ability_count']} abilities"),
         (port["compared"] == port["trial_count"],
          f"only {port['compared']} of {port['trial_count']} preset trials could be compared"),
-        (port["hits"].get("triple_cryo_rotation") == 808,
-         f"triple cryo reports {port['hits'].get('triple_cryo_rotation')} hits, expected 808"),
+        # The 9.3s burst-pull-out window used to keep its unintended Tick13. Dropping it
+        # removes the tick AND the Stellar Swirl that tick applied: 3 of each here (the
+        # trial's last cast is cut by the trial end anyway), i.e. 6 hits.
+        (port["hits"].get("triple_cryo_rotation") == 802,
+         f"triple cryo reports {port['hits'].get('triple_cryo_rotation')} hits, expected 802"),
         (port["active"] == "mizuki_sac_frag_pull_out_6x_rotations",
          f"the default party opens the editor on {port['active']}"),
         (not port["problems"], "editor port: " + "; ".join(port["problems"][:3])),

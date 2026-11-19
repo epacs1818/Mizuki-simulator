@@ -6,4 +6,6 @@
 # those panels, and it also removes the light/dark switch from the app menu.
 [theme]
 base = "dark"
-primaryColor = "#3b82f6"
+# The dataframe's checkboxes (and every other widget accent: buttons, sliders, focus
+# rings, the strip cursor) use this colour. White reads clearly on the dark row tints.
+primaryColor = "#ffffff"

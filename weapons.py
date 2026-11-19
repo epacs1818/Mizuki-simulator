@@ -10,9 +10,17 @@ WEAPON_STATS = {
         "base_atk": 510.0,
         "crit_dmg": 0.551
     },
+    # Passive: SKILL damage dealt by the ON-FIELD holder ends the holder's
+    # elemental skill cooldown, once per "skill_cd_reset" seconds (R1..R5, measured
+    # from the proc). The app models it as GUARANTEED - it does no random
+    # simulation, and a rotation that relies on it is only worth authoring when it
+    # procs. The nested block is deliberately NOT a stat: build_initial_stats only
+    # folds int/float values, so it can never leak into a snapshot.
     "Sacrificial Fragments": {
         "base_atk": 454.0,
-        "em": 221.0
+        "em": 221.0,
+        "skill_cd_reset": {"icd": [30.0, 26.0, 22.0, 19.0, 16.0],
+                           "label": "Sac Frag proc"},
     },
      "Sacrificial Jade":{
         "base_atk": 454.0,
@@ -95,9 +103,12 @@ WEAPON_STATS = {
         "base_atk": 454.0,
         "er": 0.613
     },
+      # Same passive as Sacrificial Fragments (see its entry for the full note).
       "Sacrificial Bow": {
         "base_atk": 565.0,
-        "er": 0.306
+        "er": 0.306,
+        "skill_cd_reset": {"icd": [30.0, 26.0, 22.0, 19.0, 16.0],
+                           "label": "Sac Bow proc"},
     },
      "Breezeborne Refrain":{
         "base_atk": 510.0,
@@ -146,4 +157,27 @@ def resolve_weapon_key(weapon_full_name):
 def get_weapon_entry(weapon_full_name):
     """WEAPON_STATS entry for a weapon label (empty dict when unknown)."""
     return WEAPON_STATS.get(resolve_weapon_key(weapon_full_name), {})
+
+
+def get_skill_cd_reset(weapon_full_name, refinement=1):
+    """(internal cooldown, proc label) for a weapon that ends the skill CD.
+
+    Returns (None, None) for every other weapon. The ICD is stored as an
+    [R1..R5] list; *refinement* may be an int or an "R5" style label (anything
+    unparseable falls back to R1, like every other refinement read in the app).
+
+    Both Sacrificial weapons share this passive: SKILL damage dealt by the
+    on-field holder ends the holder's elemental skill cooldown, once per ICD.
+    """
+    block = get_weapon_entry(weapon_full_name).get("skill_cd_reset") or {}
+    icd = block.get("icd")
+    if icd is None:
+        return None, None
+    try:
+        rank = int(str(refinement).strip().lstrip("Rr") or 1)
+    except (TypeError, ValueError):
+        rank = 1
+    if isinstance(icd, (list, tuple)):
+        icd = icd[max(0, min(rank - 1, len(icd) - 1))]
+    return float(icd), block.get("label")
 

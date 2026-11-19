@@ -48,6 +48,29 @@ class Ability:
     cooldown: float = 0.0
     talent_level: int = 10  # Track skill level of the attack (1-13)
     talent_type: str = "skill_talent"
+    # A skill FORM can be CUT by the caster's swap-out (Mizuki). When this is set,
+    # the field sequence's window decides how many hits happen: everything up to and
+    # including the FIRST hit after the swap-out still lands (that tick was already
+    # in the air, so it resolves off field), and every later hit never happens.
+    interrupt_on_swap_out: bool = False
+
+
+def interrupted_hit_count(times, swap_out_time, eps=1e-9):
+    """How many of *times* still land when the caster swaps out at *swap_out_time*.
+
+    *times* are sequence-relative hit times in ascending order. The rule (see
+    Ability.interrupt_on_swap_out): keep every hit at or before the swap-out, keep
+    the first hit after it (the one already in the air), then stop.
+    """
+    count = 0
+    airborne = False
+    for when in times:
+        if when > swap_out_time + eps:
+            if airborne:
+                break
+            airborne = True
+        count += 1
+    return count
 
 
 @dataclass

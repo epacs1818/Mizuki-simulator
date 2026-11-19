@@ -69,6 +69,9 @@ def _ability(ability) -> dict:
         "character": character_id(ability.character),
         "category": _category(ability),
         "cooldown": float(getattr(ability, "cooldown", 0.0) or 0.0),
+        # Interruptible skill forms are cut by the swap-out: the strip and the issue
+        # list must show the hits that really happen, not the full hit table.
+        "interrupt_on_swap_out": bool(getattr(ability, "interrupt_on_swap_out", False)),
         "hits": [{"offset": round(h.relative_delay - base, 6)} for h in hits],
     }
 

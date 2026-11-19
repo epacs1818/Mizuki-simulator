@@ -1,7 +1,7 @@
 import copy
 from typing import Dict, List, Optional, Tuple
 
-from models import ActionCategory, FieldSequence, AttackType, Rotation, Trial
+from models import ActionCategory, FieldSequence, AttackType, Rotation, Trial, interrupted_hit_count
 from aura import CryoAuraTracker
 from mechanics import StellarVortex, stellar_swirl_hit
 from abilities import (
@@ -26,7 +26,7 @@ from stats_calc import (
     build_initial_stats, apply_permanent_buffs, apply_weapon_party_stats,
     build_snapshot_stats, compute_final_stats, is_rv_mode,
 )
-from weapons import resolve_weapon_key
+from weapons import resolve_weapon_key, get_skill_cd_reset
 from characters import party_element_counts
 
 
@@ -126,6 +126,9 @@ class RotationTimeline:
         self.enemy_stats = enemy_stats if enemy_stats is not None else DEFAULT_ENEMY_STATS.copy()
         self._timeline_evaluated = False
         self._burst_call_seq = 0
+        # {character: (ICD, proc label)} for a Sacrificial weapon that can end the
+        # holder's elemental skill cooldown. Refreshed by _prepare_character_stats().
+        self.skill_cd_resets: Dict[str, Tuple[float, str]] = {}
 
         # Normalize party structure: ensure every entry has dict metadata and
         # that both "artifact" / "artifact_set" keys resolve to the same name
@@ -143,6 +146,16 @@ class RotationTimeline:
 
     def _prepare_character_stats(self):
         self.char_initial_stats_map = {}
+        # Which party members hold a weapon whose passive can END the elemental
+        # skill's cooldown (Sacrificial Fragments / Bow). Their casts are validated
+        # during evaluation instead of at scheduling time, because a proc can
+        # legally end the CD between two casts.
+        self.skill_cd_resets = {}
+        for char_name, data in self.party.items():
+            data = data or {}
+            icd, label = get_skill_cd_reset(data.get("weapon"), data.get("refinement", 1))
+            if icd is not None:
+                self.skill_cd_resets[char_name] = (icd, label)
         for char_name, data in self.party.items():
             char_level = data.get("level")
             weapon = data.get("weapon")
@@ -208,7 +221,12 @@ class RotationTimeline:
             if c_ability.cooldown > 0 and ability_key in self.last_used_timestamps:
                 last_time = self.last_used_timestamps[ability_key]
                 cd_expires_at = last_time + c_ability.cooldown
-                if ability_start_global < cd_expires_at:
+                # A Sacrificial weapon can END the skill's cooldown between two
+                # casts, so a holder's casts are validated during evaluation
+                # (_skill_cd_reset_plan), where the procs are known. Every other
+                # character keeps the immediate, scheduling-time check.
+                if (ability_start_global < cd_expires_at
+                        and field_sequence.character not in self.skill_cd_resets):
                     raise CooldownError(field_sequence.character, c_ability.name,
                                         cd_expires_at)
 
@@ -231,7 +249,16 @@ class RotationTimeline:
                 self._burst_call_seq += 1
             burst_call_id = self._burst_call_seq if is_aether_burst else None
 
-            for hit in c_ability.hits:
+            # A skill FORM can be cut by the swap-out (Mizuki): every hit up to and
+            # including the FIRST hit after the swap-out still lands (that tick is in
+            # the air, so it resolves off field) and every later hit is never
+            # scheduled. Times are SEQUENCE-relative, like swap_out_time itself.
+            hit_times = [call.start_time + hit.relative_delay for hit in c_ability.hits]
+            keep = len(hit_times)
+            if c_ability.interrupt_on_swap_out:
+                keep = interrupted_hit_count(hit_times, field_sequence.swap_out_time)
+
+            for hit in c_ability.hits[:keep]:
                 hit_global_time = ability_start_global + hit.relative_delay
                 ev = {
                     "global_time": hit_global_time,
@@ -250,6 +277,15 @@ class RotationTimeline:
                     # evaluator back-derive the cast time of any hit (used by
                     # ability-wide buff windows such as Sucrose's C6).
                     "hit_offset": hit.relative_delay,
+                    # Cast bookkeeping for the Sacrificial-weapon cooldown plan:
+                    # which cast this hit belongs to, what that cast must wait for
+                    # and whether the ability IS the elemental skill (its cooldown
+                    # is what a proc ends). Triggered hits never inherit these
+                    # (see _TRIGGERED_DROP_KEYS).
+                    "cast_time": ability_start_global,
+                    "cast_cooldown": c_ability.cooldown,
+                    "cast_is_skill": c_ability.talent_type == "skill_talent",
+                    "cast_start": hit is c_ability.hits[0],
                 }
                 if is_aether_burst:
                     ev["burst_variant"] = "auto"
@@ -307,6 +343,9 @@ class RotationTimeline:
         "quill_damage", "c1_quill", "burst_variant", "burst_call_id",
         "frostglow_consumed", "aether_c6_consumed_on",
         "swirl_metadata", "vortex_metadata", "reaction",
+        # Cast bookkeeping: a triggered hit is not a cast, so it must never look
+        # like the start of one to the Sacrificial-weapon cooldown plan.
+        "cast_time", "cast_cooldown", "cast_is_skill", "cast_start",
     )
 
     def _resolved_triggered_ability(self, ability, character: Optional[str] = None):
@@ -419,12 +458,119 @@ class RotationTimeline:
         return next((c for c, d in self.party.items()
                      if (d.get("artifact_set") or d.get("artifact")) == set_name), None)
 
+    # -----------------------------------------------------------------------
+    # Sacrificial weapons: guaranteed elemental-skill cooldown reset
+    # -----------------------------------------------------------------------
+    # Sacrificial Fragments and Sacrificial Bow share one passive: SKILL damage
+    # dealt by the ON-FIELD holder ends the holder's elemental skill cooldown, at
+    # most once per [30, 26, 22, 19, 16]s (R1..R5), measured FROM THE PROC.
+    #
+    # The proc is modelled as GUARANTEED: the app runs no random simulation, so a
+    # 40% roll that fails would silently invalidate a rotation. A rotation that
+    # relies on this weapon is only authored when it procs.
+    #
+    # This plan runs BEFORE the evaluator mutates the event list, which buys two
+    # things in one pass:
+    #   * the cooldown re-check for the holders (their casts skip the eager check
+    #     in add_field_sequence because a proc can legally end the CD between two
+    #     casts), and
+    #   * one audit row per proc, placed like the swap rows (no stats, no buff
+    #     column: the passive changes cooldowns, not damage).
+    #
+    # It walks EVERY skill hit, not just the cast hit, so a LATE tick that eats
+    # the weapon's ICD is modelled exactly: the rotation then has no reset left
+    # for its next cast, and the engine reports the cooldown clash.
+    #
+    # Only hits the rotation SCHEDULES are proc sources. Engine-injected hits
+    # (Faruzan's Pressurized Collapse, Diona's Icy Paws) are not: Paws are
+    # off-field anyway, and a self-triggered collapse is not part of a rotation.
+    def _skill_cd_reset_plan(self) -> None:
+        if not self.skill_cd_resets:
+            return
+
+        events = sorted(self.global_events, key=lambda ev: ev["global_time"])
+        active: Optional[str] = None
+        ready: Dict[Tuple[str, str], float] = {}     # (char, ability) -> castable again
+        skill_keys: Dict[str, set] = {}              # char -> every skill-talent key
+        icd_ready: Dict[str, float] = {}             # char -> next allowed proc
+        procs: List[Tuple[Dict, Dict]] = []          # (triggering hit, audit row)
+        minus_inf = float("-inf")
+
+        for event in events:
+            e_type = event.get("event_type")
+            char = event.get("character")
+            if e_type == "SWAP_IN":
+                active = char
+                continue
+            if e_type == "SWAP_OUT":
+                active = None
+                continue
+            if e_type != "HIT":
+                continue
+
+            reset = self.skill_cd_resets.get(char)
+            if reset is None:
+                continue
+            icd, label = reset
+            t = event["global_time"]
+            key = (char, event.get("ability_name"))
+
+            # 1. Cooldown legality, checked at the cast's own start (the eager
+            #    scheduling check was deferred for a holder), then the CD starts.
+            if event.get("cast_start"):
+                cooldown = float(event.get("cast_cooldown") or 0.0)
+                cast_time = float(event.get("cast_time", t))
+                if cooldown > 0:
+                    available = ready.get(key)
+                    if available is not None and cast_time < available - _WINDOW_EPS:
+                        raise CooldownError(char, event.get("ability_name"), available)
+                    ready[key] = cast_time + cooldown
+                if event.get("cast_is_skill"):
+                    skill_keys.setdefault(char, set()).add(key)
+
+            # 2. SKILL damage by the on-field holder -> guaranteed proc. Only
+            #    STANDARD damage carries an attack type, so the type IS the check;
+            #    a cast's LATER ticks can proc too (that is the ICD-stealing tail).
+            if event.get("attack_type") != AttackType.SKILL or active != char:
+                continue
+            if t < icd_ready.get(char, minus_inf) - _WINDOW_EPS:
+                continue
+            icd_ready[char] = t + icd
+            for skill_key in skill_keys.get(char, ()):   # the proc ends the skill CD
+                if ready.get(skill_key, minus_inf) > t:
+                    ready[skill_key] = t
+            procs.append((event, {
+                "global_time": t,
+                "active_character": char,
+                "character": char,
+                "action": label,
+                "category": ActionCategory.SWAP,   # non-damage row, like a swap
+                "elem_app": "-",
+                "element": None,
+                "event_type": "WEAPON_PROC",
+                "hit_name": label,
+                "ability_name": label,
+                "weapon": resolve_weapon_key(self.party.get(char, {}).get("weapon")),
+            }))
+
+        # 3. Place each row right after the hit that produced it; reverse order
+        #    keeps the trigger indices valid while inserting.
+        for trigger, row in reversed(procs):
+            index = next((i for i, ev in enumerate(self.global_events) if ev is trigger),
+                         len(self.global_events) - 1)
+            self.global_events.insert(index + 1, row)
+
     def evaluate_timeline(self):
         # Idempotence guard: this pass mutates the event list (inserts swirls,
         # nukes, vortex explosions, burst substitution). Re-running it would
         # duplicate events, so skip if we already evaluated.
         if self._timeline_evaluated:
             return
+
+        # 0. Sacrificial weapons: re-check the holders' cooldowns (a proc can end
+        #    the elemental skill's CD) and pre-place one audit row per proc. Must
+        #    run before anything below inserts events.
+        self._skill_cd_reset_plan()
 
         active_character = "None"
         aether_c2_active = False

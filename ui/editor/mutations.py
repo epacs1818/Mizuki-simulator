@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import copy
 
+from models import interrupted_hit_count
 from ui.editor import catalog
 
 SECTIONS = ("trials", "rotations", "field_seqs")
@@ -271,10 +272,20 @@ def move_block(spec: dict, rotation_id: str, index: int, delta: int) -> None:
         blocks.insert(target, blocks.pop(index))
 
 
-def _placement_end(spec: dict, placement: dict) -> float:
+def _placement_end(spec: dict, placement: dict, field_time: float) -> float:
+    """When the last hit this placement really lands at.
+
+    An interruptible skill form is cut by the swap-out, so the automatic placement of
+    the NEXT ability has to clear the in-air tick, not the full hit table.
+    """
     ability = spec["catalog"]["abilities"].get(placement["ability"]) or {}
-    last = max((hit["offset"] for hit in ability.get("hits") or ()), default=0.0)
-    return float(placement["first_hit"]) + last
+    first = float(placement["first_hit"])
+    times = [first + float(hit["offset"]) for hit in ability.get("hits") or ()]
+    if not times:
+        return first
+    if ability.get("interrupt_on_swap_out"):
+        times = times[:interrupted_hit_count(times, field_time)]
+    return times[-1] if times else first
 
 
 def add_placement(spec: dict, sequence_id: str, ability_id: str, at=None) -> str:
@@ -286,7 +297,8 @@ def add_placement(spec: dict, sequence_id: str, ability_id: str, at=None) -> str
         raise ValueError("That ability is not in the catalogue.")
     when = at
     if when is None:
-        when = max([_placement_end(spec, p) for p in sequence["placements"]] + [0.0])
+        field_time = float(sequence["field_time"])
+        when = max([_placement_end(spec, p, field_time) for p in sequence["placements"]] + [0.0])
     placement_id = unique_id({p["id"] for p in sequence["placements"]},
                              sequence_id + "~" + catalog.slug(ability["name"]))
     sequence["placements"].append({"id": placement_id, "ability": ability_id,

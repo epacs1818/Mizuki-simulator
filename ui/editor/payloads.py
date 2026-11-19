@@ -6,6 +6,7 @@ positioned items, a cursor and a zoom. Nothing here touches the engine.
 
 from __future__ import annotations
 
+from models import interrupted_hit_count
 from ui.editor import engine
 
 
@@ -63,7 +64,7 @@ def _hit_items(spec: dict, hits: list, selected=None) -> list:
             "off": not hit.get("on_field", True),
             "selected": selected is not None and selected[0] == "hit"
                         and abs(float(selected[1]) - hit["t"]) < 1e-6,
-            "title": "%s #%d \u00b7 %s \u00b7 %.2fs" % (hit["ability_name"],
+            "title": "%s #%d \u00b7 %s \u00b7 %.3fs" % (hit["ability_name"],
                      hit["hit_index"] + 1, format(hit["damage"], ",.0f"), hit["t"]),
         })
     return items
@@ -88,7 +89,7 @@ def trial_payload(spec: dict, trial_id: str, result: dict, *, selected=None,
             "start": block["start"],
             "end": block["end"],
             "label": sequence.get("name", ""),
-            "title": "%s / %s  %.2fs - %.2fs" % (
+            "title": "%s / %s  %.3fs - %.3fs" % (
                 block["rotation_name"], sequence.get("name", ""),
                 block["start"], block["end"]),
             "color": colour,
@@ -182,7 +183,7 @@ def rotation_payload(spec: dict, rotation_id: str, preview: dict, *, selected=No
             "start": block["start"],
             "end": block["end"],
             "label": sequence.get("name", ""),
-            "title": "%s  %.2fs - %.2fs" % (sequence.get("name", ""), block["start"], block["end"]),
+            "title": "%s  %.3fs - %.3fs" % (sequence.get("name", ""), block["start"], block["end"]),
             "color": colour,
             # Display only: the field time is set by the number box. The bar is the
             # ability's runtime, so it is faded and sits behind its own hit ticks.
@@ -195,7 +196,7 @@ def rotation_payload(spec: dict, rotation_id: str, preview: dict, *, selected=No
     items.extend(_hit_items(spec, hits, selected))
     items.append({"kind": "marker", "t": 0.0, "label": "loop start", "kind2": "in", "draggable": False})
     items.append({"kind": "marker", "t": round(loop_time, 3),
-                  "label": "loop end %.2fs" % loop_time, "kind2": "seam", "draggable": False})
+                  "label": "loop end %.3fs" % loop_time, "kind2": "seam", "draggable": False})
     tail = max([hit["t"] for hit in hits] + [loop_time]) - loop_time
     return {
         "tMax": max(loop_time + max(tail, 0.0), 1.0),
@@ -225,18 +226,24 @@ def field_sequence_payload(spec: dict, sequence_key: str, *, selected=None,
         row_id = "p_" + placement["id"]
         rows.append({"id": row_id, "label": ability["name"], "kind": "lane", "color": colour})
         first = float(placement["first_hit"])
-        last = max((hit["offset"] for hit in ability["hits"]), default=0.0)
-        residual = sum(1 for hit in ability["hits"] if first + hit["offset"] > field_time + 1e-9)
+        times = [first + float(hit["offset"]) for hit in ability["hits"]]
+        kept = times
+        if ability.get("interrupt_on_swap_out"):
+            kept = times[:interrupted_hit_count(times, field_time)]
+        last = kept[-1] if kept else first
+        interrupted = len(kept) < len(times)
         items.append({
             "kind": "band",
             "row": row_id,
             "id": placement["id"],
             "refKind": "placement",
             "start": first,
-            "end": first + last,
+            "end": last,
             "label": ability["name"],
-            "title": "%s  first hit %.2fs, last hit %.2fs" % (
-                ability["name"], first, first + last),
+            "title": "%s  first hit %.3fs, last hit %.3fs%s" % (
+                ability["name"], first, last,
+                (", interrupted by the %.3fs swap-out (%d of %d hits land)"
+                 % (field_time, len(kept), len(times))) if interrupted else ""),
             "color": colour,
             # Display only: the field time is set by the number box. The bar is the
             # ability's runtime, so it is faded and sits behind its own hit ticks.
@@ -244,10 +251,10 @@ def field_sequence_payload(spec: dict, sequence_key: str, *, selected=None,
             "dim": False,
             "soft": True,
             "minPx": 14,
-            "tailFrom": field_time if residual else None,
+            "tailFrom": field_time if (interrupted and last > field_time + 1e-9) else None,
             "selected": selected == ("placement", placement["id"]),
         })
-        for index, hit in enumerate(ability["hits"]):
+        for index, hit in enumerate(ability["hits"][:len(kept)]):
             when = first + hit["offset"]
             items.append({
                 "kind": "hit",
@@ -258,10 +265,10 @@ def field_sequence_payload(spec: dict, sequence_key: str, *, selected=None,
                 "crit": False,
                 "off": when > field_time + 1e-9,
                 "selected": False,
-                "title": "hit #%d . %.2fs" % (index + 1, when),
+                "title": "hit #%d . %.3fs" % (index + 1, when),
             })
     items.append({"kind": "marker", "t": 0.0, "label": "swap in", "kind2": "in", "draggable": False})
-    items.append({"kind": "marker", "t": field_time, "label": "swap out %.1fs" % field_time,
+    items.append({"kind": "marker", "t": field_time, "label": "swap out %.3fs" % field_time,
                   "kind2": "out", "draggable": False})
     return {
         "tMax": max(field_time, 1.0) * 1.05,

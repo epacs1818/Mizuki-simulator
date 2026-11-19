@@ -17,8 +17,7 @@ from abilities import (
     aether_skill, aether_n1, aether_n1ca, aether_burst_enhanced,
     odette_cast, odette_recast, odette_burst,
     faruzan_skill_cast, faruzan_burst,
-    mizuki_n1, mizuki_charged, mizuki_pullout_2,
-    mizuki_pullout_5, mizuki_pullout_9, mizuki_pullout_13, mizuki_burst,
+    mizuki_n1, mizuki_charged, mizuki_skill_pullout, mizuki_burst,
     sucrose_skill, sucrose_burst, sucrose_n1, sucrose_n2,
     diona_skill_tap, diona_skill_hold, diona_burst,
     anastasya_tap, anastasya_burst,
@@ -99,26 +98,28 @@ diona_hEQ.add_ability(0.660, diona_skill_hold)
 diona_hEQ.add_ability(3.071, diona_burst)
 
 # --- Mizuki ---
-# One sequence per pull-out length (the number of stellar nukes she banks), plus the
-# skill+burst combo and a normal-attack filler.
+# One sequence per pull-out length (how long she stays, which is what decides how many
+# of the skill's ticks land - the swap-out cuts the skill), plus the skill+burst combo
+# and a normal-attack filler. All of them cast the SAME pullout form; only the window
+# differs.
 mizuki_pullout_4_nukes = FieldSequence("Skill Pullout 4 Nukes", "Mizuki", swap_out_time=10.000)
-mizuki_pullout_4_nukes.add_ability(0.301, mizuki_pullout_13)
+mizuki_pullout_4_nukes.add_ability(0.301, mizuki_skill_pullout)
 
 mizuki_pullout_1_nuke = FieldSequence("Skill Pullout 1 Nuke", "Mizuki", swap_out_time=1.750)
-mizuki_pullout_1_nuke.add_ability(0.301, mizuki_pullout_2)
+mizuki_pullout_1_nuke.add_ability(0.301, mizuki_skill_pullout)
 
 mizuki_pullout_3_nukes = FieldSequence("Skill Pullout 3 Nukes", "Mizuki", swap_out_time=7.100)
-mizuki_pullout_3_nukes.add_ability(0.301, mizuki_pullout_9)
+mizuki_pullout_3_nukes.add_ability(0.301, mizuki_skill_pullout)
 
 mizuki_pullout_2_nukes = FieldSequence("Skill Pullout 2 Nukes", "Mizuki", swap_out_time=4.101)
-mizuki_pullout_2_nukes.add_ability(0.301, mizuki_pullout_5)
+mizuki_pullout_2_nukes.add_ability(0.301, mizuki_skill_pullout)
 
 mizuki_n1c = FieldSequence("N1C", "Mizuki", swap_out_time=1.410)
 mizuki_n1c.add_ability(0.660, mizuki_n1)
 mizuki_n1c.add_ability(1.080, mizuki_charged)
 
 mizuki_pullout_burst_4_nukes = FieldSequence("Burst Pullout 4 Nukes", "Mizuki", swap_out_time=9.3)
-mizuki_pullout_burst_4_nukes.add_ability(0.301, mizuki_pullout_13)
+mizuki_pullout_burst_4_nukes.add_ability(0.301, mizuki_skill_pullout)
 mizuki_pullout_burst_4_nukes.add_ability(8.301, mizuki_burst)
 
 # --- Sucrose ---

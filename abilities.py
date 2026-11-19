@@ -321,12 +321,21 @@ mizuki_charged = Ability(
     ]
 )
 
-mizuki_pullout_13 = Ability(
-    name="Mizuki Skill [13 Ticks]",
+# One ability per in-game FORM of her skill. How long she stays on field decides how
+# many ticks land (models.interrupted_hit_count): the swap-out cuts the skill, and only
+# the tick already in the air survives it. Field-sequence windows therefore replace the
+# old "[2/5/9/13 Ticks]" duplicates.
+#
+# The PULLOUT form: the in-game pull-out technique delays the 3rd tick's Anemo
+# application (Tick3 at 2.639s) until after her 2.5s nuke-prep cooldown, which is what
+# buys the extra early VBTD nuke. Tick3 is the anomalous 1.020s gap.
+mizuki_skill_pullout = Ability(
+    name="Mizuki Skill [Pullout]",
     character="Mizuki",
     cooldown=0.0,
     talent_level=10,
     talent_type="skill_talent",
+    interrupt_on_swap_out=True,
     hits=[
         Hit("Cast",   0.000, element="Anemo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Skill", "Skill DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Mizuki", "Skill", "Skill DMG")),
         Hit("Tick1",  0.929, element="Anemo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Skill", "Continuous Attack DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Mizuki", "Skill", "Continuous Attack DMG")),
@@ -345,52 +354,36 @@ mizuki_pullout_13 = Ability(
     ]
 )
 
-mizuki_pullout_2 = Ability(
-    name="Mizuki Skill [2 Ticks]",
+# The STANDARD form: same skill without the pull-out tech, so the early ticks keep the
+# natural cadence the game actually shows (it alternates ~0.69s / ~0.81s gaps). Tick2 is
+# unchanged; the 1.020s gap into Tick3 becomes 0.810s (of 0.69 / 0.81 it is the one that
+# keeps the whole ability's mean gap closest to the ~0.750s players expect: 9.659 / 13 =
+# 0.743 instead of 0.734), and every later tick moves with it so the tail gaps survive.
+# Consequence the simulator must reproduce: the 3rd Anemo application now lands at 2.429s
+# (before the 2.5s nuke-prep cooldown refreshes), so this form misses the extra early
+# VBTD nuke the pullout form gets.
+mizuki_skill_standard = Ability(
+    name="Mizuki Skill [Standard]",
     character="Mizuki",
     cooldown=0.0,
     talent_level=10,
     talent_type="skill_talent",
-    hits=[
-        Hit("Cast",  0.000, element="Anemo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Skill", "Skill DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Mizuki", "Skill", "Skill DMG")),
-        Hit("Tick1", 0.929, element="Anemo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Skill", "Continuous Attack DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Mizuki", "Skill", "Continuous Attack DMG")),
-        Hit("Tick2", 1.619, element="Anemo",                     category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Skill", "Continuous Attack DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Mizuki", "Skill", "Continuous Attack DMG")),
-    ]
-)
-
-mizuki_pullout_9 = Ability(
-    name="Mizuki Skill [9 Ticks]",
-    character="Mizuki",
-    cooldown=0.0,
-    talent_level=10,
-    talent_type="skill_talent",
+    interrupt_on_swap_out=True,
     hits=[
         Hit("Cast",   0.000, element="Anemo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Skill", "Skill DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Mizuki", "Skill", "Skill DMG")),
         Hit("Tick1",  0.929, element="Anemo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Skill", "Continuous Attack DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Mizuki", "Skill", "Continuous Attack DMG")),
         Hit("Tick2",  1.619, element="Anemo",                     category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Skill", "Continuous Attack DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Mizuki", "Skill", "Continuous Attack DMG")),
-        Hit("Tick3",  2.639, element="Anemo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Skill", "Continuous Attack DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Mizuki", "Skill", "Continuous Attack DMG")),
-        Hit("Tick4",  3.300, element="Anemo",                     category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Skill", "Continuous Attack DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Mizuki", "Skill", "Continuous Attack DMG")),
-        Hit("Tick5",  3.990, element="Anemo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Skill", "Continuous Attack DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Mizuki", "Skill", "Continuous Attack DMG")),
-        Hit("Tick6",  4.800, element="Anemo",                     category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Skill", "Continuous Attack DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Mizuki", "Skill", "Continuous Attack DMG")),
-        Hit("Tick7",  5.490, element="Anemo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Skill", "Continuous Attack DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Mizuki", "Skill", "Continuous Attack DMG")),
-        Hit("Tick8",  6.269, element="Anemo",                     category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Skill", "Continuous Attack DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Mizuki", "Skill", "Continuous Attack DMG")),
-        Hit("Tick9",  6.989, element="Anemo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Skill", "Continuous Attack DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Mizuki", "Skill", "Continuous Attack DMG")),
-    ]
-)
-
-mizuki_pullout_5 = Ability(
-    name="Mizuki Skill [5 Ticks]",
-    character="Mizuki",
-    cooldown=0.0,
-    talent_level=10,
-    talent_type="skill_talent",
-    hits=[
-        Hit("Cast",   0.000, element="Anemo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Skill", "Skill DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Mizuki", "Skill", "Skill DMG")),
-        Hit("Tick1",  0.929, element="Anemo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Skill", "Continuous Attack DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Mizuki", "Skill", "Continuous Attack DMG")),
-        Hit("Tick2",  1.619, element="Anemo",                     category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Skill", "Continuous Attack DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Mizuki", "Skill", "Continuous Attack DMG")),
-        Hit("Tick3",  2.639, element="Anemo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Skill", "Continuous Attack DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Mizuki", "Skill", "Continuous Attack DMG")),
-        Hit("Tick4",  3.300, element="Anemo",                     category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Skill", "Continuous Attack DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Mizuki", "Skill", "Continuous Attack DMG")),
-        Hit("Tick5",  3.990, element="Anemo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Skill", "Continuous Attack DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Mizuki", "Skill", "Continuous Attack DMG")),
+        Hit("Tick3",  2.429, element="Anemo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Skill", "Continuous Attack DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Mizuki", "Skill", "Continuous Attack DMG")),
+        Hit("Tick4",  3.090, element="Anemo",                     category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Skill", "Continuous Attack DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Mizuki", "Skill", "Continuous Attack DMG")),
+        Hit("Tick5",  3.780, element="Anemo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Skill", "Continuous Attack DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Mizuki", "Skill", "Continuous Attack DMG")),
+        Hit("Tick6",  4.590, element="Anemo",                     category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Skill", "Continuous Attack DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Mizuki", "Skill", "Continuous Attack DMG")),
+        Hit("Tick7",  5.280, element="Anemo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Skill", "Continuous Attack DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Mizuki", "Skill", "Continuous Attack DMG")),
+        Hit("Tick8",  6.059, element="Anemo",                     category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Skill", "Continuous Attack DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Mizuki", "Skill", "Continuous Attack DMG")),
+        Hit("Tick9",  6.779, element="Anemo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Skill", "Continuous Attack DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Mizuki", "Skill", "Continuous Attack DMG")),
+        Hit("Tick10", 7.469, element="Anemo",                     category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Skill", "Continuous Attack DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Mizuki", "Skill", "Continuous Attack DMG")),
+        Hit("Tick11", 8.279, element="Anemo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Skill", "Continuous Attack DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Mizuki", "Skill", "Continuous Attack DMG")),
+        Hit("Tick12", 8.969, element="Anemo",                     category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Skill", "Continuous Attack DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Mizuki", "Skill", "Continuous Attack DMG")),
+        Hit("Tick13", 9.659, element="Anemo", elemental_app="1U", category=ActionCategory.STANDARD_DMG, stat_ref=StatRef.ATK, motion_value=get_ability_motion_value("Mizuki", "Skill", "Continuous Attack DMG", 10), attack_type=AttackType.SKILL, scaling_key=("Mizuki", "Skill", "Continuous Attack DMG")),
     ]
 )
 

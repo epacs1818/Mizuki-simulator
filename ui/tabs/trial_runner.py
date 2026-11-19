@@ -60,7 +60,7 @@ def render():
                     f"(Repeated {rotation.repetitions}x)"
                 )
                 for s_idx, seq in enumerate(rotation.sequences):
-                    st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;↳ Step {s_idx + 1}: `{seq.name}` (*{seq.character}* — {seq.swap_out_time}s field time)")
+                    st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;↳ Step {s_idx + 1}: `{seq.name}` (*{seq.character}* — {seq.swap_out_time:.3f}s field time)")
 
         st.markdown("<br>", unsafe_allow_html=True)
 

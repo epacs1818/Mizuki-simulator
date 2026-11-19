@@ -7,7 +7,7 @@ import streamlit as st
 from build_io import document_to_json, suggested_file_name
 from ui.cards import render_party_card
 from ui.paths import ASSETS
-from ui.style import blend_chart, style_timeline_dataframe
+from ui.style import AUDIT_COLUMN_CONFIG, blend_chart, style_timeline_dataframe
 from ui.table import build_timeline_dataframe
 
 
@@ -118,7 +118,7 @@ def render() -> None:
                     with m2:
                         st.metric("Overall DPS", f"{analytics.get('overall_dps', 0):,.1f} DMG/s")
                     with m3:
-                        st.metric("Trial Duration", f"{analytics.get('trial_duration', 0):.1f}s")
+                        st.metric("Trial Duration", f"{analytics.get('trial_duration', 0):.3f}s")
                     
                     st.markdown("---")
                     
@@ -193,7 +193,11 @@ def render() -> None:
                             "Elemental App", "Aura", "Reaction", "Average DMG",
                         ]
                         view = df_timeline[[c for c in preview_order if c in df_timeline.columns]]
-                    st.dataframe(style_timeline_dataframe(view), use_container_width=True, hide_index=True)
+                    st.dataframe(style_timeline_dataframe(view),
+                                 column_config={name: config for name, config
+                                                in AUDIT_COLUMN_CONFIG.items()
+                                                if name in view.columns},
+                                 width="stretch", hide_index=False, placeholder="-")
 
                     st.markdown("<br><hr>", unsafe_allow_html=True)
                                         

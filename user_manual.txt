@@ -269,6 +269,12 @@ files.
     view. Because this view contains a wealth of data, downloading the
     table and opening it in spreadsheet software (like Excel or Google
     Sheets) is highly recommended for deep analysis.
+  - Every column holds real numbers, so clicking a column header sorts it
+    by value (the "U" suffixes, ON/OFF flags and timestamps are display
+    formatting only). Every time shown in the app is given to 3 decimals.
+  - Hover a column header to read what that column means. The Action column
+    is pinned, so the row's action stays visible while you scroll sideways
+    through the buff columns.
 
 6.4 Detailed timeline column blocks
   To make the damage math as clear as possible, the detailed table is

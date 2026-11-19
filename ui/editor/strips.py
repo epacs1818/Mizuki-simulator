@@ -222,15 +222,17 @@ function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, v)); }
 function round(v, d) { const m = Math.pow(10, d); return Math.round(v * m) / m; }
 function niceStep(px) {
   const c = [0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300];
-  for (const s of c) if (s * px >= 56) return s;
+  // 64px keeps a 3-decimal label ("12.345s", "1:02.345") from touching its neighbour.
+  for (const s of c) if (s * px >= 64) return s;
   return 600;
 }
 function fmtT(t) {
+  // Every time shown to the user is 3 decimals, ruler included.
   if (t >= 60) {
-    const m = Math.floor(t / 60), s = Math.round(t % 60);
-    return m + ":" + String(s).padStart(2, "0");
+    const m = Math.floor(t / 60), s = t % 60;
+    return m + ":" + s.toFixed(3).padStart(6, "0");
   }
-  return (Math.round(t * 10) / 10) + "s";
+  return t.toFixed(3) + "s";
 }
 
 export default function (component) {
@@ -284,7 +286,7 @@ export default function (component) {
   rulerEl.innerHTML = ruler;
   rulerEl.onclick = (e) => {
     const rect = rulerEl.getBoundingClientRect();
-    setTriggerValue("seek", { t: round(clamp((e.clientX - rect.left - PAD) / px, 0, tMax), 2) });
+    setTriggerValue("seek", { t: round(clamp((e.clientX - rect.left - PAD) / px, 0, tMax), 3) });
   };
 
   // ---- rows + items -----------------------------------------------------
@@ -406,7 +408,7 @@ export default function (component) {
         marker.style.transform = "";
         const raw = Math.max(0.5, startVal + dx / px);
         setTriggerValue("retimed", {
-          value: round(ev.altKey ? raw : Math.round(raw / 0.1) * 0.1, 2),
+          value: round(ev.altKey ? raw : Math.round(raw / 0.1) * 0.1, 3),
         });
       };
     };
