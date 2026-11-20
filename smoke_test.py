@@ -52,6 +52,15 @@ Checks:
      formats, the pinned Action column and the header tooltips come from
      `st.column_config` (`ui.style.AUDIT_COLUMN_CONFIG`), and only the stack counters
      are painted. Every time shown in the UI is 3 decimals (ruler included).
+ 16. Cooldown families: `Ability.cooldown_family` names the in-game button, so the
+     two forms of one skill clash with each other (Mizuki pullout/standard, Diona
+     tap/hold) while Odette's cast and recast stay independent. The cooldown that
+     applies is the one the PREVIOUS cast started, and the editor pre-flight
+     reports exactly the clashes the engine does.
+ 17. Ability charges: `Ability.ability_max_charges` (Sucrose 2) makes a cast spend
+     a charge instead of only checking a cooldown. One recharge timer per skill,
+     started by the FIRST spend; charges stay clamped to [0, max]; a Sacrificial
+     proc grants one charge; the pre-flight mirrors the pool exactly.
 """
 from pathlib import Path
 
@@ -955,6 +964,227 @@ def _run_sacrificial_check() -> dict:
     out["bow_row_label"] = bow_rows[0]["action"] if bow_rows else None
     out["bow_row_owner"] = bow_rows[0]["character"] if bow_rows else None
 
+    return out
+
+
+def _run_cooldown_family_check() -> dict:
+    """Cooldown families: one in-game button, one cooldown.
+
+    `Ability.cooldown_family` names the button an ability belongs to, and
+    `Ability.cooldown_key` scopes that family per character. Two forms of one
+    skill therefore clash with each other, while Odette's cast and recast (two
+    halves she chains immediately) stay independent. Pinned here:
+
+      * every shipped ability has a family, the key carries the character (so two
+        characters can both own a "skill" family), and both Aether burst variants
+        share theirs,
+      * Mizuki's pullout then standard inside the 14.25s skill CD is refused (the
+        old per-name keys let it through); Odette cast -> recast stays legal,
+      * a mixed family waits what the PREVIOUS cast started: Diona's tap (6s) ->
+        hold is legal at 7.66s, her hold (14.25s) -> tap is refused until 14.91s,
+      * the editor pre-flight reports exactly the same two clashes, so the warning
+        list and the engine cannot disagree.
+    """
+    import abilities as ab
+    from timeline import CooldownError
+    from ui.editor import catalog, validate
+
+    out = {}
+    out["all_have_family"] = all(
+        ability.cooldown_family
+        for names in ab.ABILITY_REGISTRY.values()
+        for ability in names.values())
+    out["mizuki_forms_share"] = (ab.mizuki_skill_pullout.cooldown_key
+                                 == ab.mizuki_skill_standard.cooldown_key
+                                 == ("Mizuki", "skill"))
+    out["diona_forms_share"] = (ab.diona_skill_tap.cooldown_key
+                                == ab.diona_skill_hold.cooldown_key
+                                == ("Diona", "skill"))
+    out["odette_split"] = (ab.odette_cast.cooldown_key == ("Odette", "skill_cast")
+                           and ab.odette_recast.cooldown_key == ("Odette", "skill_recast"))
+    # Both characters name their skill family "skill"; the key must keep them apart.
+    out["characters_scoped"] = (ab.mizuki_skill_pullout.cooldown_key
+                                != ab.diona_skill_tap.cooldown_key)
+    out["aether_variants_share"] = (ab.aether_burst_enhanced.cooldown_key
+                                    == ab.aether_burst_standard.cooldown_key
+                                    == ("Aether", "burst"))
+
+    # One character per probe, holding a weapon WITHOUT a skill-CD reset, so the
+    # eager scheduling check answers and the Sacrificial plan never runs.
+    gear = {
+        "Mizuki": ("The Widsith (Average)", "2p/2p EM"),
+        "Odette": ("New Bough", "2p/2p ATK"),
+        "Diona": ("Favonius Warbow", "Noblesse Oblige"),
+    }
+
+    def party_of(character):
+        weapon, artifact = gear[character]
+        return {character: {"constellation": 0, "level": 90, "refinement": 1,
+                            "weapon": weapon, "artifact_set": artifact,
+                            "talents": "10/10/10"}}
+
+    def error_of(character, steps):
+        """steps = [(ability, cast offset, field time), ...] chained in order."""
+        sequences = []
+        for ability, cast, field in steps:
+            sequence = FieldSequence("Family Probe", character, swap_out_time=field)
+            sequence.add_ability(cast, ability)
+            sequences.append(sequence)
+        timeline = RotationTimeline(party=party_of(character))
+        try:
+            timeline.add_trial(Trial(name="family probe", end_mode="time", end_time=40.0,
+                                     rotations=[Rotation(name="r", sequences=sequences,
+                                                         repetitions=1)]))
+            timeline.evaluate_timeline()
+        except CooldownError as exc:
+            return (exc.character, exc.ability_name, round(exc.until, 3))
+        return None
+
+    # Mizuki: the standard form cast inside the pullout's CD (0.301 + 14.25).
+    out["mizuki_mixed_error"] = error_of(
+        "Mizuki", [(ab.mizuki_skill_pullout, 0.301, 1.0),
+                   (ab.mizuki_skill_standard, 0.0, 1.75)])
+    # Odette: cast then recast, the pair OdetteEE chains, must stay legal.
+    out["odette_chain_error"] = error_of(
+        "Odette", [(ab.odette_cast, 0.66, 2.371), (ab.odette_recast, 0.0, 2.371)])
+    # Diona: tap (6s) then hold at 7.66s is legal; hold (14.25s) then tap is not.
+    out["diona_tap_then_hold"] = error_of(
+        "Diona", [(ab.diona_skill_tap, 0.66, 7.0), (ab.diona_skill_hold, 0.66, 1.41)])
+    out["diona_hold_then_tap"] = error_of(
+        "Diona", [(ab.diona_skill_hold, 0.66, 7.0), (ab.diona_skill_tap, 0.66, 1.41)])
+
+    spec = catalog.preset_spec()
+
+    def preflight(rows):
+        casts = [(when, catalog.character_id(ability.character),
+                  catalog.ability_id(ability.character, ability.name),
+                  ability.name, ability.cooldown,
+                  ability.cooldown_family or ability.name,
+                  ability.ability_max_charges)
+                 for when, ability in rows]
+        return [issue["message"] for issue in
+                validate.cooldown_issues(spec, "family probe", casts=casts, resets={})]
+
+    out["preflight_mizuki"] = preflight([(0.301, ab.mizuki_skill_pullout),
+                                        (1.0, ab.mizuki_skill_standard)])
+    out["preflight_odette"] = preflight([(0.66, ab.odette_cast),
+                                        (2.371, ab.odette_recast)])
+    out["preflight_diona_ok"] = preflight([(0.66, ab.diona_skill_tap),
+                                          (7.66, ab.diona_skill_hold)])
+    out["preflight_diona_bad"] = preflight([(0.66, ab.diona_skill_hold),
+                                           (7.66, ab.diona_skill_tap)])
+    return out
+
+
+def _run_charge_check() -> dict:
+    """Stocked charges: Sucrose holds 2 skill casts, every other ability holds 1.
+
+    A charge-based skill spends one charge per cast and a charge comes back every
+    `cooldown` seconds. Genshin runs ONE recharge timer per skill: the FIRST spend
+    starts it and later spends do not push it back, so two casts 1s apart return
+    their first charge `cooldown` after the FIRST cast. A Sacrificial proc hands one
+    charge back (it does not refill the pool). Pinned here:
+
+      * the data (only Sucrose stocks 2) and that no cooldown family declares a
+        conflicting capacity,
+      * the ChargePool itself: clamping, the single timer, grant() on a full pool,
+      * the engine: casts at 1.0 and 2.0 are legal, the next one waits for the first
+        charge (1.0 + 14.25 = 15.25) and is legal at 15.5; after that the timer
+        continues, so the following cast waits until 29.5,
+      * the pre-flight reports exactly the same two clashes.
+    """
+    import abilities as ab
+    from models import ChargePool
+    from timeline import CooldownError
+    from ui.editor import catalog, validate
+
+    out = {}
+    every = [value for value in vars(ab).values()
+             if isinstance(value, ab.Ability)]
+    out["sucrose_max"] = ab.sucrose_skill.ability_max_charges
+    out["stocked"] = {ability.name: ability.ability_max_charges
+                      for ability in every if ability.ability_max_charges != 1}
+
+    # Charges belong to the button: one family must not declare two capacities.
+    capacities, conflicts = {}, []
+    for ability in every:
+        key = ability.cooldown_key
+        if capacities.setdefault(key, ability.ability_max_charges) != ability.ability_max_charges:
+            conflicts.append(key)
+    out["family_conflicts"] = sorted(set(conflicts))
+
+    # --- the pool itself ---------------------------------------------------
+    pool = ChargePool(2)
+    out["pool_start"] = (pool.charges, pool.ready_at)
+    out["pool_first"] = pool.block_until(14.25, 1.0)
+    pool.consume(14.25, 1.0)
+    out["pool_after_first"] = (pool.charges, pool.ready_at)      # (1, 15.25)
+    out["pool_second"] = pool.block_until(14.25, 2.0)
+    pool.consume(14.25, 2.0)
+    out["pool_third"] = pool.block_until(14.25, 3.5)             # 15.25
+    out["pool_at_ready"] = pool.block_until(14.25, 15.25)        # None
+    out["pool_after_ready"] = (pool.charges, pool.ready_at)      # (1, 29.5)
+    pool.consume(14.25, 15.25)
+    out["pool_empty_again"] = pool.block_until(14.25, 16.0)      # 29.5
+    pool.grant(20.0)                                             # one charge, now
+    out["pool_granted"] = pool.block_until(14.25, 20.0)          # None
+    out["pool_after_grant"] = (pool.charges, pool.ready_at)      # (1, 34.25)
+    full = ChargePool(1)
+    full.grant(5.0)
+    out["pool_grant_full"] = full.ready_at                       # None (no-op)
+    empty = ChargePool(1)
+    empty.consume(10.0, 0.0)
+    empty.consume(10.0, 0.0)
+    out["pool_clamp_low"] = empty.charges                        # 0
+    empty.advance(10.0, 100.0)
+    empty.advance(10.0, 200.0)
+    out["pool_clamp_high"] = (empty.charges, empty.ready_at)     # (1, None)
+
+    # --- the engine --------------------------------------------------------
+    gear = ("The Widsith (Average)", "2p/2p EM")
+
+    def error_of(times):
+        """Cast Sucrose's skill at those absolute times, chained 0.5s on field."""
+        sequences, start = [], 0.0
+        for when in times:
+            offset = round(when - start, 6)
+            sequence = FieldSequence("Charge Probe", "Sucrose",
+                                     swap_out_time=offset + 0.5)
+            sequence.add_ability(offset, ab.sucrose_skill)
+            sequences.append(sequence)
+            start = when + 0.5
+        timeline = RotationTimeline(party={"Sucrose": {
+            "constellation": 0, "level": 90, "refinement": 1,
+            "weapon": gear[0], "artifact_set": gear[1], "talents": "10/10/10"}})
+        try:
+            timeline.add_trial(Trial(
+                name="charge probe", end_mode="time", end_time=times[-1] + 5.0,
+                rotations=[Rotation(name="r", sequences=sequences, repetitions=1)]))
+            timeline.evaluate_timeline()
+        except CooldownError as exc:
+            return (exc.character, exc.ability_name, round(exc.until, 3))
+        return None
+
+    out["two_casts"] = error_of([1.0, 2.0])
+    out["third_cast"] = error_of([1.0, 2.0, 3.5])
+    out["late_cast"] = error_of([1.0, 2.0, 15.5])
+    out["fourth_cast"] = error_of([1.0, 2.0, 15.5, 16.5])
+
+    # --- the editor pre-flight must agree ---------------------------------
+    spec = catalog.preset_spec()
+
+    def preflight(times):
+        casts = [(when, catalog.character_id("Sucrose"),
+                  catalog.ability_id("Sucrose", ab.sucrose_skill.name),
+                  ab.sucrose_skill.name, ab.sucrose_skill.cooldown,
+                  ab.sucrose_skill.cooldown_key[1],
+                  ab.sucrose_skill.ability_max_charges)
+                 for when in times]
+        return [issue["message"] for issue in
+                validate.cooldown_issues(spec, "charge probe", casts=casts, resets={})]
+
+    out["preflight_third"] = preflight([1.0, 2.0, 3.5])
+    out["preflight_late"] = preflight([1.0, 2.0, 15.5])
     return out
 
 
@@ -2393,7 +2623,14 @@ def _run_diona_check() -> dict:
 
     # Refresh + expiry: her tap at 0.66 opens the window until 20.66, her hold at 2.07
     # refreshes it until 22.07. Anastasya's 10 skill beats (3.42 .. 23.22) are the probe.
+    #
+    # Tap and hold share ONE cooldown (Ability.cooldown_family), so the hold 1.41s
+    # after the tap is only legal with a Sacrificial Bow: the tap's own hit procs and
+    # ends the skill CD (the passive is modelled as guaranteed). That is also how a
+    # real rotation refreshes this state twice inside 6s.
     refresh_party = dict(_diona_party())
+    refresh_party["Diona"] = dict(refresh_party["Diona"], weapon="Sacrificial Bow",
+                                  refinement=5)
     refresh_party["Anastasya"] = {"constellation": 0, "level": 90, "refinement": 1,
                                   "weapon": "Favonius Warbow", "artifact_set": "2p/2p ATK",
                                   "talents": "1/13/13"}
@@ -4091,7 +4328,10 @@ def run(verbose: bool = True) -> None:
          f"the off-field probe refused to evaluate: {sac['offfield_error']}"),
         (sac["offfield_procs"] == 0,
          f"an off-field skill hit produced {sac['offfield_procs']} proc rows"),
-        (sac["burst_error"] == ("Mizuki", "Mizuki Burst", 15.301),
+        # The burst's CD is 14.25s (15.0 * 0.95, the 2-Anemo party buff), so the
+        # second cast at 1.751s is refused until 14.551s. A burst is not skill
+        # damage, so it never procs the Sacrificial passive (checked below).
+        (sac["burst_error"] == ("Mizuki", "Mizuki Burst", 14.551),
          f"a burst cast is not cooldown-checked: {sac['burst_error']}"),
         (sac["burst_procs"] == 0,
          f"a burst produced {sac['burst_procs']} proc rows (burst is not skill damage)"),
@@ -4112,6 +4352,104 @@ def run(verbose: bool = True) -> None:
     if not sacrificial_failures and verbose:
         print("[OK] Sacrificial weapons: guaranteed skill-CD reset, ICD table, "
               "on-field/skill gating and the ICD-stealing tail behave")
+
+    # 3j3. Cooldown families: one in-game button, one cooldown.
+    families = _run_cooldown_family_check()
+    family_checks = [
+        (families["all_have_family"], "an ability has no cooldown_family"),
+        (families["mizuki_forms_share"],
+         "Mizuki's two skill forms do not share the ('Mizuki', 'skill') key"),
+        (families["diona_forms_share"],
+         "Diona's tap/hold do not share the ('Diona', 'skill') key"),
+        (families["odette_split"],
+         "Odette's cast and recast must keep separate cooldown families"),
+        (families["characters_scoped"],
+         "Mizuki's and Diona's 'skill' families collide across characters"),
+        (families["aether_variants_share"],
+         "the two Aether burst variants do not share ('Aether', 'burst')"),
+        (families["mizuki_mixed_error"] == ("Mizuki", "Mizuki Skill [Standard]", 14.551),
+         "pullout then standard reports "
+         f"{families['mizuki_mixed_error']}, expected a clash until 14.551"),
+        (families["odette_chain_error"] is None,
+         f"Odette's cast -> recast was refused: {families['odette_chain_error']}"),
+        (families["diona_tap_then_hold"] is None,
+         "Diona's tap (6s) blocks her hold at 7.66s: "
+         f"{families['diona_tap_then_hold']}"),
+        (families["diona_hold_then_tap"] == ("Diona", "Diona Skill [Tap]", 14.91),
+         "Diona's hold then tap reports "
+         f"{families['diona_hold_then_tap']}, expected a clash until 14.91"),
+        (len(families["preflight_mizuki"]) == 1
+         and "14.551" in families["preflight_mizuki"][0],
+         "the pre-flight does not report the mixed Mizuki forms: "
+         f"{families['preflight_mizuki']}"),
+        (families["preflight_odette"] == [],
+         "the pre-flight refuses Odette's cast -> recast: "
+         f"{families['preflight_odette']}"),
+        (families["preflight_diona_ok"] == [],
+         "the pre-flight refuses Diona's legal tap -> hold: "
+         f"{families['preflight_diona_ok']}"),
+        (len(families["preflight_diona_bad"]) == 1
+         and "14.910" in families["preflight_diona_bad"][0],
+         "the pre-flight misses Diona's hold -> tap clash: "
+         f"{families['preflight_diona_bad']}"),
+    ]
+    family_failures = [msg for ok, msg in family_checks if not ok]
+    failures.extend(family_failures)
+    if not family_failures and verbose:
+        print("[OK] Cooldown families: shared skill forms, Odette's split, the "
+              "previous-cast duration rule and pre-flight parity behave")
+
+    # 3j4. Stocked charges: Sucrose's 2 skill casts.
+    charges = _run_charge_check()
+    charge_checks = [
+        (charges["sucrose_max"] == 2,
+         f"Sucrose's skill stocks {charges['sucrose_max']} charges, expected 2"),
+        (charges["stocked"] == {"Sucrose Skill": 2},
+         f"unexpected stocked abilities: {charges['stocked']}"),
+        (charges["family_conflicts"] == [],
+         f"cooldown families declare conflicting capacities: {charges['family_conflicts']}"),
+        (charges["pool_start"] == (2, None),
+         f"a fresh 2-charge pool starts at {charges['pool_start']}"),
+        (charges["pool_first"] is None and charges["pool_after_first"] == (1, 15.25),
+         f"the first spend leaves {charges['pool_after_first']}, expected (1, 15.25)"),
+        (charges["pool_second"] is None,
+         f"the second charge is not castable: {charges['pool_second']}"),
+        (charges["pool_third"] == 15.25,
+         f"the third cast waits until {charges['pool_third']}, expected 15.25"),
+        (charges["pool_at_ready"] is None
+         and charges["pool_after_ready"] == (1, 29.5),
+         f"the recharge at 15.25 leaves {charges['pool_after_ready']}, expected (1, 29.5)"),
+        (charges["pool_empty_again"] == 29.5,
+         f"the next cast waits until {charges['pool_empty_again']}, expected 29.5"),
+        (charges["pool_granted"] is None and charges["pool_after_grant"] == (1, 34.25),
+         f"a granted charge leaves {charges['pool_after_grant']}, expected (1, 34.25)"),
+        (charges["pool_grant_full"] is None,
+         f"granting on a full pool started a timer: {charges['pool_grant_full']}"),
+        (charges["pool_clamp_low"] == 0,
+         f"a charge went below zero: {charges['pool_clamp_low']}"),
+        (charges["pool_clamp_high"] == (1, None),
+         f"advance over-filled the pool: {charges['pool_clamp_high']}"),
+        (charges["two_casts"] is None,
+         f"two charges 1s apart were refused: {charges['two_casts']}"),
+        (charges["third_cast"] == ("Sucrose", "Sucrose Skill", 15.25),
+         "the third cast reports "
+         f"{charges['third_cast']}, expected a wait until 15.25 (from the first spend)"),
+        (charges["late_cast"] is None,
+         f"the cast after the recharge was refused: {charges['late_cast']}"),
+        (charges["fourth_cast"] == ("Sucrose", "Sucrose Skill", 29.5),
+         "the following cast reports "
+         f"{charges['fourth_cast']}, expected a wait until 29.5"),
+        (len(charges["preflight_third"]) == 1
+         and "15.250" in charges["preflight_third"][0],
+         f"the pre-flight misses the third-cast wait: {charges['preflight_third']}"),
+        (charges["preflight_late"] == [],
+         f"the pre-flight refuses the legal late cast: {charges['preflight_late']}"),
+    ]
+    charge_failures = [msg for ok, msg in charge_checks if not ok]
+    failures.extend(charge_failures)
+    if not charge_failures and verbose:
+        print("[OK] Ability charges: Sucrose stocks 2, the first spend starts the "
+              "timer, procs hand one back and the pre-flight agrees")
 
     # 3j3. Mizuki's skill: one ability per form, cut by her own swap-out.
     intr = _run_skill_interrupt_check()

@@ -53,6 +53,83 @@ class Ability:
     # including the FIRST hit after the swap-out still lands (that tick was already
     # in the air, so it resolves off field), and every later hit never happens.
     interrupt_on_swap_out: bool = False
+    # Abilities that are the SAME in-game button share one cooldown by naming the
+    # same family (Mizuki's two skill forms, Diona's tap/hold). None falls back to
+    # the ability's own name, which is the old per-ability behaviour. Odette's cast
+    # and recast keep separate families on purpose: her recast must stay castable
+    # right after her cast, which is what her OdetteEE / OdetteQE presets do.
+    cooldown_family: Optional[str] = None
+    # How many casts a skill can stock (Sucrose: 2; 1 everywhere else). Charges
+    # belong to the BUTTON, so every ability in one cooldown family must declare
+    # the same value. A cast spends one charge; a charge returns every `cooldown`
+    # seconds, and the recharge timer is started by the FIRST spend (later spends
+    # do not push it back).
+    ability_max_charges: int = 1
+
+    @property
+    def cooldown_key(self) -> tuple:
+        """(character, family-or-name): the key cooldowns are tracked under.
+
+        The character is part of the key, so "skill" on Mizuki and "skill" on
+        Diona are different cooldowns. The family - not the ability name - is
+        what makes two forms of one button clash with each other.
+        """
+        return (self.character, self.cooldown_family or self.name)
+
+
+# Float tolerance for "the charge is up at exactly this time" checks, matching the
+# window tolerance the timeline uses (timeline._WINDOW_EPS).
+_CHARGE_EPS = 1e-9
+
+
+class ChargePool:
+    """Charges (Sucrose's 2 skill casts) and the one recharge timer behind them.
+
+    Genshin refills stocked charges ONE at a time from a single timer: spending a
+    charge while the pool is full starts that timer, and further spends do not move
+    it. `advance()` rolls the clock forward, `block_until()` answers "when can this
+    cast happen", `consume()` spends, and `grant()` is a Sacrificial-weapon proc -
+    it makes the next charge available now, it does NOT refill the pool.
+
+    Charges are clamped to [0, capacity]: consume() never goes negative, advance()
+    never over-fills, and grant() is a no-op on a full pool. `ready_at` is None
+    exactly while the pool is full (no timer running).
+    """
+
+    __slots__ = ("capacity", "charges", "ready_at")
+
+    def __init__(self, max_charges):
+        self.capacity = max(1, int(max_charges or 1))
+        self.charges = self.capacity
+        self.ready_at: Optional[float] = None
+
+    def advance(self, cooldown, when) -> None:
+        """Grant every charge whose timer has come up by *when*."""
+        while (self.charges < self.capacity and self.ready_at is not None
+               and when >= self.ready_at - _CHARGE_EPS):
+            self.charges += 1
+            self.ready_at = (None if self.charges >= self.capacity
+                             else self.ready_at + cooldown)
+
+    def block_until(self, cooldown, when) -> Optional[float]:
+        """None when the cast can happen at *when*, else when it becomes legal."""
+        self.advance(cooldown, when)
+        return None if self.charges > 0 else self.ready_at
+
+    def consume(self, cooldown, when) -> None:
+        """Spend one charge; a spend from a FULL pool starts the recharge timer."""
+        if self.charges <= 0:
+            return
+        if self.charges >= self.capacity:
+            self.ready_at = when + cooldown
+        self.charges -= 1
+
+    def grant(self, when) -> None:
+        """Sacrificial proc: the next charge arrives now (never over-fills)."""
+        if self.charges >= self.capacity:
+            return
+        if self.ready_at is None or self.ready_at > when:
+            self.ready_at = when
 
 
 def interrupted_hit_count(times, swap_out_time, eps=1e-9):

@@ -1,7 +1,10 @@
 import copy
 from typing import Dict, List, Optional, Tuple
 
-from models import ActionCategory, FieldSequence, AttackType, Rotation, Trial, interrupted_hit_count
+from models import (
+    ActionCategory, FieldSequence, AttackType, Rotation, Trial, ChargePool,
+    interrupted_hit_count,
+)
 from aura import CryoAuraTracker
 from mechanics import StellarVortex, stellar_swirl_hit
 from abilities import (
@@ -122,7 +125,9 @@ ODETTE_C4_PROC_CD = 3.5
 class RotationTimeline:
     def __init__(self, party: Optional[Dict[str, dict]] = None, enemy_stats: Optional[Dict[str, float]] = None):
         self.global_events = []
-        self.last_used_timestamps: Dict[Tuple[str, str], float] = {}
+        # (character, cooldown family) -> ChargePool. Stocked skills (Sucrose) hold
+        # more than one cast; a 1-charge pool is exactly the old ready-at rule.
+        self.charge_pools: Dict[Tuple[str, str], ChargePool] = {}
         self.enemy_stats = enemy_stats if enemy_stats is not None else DEFAULT_ENEMY_STATS.copy()
         self._timeline_evaluated = False
         self._burst_call_seq = 0
@@ -216,22 +221,29 @@ class RotationTimeline:
         for call in field_sequence.calls:
             c_ability = call.ability
             ability_start_global = swap_in_time + call.start_time
-            ability_key = (field_sequence.character, c_ability.name)
-
-            if c_ability.cooldown > 0 and ability_key in self.last_used_timestamps:
-                last_time = self.last_used_timestamps[ability_key]
-                cd_expires_at = last_time + c_ability.cooldown
-                # A Sacrificial weapon can END the skill's cooldown between two
-                # casts, so a holder's casts are validated during evaluation
-                # (_skill_cd_reset_plan), where the procs are known. Every other
-                # character keeps the immediate, scheduling-time check.
-                if (ability_start_global < cd_expires_at
-                        and field_sequence.character not in self.skill_cd_resets):
-                    raise CooldownError(field_sequence.character, c_ability.name,
-                                        cd_expires_at)
+            # Cooldowns are tracked per FAMILY, not per ability name: Mizuki's two
+            # skill forms and Diona's tap/hold are one in-game button, so a cast of
+            # either starts the same cooldown (Ability.cooldown_key).
+            ability_key = c_ability.cooldown_key
 
             if c_ability.cooldown > 0:
-                self.last_used_timestamps[ability_key] = ability_start_global
+                # A Sacrificial weapon can hand a charge BACK between two casts, so
+                # a holder's pools are driven during evaluation
+                # (_skill_cd_reset_plan), where the procs are known. Every other
+                # character keeps the immediate, scheduling-time check.
+                if field_sequence.character not in self.skill_cd_resets:
+                    pool = self.charge_pools.get(ability_key)
+                    if pool is None:
+                        pool = self.charge_pools[ability_key] = ChargePool(
+                            c_ability.ability_max_charges)
+                    blocked_until = pool.block_until(c_ability.cooldown,
+                                                     ability_start_global)
+                    if blocked_until is not None:
+                        raise CooldownError(field_sequence.character, c_ability.name,
+                                            blocked_until)
+                    # The FIRST spend starts the recharge timer; later spends do not
+                    # push it back, so a stocked skill refills one charge at a time.
+                    pool.consume(c_ability.cooldown, ability_start_global)
 
             self.global_events = [
                 ev for ev in self.global_events
@@ -278,12 +290,15 @@ class RotationTimeline:
                     # ability-wide buff windows such as Sucrose's C6).
                     "hit_offset": hit.relative_delay,
                     # Cast bookkeeping for the Sacrificial-weapon cooldown plan:
-                    # which cast this hit belongs to, what that cast must wait for
-                    # and whether the ability IS the elemental skill (its cooldown
-                    # is what a proc ends). Triggered hits never inherit these
-                    # (see _TRIGGERED_DROP_KEYS).
+                    # which cast this hit belongs to, which cooldown FAMILY that
+                    # cast started, what it must wait for (and how many charges the
+                    # family stocks) and whether the ability IS the elemental skill
+                    # (a proc hands one of its charges back). Triggered hits never
+                    # inherit these (see _TRIGGERED_DROP_KEYS).
                     "cast_time": ability_start_global,
                     "cast_cooldown": c_ability.cooldown,
+                    "cast_family": c_ability.cooldown_family or c_ability.name,
+                    "cast_max_charges": c_ability.ability_max_charges,
                     "cast_is_skill": c_ability.talent_type == "skill_talent",
                     "cast_start": hit is c_ability.hits[0],
                 }
@@ -345,7 +360,8 @@ class RotationTimeline:
         "swirl_metadata", "vortex_metadata", "reaction",
         # Cast bookkeeping: a triggered hit is not a cast, so it must never look
         # like the start of one to the Sacrificial-weapon cooldown plan.
-        "cast_time", "cast_cooldown", "cast_is_skill", "cast_start",
+        "cast_time", "cast_cooldown", "cast_family", "cast_max_charges",
+        "cast_is_skill", "cast_start",
     )
 
     def _resolved_triggered_ability(self, ability, character: Optional[str] = None):
@@ -462,8 +478,9 @@ class RotationTimeline:
     # Sacrificial weapons: guaranteed elemental-skill cooldown reset
     # -----------------------------------------------------------------------
     # Sacrificial Fragments and Sacrificial Bow share one passive: SKILL damage
-    # dealt by the ON-FIELD holder ends the holder's elemental skill cooldown, at
-    # most once per [30, 26, 22, 19, 16]s (R1..R5), measured FROM THE PROC.
+    # dealt by the ON-FIELD holder hands ONE charge of the holder's elemental skill
+    # back (for a plain 1-charge skill that is simply "castable again"), at most
+    # once per [30, 26, 22, 19, 16]s (R1..R5), measured FROM THE PROC.
     #
     # The proc is modelled as GUARANTEED: the app runs no random simulation, so a
     # 40% roll that fails would silently invalidate a rotation. A rotation that
@@ -471,9 +488,9 @@ class RotationTimeline:
     #
     # This plan runs BEFORE the evaluator mutates the event list, which buys two
     # things in one pass:
-    #   * the cooldown re-check for the holders (their casts skip the eager check
-    #     in add_field_sequence because a proc can legally end the CD between two
-    #     casts), and
+    #   * the charge re-check for the holders (their casts skip the eager check in
+    #     add_field_sequence because a proc can legally hand a charge back between
+    #     two casts), and
     #   * one audit row per proc, placed like the swap rows (no stats, no buff
     #     column: the passive changes cooldowns, not damage).
     #
@@ -490,8 +507,8 @@ class RotationTimeline:
 
         events = sorted(self.global_events, key=lambda ev: ev["global_time"])
         active: Optional[str] = None
-        ready: Dict[Tuple[str, str], float] = {}     # (char, ability) -> castable again
-        skill_keys: Dict[str, set] = {}              # char -> every skill-talent key
+        pools: Dict[Tuple[str, str], ChargePool] = {}   # (char, family) -> charges
+        skill_keys: Dict[str, set] = {}                 # char -> every skill-talent key
         icd_ready: Dict[str, float] = {}             # char -> next allowed proc
         procs: List[Tuple[Dict, Dict]] = []          # (triggering hit, audit row)
         minus_inf = float("-inf")
@@ -513,18 +530,24 @@ class RotationTimeline:
                 continue
             icd, label = reset
             t = event["global_time"]
-            key = (char, event.get("ability_name"))
+            # Cooldown FAMILY, not ability name: a cast of either form of one button
+            # clashes with the other (Mizuki's two skill forms, Diona's tap/hold).
+            key = (char, event.get("cast_family") or event.get("ability_name"))
 
-            # 1. Cooldown legality, checked at the cast's own start (the eager
-            #    scheduling check was deferred for a holder), then the CD starts.
+            # 1. Charge legality, checked at the cast's own start (the eager
+            #    scheduling check was deferred for a holder), then a charge is spent.
             if event.get("cast_start"):
                 cooldown = float(event.get("cast_cooldown") or 0.0)
                 cast_time = float(event.get("cast_time", t))
                 if cooldown > 0:
-                    available = ready.get(key)
-                    if available is not None and cast_time < available - _WINDOW_EPS:
+                    pool = pools.get(key)
+                    if pool is None:
+                        pool = pools[key] = ChargePool(
+                            event.get("cast_max_charges") or 1)
+                    available = pool.block_until(cooldown, cast_time)
+                    if available is not None:
                         raise CooldownError(char, event.get("ability_name"), available)
-                    ready[key] = cast_time + cooldown
+                    pool.consume(cooldown, cast_time)
                 if event.get("cast_is_skill"):
                     skill_keys.setdefault(char, set()).add(key)
 
@@ -536,9 +559,10 @@ class RotationTimeline:
             if t < icd_ready.get(char, minus_inf) - _WINDOW_EPS:
                 continue
             icd_ready[char] = t + icd
-            for skill_key in skill_keys.get(char, ()):   # the proc ends the skill CD
-                if ready.get(skill_key, minus_inf) > t:
-                    ready[skill_key] = t
+            for skill_key in skill_keys.get(char, ()):   # the proc hands one back
+                pool = pools.get(skill_key)
+                if pool is not None:
+                    pool.grant(t)
             procs.append((event, {
                 "global_time": t,
                 "active_character": char,

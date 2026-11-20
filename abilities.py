@@ -58,10 +58,24 @@ def update_ability_talent_level(ability: Ability, level: int):
 # 3. CHARACTER ABILITIES & FIELD SEQUENCES
 # ==========================================
 
+# COOLDOWN FAMILIES (`Ability.cooldown_family`): the in-game button an ability
+# belongs to. Two forms of one button name the same family, so a cast of either
+# starts ONE cooldown (Mizuki's pullout/standard, Diona's tap/hold). The engine keys
+# cooldowns on `Ability.cooldown_key` = (character, family), so two characters can
+# both have a "skill" family without clashing. Odette's cast and recast are the
+# deliberate exception: the recast must stay castable right after the cast.
+#
+# COOLDOWN VALUES: a 15s skill is entered as 14.25s - the 2-Anemo party buff (-5%
+# CD) is HARD-CODED into the data for now, because the app has no party-aware CD
+# reducer yet. Aether's charged ability is the exception: it keeps its full 15s.
+#
+# CHARGES (`Ability.ability_max_charges`): a stocked skill (Sucrose's 2 casts).
+
 # --- Aether ---
 aether_n1 = Ability(
     "N1",
     "Aether",
+    cooldown_family="normal",
     talent_level=10,
     talent_type = "normal_talent",
     hits=[
@@ -75,9 +89,13 @@ aether_n1 = Ability(
     ]
 )
 
+# His charged ability keeps the FULL 15s: the 2-Anemo -5% CD buff is deliberately
+# NOT applied to it (every skill below is 15.0 * 0.95 = 14.25).
 aether_n1ca = Ability(
     "Charged Attack",
     "Aether",
+    cooldown_family="charged",
+    cooldown=15.0,
     talent_level=10,
     talent_type="normal_talent",
     hits=[
@@ -108,7 +126,8 @@ aether_n1ca = Ability(
 aether_skill = Ability(
     name="Elemental Skill",
     character="Aether",
-    cooldown=15.0,
+    cooldown_family="skill",
+    cooldown=14.25,
     talent_level=10,
     talent_type="skill_talent",
     hits=[
@@ -129,7 +148,8 @@ aether_skill = Ability(
 aether_burst_enhanced = Ability(
     name="Elemental Burst",
     character="Aether",
-    cooldown=15.0,
+    cooldown_family="burst",
+    cooldown=14.25,
     talent_level=13,
     talent_type="burst_talent",
     hits=[
@@ -144,7 +164,8 @@ aether_burst_enhanced = Ability(
 aether_burst_standard = Ability(
     name="Elemental Burst",
     character="Aether",
-    cooldown=15.0,
+    cooldown_family="burst",
+    cooldown=14.25,
     talent_level=13,
     talent_type="burst_talent",
     hits=[
@@ -155,10 +176,13 @@ aether_burst_standard = Ability(
 )
 
 # --- Odette ---
+# Cast and recast are two halves of one button the player chains immediately, so they
+# deliberately do NOT share a family: OdetteEE casts at 0.660s and recasts at 1.170s.
 odette_cast = Ability(
     name="Skill Cast",
     character="Odette",
-    cooldown=15.0,
+    cooldown_family="skill_cast",
+    cooldown=14.25,
     talent_level=10,
     talent_type="skill_talent",
     hits=[
@@ -189,7 +213,8 @@ odette_cast = Ability(
 odette_recast = Ability(
     name="Skill Recast",
     character="Odette",
-    cooldown=15.0,
+    cooldown_family="skill_recast",
+    cooldown=14.25,
     talent_level=10,
     talent_type="skill_talent",
     hits=[
@@ -203,7 +228,8 @@ odette_recast = Ability(
 odette_burst = Ability(
     name="Odette Burst",
     character="Odette",
-    cooldown=15.0,
+    cooldown_family="burst",
+    cooldown=14.25,
     talent_level=10,
     talent_type="burst_talent",
     hits=[
@@ -239,6 +265,7 @@ odette_burst = Ability(
 faruzan_burst = Ability(
     name="Elemental Burst",
     character="Faruzan",
+    cooldown_family="burst",
     cooldown=19.0,
     talent_level=13,
     talent_type="burst_talent",
@@ -250,6 +277,7 @@ faruzan_burst = Ability(
 faruzan_skill_cast = Ability(
     name="Skill Cast",
     character="Faruzan",
+    cooldown_family="skill",
     talent_level=13,
     talent_type="skill_talent",
     hits=[
@@ -280,6 +308,7 @@ faruzan_skill_cast = Ability(
 faruzan_pressurized_collapse = Ability(
     name="Pressurized Collapse",
     character="Faruzan",
+    cooldown_family="pressurized_collapse",
     talent_level=13,
     talent_type="skill_talent",
     hits=[
@@ -302,6 +331,7 @@ faruzan_pressurized_collapse = Ability(
 mizuki_n1 = Ability(
     name="N1",
     character="Mizuki",
+    cooldown_family="normal",
     cooldown=0.0,
     talent_level=10,
     talent_type="normal_talent",
@@ -313,6 +343,7 @@ mizuki_n1 = Ability(
 mizuki_charged = Ability(
     name="Charged Attack",
     character="Mizuki",
+    cooldown_family="charged",
     cooldown=0.0,
     talent_level=10,
     talent_type="normal_talent",
@@ -329,10 +360,13 @@ mizuki_charged = Ability(
 # The PULLOUT form: the in-game pull-out technique delays the 3rd tick's Anemo
 # application (Tick3 at 2.639s) until after her 2.5s nuke-prep cooldown, which is what
 # buys the extra early VBTD nuke. Tick3 is the anomalous 1.020s gap.
+# The two FORMS are one in-game button, so they share the "skill" cooldown family:
+# casting the standard form inside the pullout form's 14.25s CD is refused.
 mizuki_skill_pullout = Ability(
     name="Mizuki Skill [Pullout]",
     character="Mizuki",
-    cooldown=0.0,
+    cooldown_family="skill",
+    cooldown=14.25,
     talent_level=10,
     talent_type="skill_talent",
     interrupt_on_swap_out=True,
@@ -365,7 +399,8 @@ mizuki_skill_pullout = Ability(
 mizuki_skill_standard = Ability(
     name="Mizuki Skill [Standard]",
     character="Mizuki",
-    cooldown=0.0,
+    cooldown_family="skill",
+    cooldown=14.25,
     talent_level=10,
     talent_type="skill_talent",
     interrupt_on_swap_out=True,
@@ -390,7 +425,8 @@ mizuki_skill_standard = Ability(
 mizuki_burst = Ability(
     name="Mizuki Burst",
     character="Mizuki",
-    cooldown=15.0,
+    cooldown_family="burst",
+    cooldown=14.25,
     talent_level=10,
     talent_type="burst_talent",
     hits=[
@@ -426,6 +462,7 @@ odette_c4_stellar_hit = Hit("Odette C4 Extra Stellar", 0.010, element="Cryo", ca
 sucrose_n1 = Ability(
     name="N1",
     character="Sucrose",
+    cooldown_family="normal",
     cooldown=0.0,
     talent_level=10,
     talent_type="normal_talent",
@@ -437,6 +474,7 @@ sucrose_n1 = Ability(
 sucrose_n2 = Ability(
     name="N2",
     character="Sucrose",
+    cooldown_family="normal",
     cooldown=0.0,
     talent_level=10,
     talent_type="normal_talent",
@@ -445,10 +483,15 @@ sucrose_n2 = Ability(
     ]
 )
 
+# She stocks TWO casts of her skill (both full at the start of every trial). Each
+# charge returns 14.25s after the FIRST spend, and a Sacrificial proc hands one
+# charge back, which is what makes her fast rotations sustain.
 sucrose_skill = Ability(
     name="Sucrose Skill",
     character="Sucrose",
-    cooldown=0.0,
+    cooldown_family="skill",
+    cooldown=14.25,
+    ability_max_charges=2,
     talent_level=10,
     talent_type="skill_talent",
     hits=[
@@ -459,7 +502,8 @@ sucrose_skill = Ability(
 sucrose_burst = Ability(
     name="Sucrose Burst",
     character="Sucrose",
-    cooldown=20.0,
+    cooldown_family="burst",
+    cooldown=19.0,
     talent_level=10,
     talent_type="burst_talent",
     hits=[
@@ -475,9 +519,13 @@ sucrose_burst = Ability(
 )
 
 # -- Diona ---
+# Tap and hold are one button; they share the "skill" family, so whichever form is
+# cast starts that family's cooldown and the other waits it out. The durations
+# differ (tap 6.0s, hold 14.25s), so the cast that started the CD owns its length.
 diona_skill_tap = Ability(
     name="Diona Skill [Tap]",
     character="Diona",
+    cooldown_family="skill",
     cooldown=6.0,
     talent_level=10,
     talent_type="skill_talent",
@@ -490,7 +538,8 @@ diona_skill_tap = Ability(
 diona_skill_hold = Ability(
     name="Diona Skill [Hold]",
     character="Diona",
-    cooldown=15.0,
+    cooldown_family="skill",
+    cooldown=14.25,
     talent_level=10,
     talent_type="skill_talent",
     hits=[
@@ -505,6 +554,7 @@ diona_skill_hold = Ability(
 diona_burst = Ability(
     name="Diona Burst",
     character="Diona",
+    cooldown_family="burst",
     cooldown=20.0,
     talent_level=10,
     talent_type="burst_talent",
@@ -528,6 +578,7 @@ diona_burst = Ability(
 diona_choice_treasures = Ability(
     name="Diona Choice Treasures",
     character="Diona",
+    cooldown_family="choice_treasures",
     talent_level=10,
     talent_type="skill_talent",
     hits=[
@@ -575,7 +626,8 @@ def configure_field_sequence_talents(field_sequence: FieldSequence, talents: Uni
 anastasya_tap = Ability(
     name="Skill Tap",
     character="Anastasya",
-    cooldown=15.0,
+    cooldown_family="skill",
+    cooldown=14.25,
     talent_level=10,
     talent_type="skill_talent",
     hits=[
@@ -606,6 +658,7 @@ anastasya_tap = Ability(
 anastasya_burst = Ability(
     name="To the New World",
     character="Anastasya",
+    cooldown_family="burst",
     cooldown=17.1,
     talent_level=13,
     talent_type="burst_talent",
@@ -620,6 +673,7 @@ anastasya_burst = Ability(
 anastasya_triumph = Ability(
     name="Triumph",
     character="Anastasya",
+    cooldown_family="triumph",
     talent_level=13,
     talent_type="burst_talent",
     hits=[
@@ -632,6 +686,7 @@ anastasya_triumph = Ability(
 anastasya_extra_stellar = Ability(
     name="Palestar Crown Extra Stellar",
     character="Anastasya",
+    cooldown_family="palestar_extra_stellar",
     talent_level=10,
     talent_type="burst_talent",
     hits=[
@@ -644,6 +699,7 @@ anastasya_extra_stellar = Ability(
 anastasya_c6_triumph = Ability(
     name="C6 Triumph",
     character="Anastasya",
+    cooldown_family="c6_triumph",
     talent_level=13,
     talent_type="burst_talent",
     hits=[

@@ -7,7 +7,7 @@ engine.simulate() and are merged by the view.
 
 from __future__ import annotations
 
-from models import interrupted_hit_count
+from models import ChargePool, interrupted_hit_count
 from weapons import get_skill_cd_reset
 
 INFO = "info"
@@ -102,6 +102,8 @@ def schedule(spec: dict, trial_key: str):
                         placement["ability"],
                         ability.get("name", ""),
                         float(ability.get("cooldown", 0.0) or 0.0),
+                        ability.get("cooldown_family") or ability.get("name", ""),
+                        int(ability.get("ability_max_charges") or 1),
                     ))
                 t += float(sequence["field_time"])
     return casts, round(t, 6)
@@ -115,6 +117,15 @@ def cooldown_issues(spec: dict, trial_key: str, casts=None, resets=None) -> list
     guaranteed proc at its own cast time: it clears that character's skill
     abilities, so a later skill cast is legal inside the ability cooldown.
 
+    Cooldowns are shared per (character, cooldown family): the two forms of one
+    in-game button (Mizuki's pullout/standard, Diona's tap/hold) clash with each
+    other, while Odette's cast and recast stay independent. The family - not the
+    ability id - is the key, exactly like timeline.add_field_sequence().
+
+    Stocked skills (Sucrose's 2 casts) use the same models.ChargePool as the engine:
+    a cast spends a charge, the recharge timer starts on the FIRST spend, and the
+    cooldown is only reported once the pool is empty.
+
     This is the pre-flight view only. The engine re-checks exactly, and it also
     knows about procs from a skill's LATER ticks (a tail tick can eat the weapon's
     ICD and leave the next rotation without a reset), so a real clash still comes
@@ -126,20 +137,33 @@ def cooldown_issues(spec: dict, trial_key: str, casts=None, resets=None) -> list
     resets = resets or {}
     abilities = spec["catalog"]["abilities"]
     skill_ids = {}
+    skill_families = {}
     for ability_id, payload in abilities.items():
         if payload.get("category") == "skill":
-            skill_ids.setdefault(payload.get("character"), set()).add(ability_id)
-    ready = {}
+            character = payload.get("character")
+            skill_ids.setdefault(character, set()).add(ability_id)
+            skill_families.setdefault(character, set()).add(
+                (character, payload.get("cooldown_family") or payload.get("id")))
+    pools = {}
     icd_ready = {}
     issues = []
-    for when, character, ability_id, name, cooldown in casts:
+    for when, character, ability_id, name, cooldown, family, max_charges in casts:
+        key = (character, family)
         if cooldown > 0:
-            available = ready.get(ability_id)
-            if available is not None and when < available - 1e-6:
+            pool = pools.get(key)
+            if pool is None:
+                pool = pools[key] = ChargePool(max_charges)
+            available = pool.block_until(cooldown, when)
+            if available is not None:
+                # A refused cast is reported and NOT spent, so the list shows every
+                # cast that is genuinely early instead of swallowing the next ones.
                 issues.append(_issue(ERROR, "%s is cast at %.3fs but is on cooldown until %.3fs." % (name, when, available), where))
                 if len(issues) >= MAX_ISSUES:
                     break
-            ready[ability_id] = when + cooldown
+            else:
+                # The FIRST spend starts the recharge timer; later spends do not
+                # push it back (a 1-charge skill is the old ready-at rule).
+                pool.consume(cooldown, when)
 
         icd = resets.get(character)
         if icd is None or ability_id not in skill_ids.get(character, ()):
@@ -147,9 +171,10 @@ def cooldown_issues(spec: dict, trial_key: str, casts=None, resets=None) -> list
         if when < icd_ready.get(character, float("-inf")) - 1e-6:
             continue
         icd_ready[character] = when + icd
-        for skill_id in skill_ids.get(character, ()):
-            if ready.get(skill_id, float("-inf")) > when:
-                ready[skill_id] = when
+        for skill_family in skill_families.get(character, ()):
+            pool = pools.get(skill_family)
+            if pool is not None:
+                pool.grant(when)
     return issues
 
 
@@ -225,7 +250,8 @@ def trial_issues(spec: dict, trial_key: str, party=None) -> list:
         issues.append(_issue(WARNING, "%s was authored for %s, so the runner will not offer it to this party." % (label, ", ".join(_char(spec, c) for c in missing)), where))
     if party:
         used = []
-        for _, character, _, _, _ in casts:
+        for cast in casts:
+            character = cast[1]
             if character not in party and character not in used:
                 used.append(character)
         if used:

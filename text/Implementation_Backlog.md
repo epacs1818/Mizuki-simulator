@@ -444,18 +444,29 @@ in `text/How_to_add_hits.txt` so the next one is mechanical.
 duplicate shells, so `"Mizuki E (Sac Frag Proc)"` / `"Mizuki E (Pullout)"` keep
 working and `"Mizuki E (2 nukes)"`, `"Mizuki E (3 nukes)"`, `"Mizuki Q"` were added.
 
-### Known limitation (documented in the guide)
+### Resolved: cooldowns are keyed per cooldown FAMILY
 
-Cooldowns are keyed on `(character, ability name)`, so the four skill variants of the
-same in-game skill do not share one cooldown: alternating them inside 15 s is
-allowed by the engine. A `cooldown_key` field on `Ability` would fix it; it was left
-out because it changes how rotations are validated and the current presets rely on
-the Sac-Frag proc variant having `cooldown = 0`.
+Cooldowns used to be keyed on `(character, ability name)`, so the two forms of one
+in-game skill did not share one cooldown: alternating them inside 15 s was allowed.
+`Ability.cooldown_family` (`models.py`) now names the in-game button an ability
+belongs to, and the engine keys on `Ability.cooldown_key` = `(character, family)`:
 
-*Superseded:* the four variants were merged into the two skill forms in the "Mizuki
-skill forms and the swap-out interrupt" round below. Cooldowns are still keyed per
-ability (the two forms do not share one yet), so the `cooldown_key` question is still
-open - it is now only about the two forms, not four variants.
+| Ability objects | `cooldown_family` |
+| --- | --- |
+| `mizuki_skill_pullout`, `mizuki_skill_standard` | `skill` |
+| `diona_skill_tap`, `diona_skill_hold` | `skill` |
+| `odette_cast` / `odette_recast` | `skill_cast` / `skill_recast` (deliberately split) |
+| normal / charged / burst / triggered abilities | `normal`, `charged`, `burst`, one family each |
+
+The family is scoped per character, so Mizuki's and Diona's `skill` families never
+collide. A cast of either form starts ONE cooldown, and the cooldown that applies is
+the one the PREVIOUS cast started (Diona tap 6s -> hold is legal after 6s; hold
+14.25s -> tap waits 14.25s) - the same rule `_skill_cd_reset_plan()` and the editor
+pre-flight already used. Odette's cast and recast stay independent because her
+presets chain them 0.51 s apart.
+
+*Superseded:* the four skill variants were merged into the two skill forms in the
+"Mizuki skill forms and the swap-out interrupt" round below.
 
 
 ---
@@ -541,9 +552,10 @@ skill talent CD 0" workaround: the passive is modelled.
   "the tail stole my Sac proc" error. The smoke test pins it (procs at 0.301 and
   16.869 -> the 21.5s cast is legal, the 23.0s cast is refused until 36.5s).
 * **Reset scope**: a proc ends every `skill_talent` ability of the holder (both of
-  Mizuki's skill forms, Sucrose's Skill, Diona tap/hold, ...). Ability cooldowns stay
-  keyed on `(character, ability name)` as before - see the `cooldown_key` limitation
-  above - so alternating two forms inside one CD is still allowed.
+  Mizuki's skill forms, Sucrose's Skill, Diona tap/hold, ...). Cooldowns are keyed
+  on `(character, cooldown_family)`, so the two Mizuki forms and Diona's tap/hold
+  share one cooldown and alternating them inside it is refused - see the
+  "cooldowns are keyed per cooldown FAMILY" section above.
 * **Editor pre-flight**: `ui/editor/validate.cooldown_issues()` accepts the party's
   gear (`trial_issues()` takes the party dict or an id list) and treats a skill cast
   as a guaranteed proc at its own cast time, so the warning list cannot contradict
@@ -557,6 +569,41 @@ skill talent CD 0" workaround: the passive is modelled.
   Sucrose rounds (`sucrose_standard` family: three Sucrose skill casts per ~33.5s
   loop) and any R1-R3 Sac rotation will start failing **by design**; Mizuki's
   catalogue is R4/R5 only, which keeps the 6x Mizuki loop legal.
+
+## Ability charges round (Sucrose stocks 2 skill casts)
+
+Sucrose's skill holds **two** charges; every other ability still holds one. A cast
+is no longer only "is the cooldown over?" - it **spends a charge**:
+
+* **Data**: `Ability.ability_max_charges` (default 1). Charges belong to the
+  in-game button, so every ability in one `cooldown_family` must declare the same
+  capacity (a smoke check enforces it). `sucrose_skill` is the only 2-charge
+  ability, and she starts every trial with both charges full.
+* **Model** (`models.ChargePool`, shared by the engine and the editor pre-flight):
+  ONE recharge timer per family. Spending from a FULL pool starts the timer;
+  further spends do not push it back. A charge returns every `cooldown` seconds
+  (14.25 for Sucrose), so casts at 1.0s and 2.0s leave the next cast legal at
+  **15.25s**, not 17.25s. Charges are clamped to [0, capacity]; `ready_at` is
+  None exactly while the pool is full.
+* **Sacrificial weapons**: a proc *grants one charge* (`ChargePool.grant`)
+  instead of "ending the cooldown". For a 1-charge skill that is the same thing
+  ("castable again"), which is why the pinned Sacrificial numbers did not move.
+* **Engine**: both passes drive the same pool - `add_field_sequence` for everyone
+  except a Sac holder, `_skill_cd_reset_plan` for the holder (its procs are only
+  known there). Hit events carry `cast_max_charges` next to `cast_family`, and a
+  triggered hit never inherits them.
+* **Editor pre-flight**: `validate.cooldown_issues()` keeps one `ChargePool` per
+  (character, family) and reports the same clash times, so a stocked skill cannot
+  produce a warning the engine disagrees with.
+* **Cooldown data convention** (also commented in `abilities.py`): a 15s skill is
+  entered as **14.25** because the 2-Anemo party buff (-5% CD) is hard-coded until
+  the app has a party-aware CD reducer. Aether's charged ability keeps its full
+  **15.0s** on purpose.
+* **Presets**: Sucrose's first two skill casts per trial are free, so the
+  `sucrose_mizuki_alternating_3_and_4_nukes` family no longer fails on its second
+  cast (the 16.50s charge covers its third cast at 22.77s). It now fails at
+  ~56.3s instead: three casts per ~33.5s loop against 2 charges per 28.5s is a
+  real deficit once the buffer is gone, so the error is worth keeping.
 
 ## Mizuki skill forms and the swap-out interrupt
 

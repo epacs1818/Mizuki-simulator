@@ -176,7 +176,13 @@ multiplier for every hit in the detailed timeline table in Tab 4.
   automatically saved to the history log in Tab 4.
   If a rotation attempts to cast an ability before its cooldown has reset,
   the simulation stops immediately with a Cooldown Error instead of
-  generating invalid results.
+  generating invalid results. Abilities that are the same in-game button
+  share one cooldown: Mizuki's two skill forms and Diona's tap/hold clash
+  with each other, while Odette's skill cast and recast stay independent.
+  Skills that stock charges (Sucrose's two skill casts) spend one charge
+  per cast and refill one charge at a time, starting from the FIRST cast;
+  a rotation is refused only once every charge is spent and the next one
+  has not returned yet.
 
 5.2 Field sequences
   A field sequence represents one character's time on-field: which
