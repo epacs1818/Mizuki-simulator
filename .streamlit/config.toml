@@ -6,6 +6,8 @@
 # those panels, and it also removes the light/dark switch from the app menu.
 [theme]
 base = "dark"
-# The dataframe's checkboxes (and every other widget accent: buttons, sliders, focus
-# rings, the strip cursor) use this colour. White reads clearly on the dark row tints.
-primaryColor = "#ffffff"
+# The dataframe's checkboxes and every other widget accent (buttons, sliders, focus
+# rings, the strip cursor, the active tab) use this colour. Reverted to the original
+# blue: white made the selected tab's label white-on-white, because page.css paints
+# the active tab with var(--primary-color).
+primaryColor = "#3b82f6"

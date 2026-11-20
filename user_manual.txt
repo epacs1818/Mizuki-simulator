@@ -21,8 +21,9 @@ CONTENTS
   6. Tab 4 - Simulation Results & History
      6.1 Overview Metrics
      6.2 Charts & Visualizations
-     6.3 The Rotation Timeline Table
-     6.4 Detailed Timeline Column Blocks
+     6.3 The Damage Rate Throughout Timeline Chart
+     6.4 The Rotation Timeline Table
+     6.5 Detailed Timeline Column Blocks
   7. Damage Categories & Stellar Swirl Mechanics
      7.1 The Three Damage Categories
      7.2 Stellar Swirl & Vortex Mechanics
@@ -246,12 +247,46 @@ files.
       attribution doesn't artificially inflate a character's personal
       share over their teammates (see Section 7 for how reaction shares
       work).
-    - DPS Timeline (Bar Chart): Shows per-second damage output across the
-      entire duration of the trial. This is especially useful for
-      identifying your burst spikes and timing your team's highest DPS
-      windows to coincide with boss vulnerability or down phases.
+    - Damage Rate Throughout Timeline (Smoothed Curve): Shows how fast damage
+      was landing at each moment of the trial. Section 6.3 explains how to
+      read it.
 
-6.3 The Rotation Timeline table
+6.3 The Damage Rate Throughout Timeline chart
+  This chart shows how fast damage was landing at each moment of the trial,
+  in DMG/s. It is not a per-second total: every damaging hit is replaced by a
+  short bell curve (Gaussian smoothing) and the bells are added together, so a
+  burst reads as one smooth peak instead of a block one second wide.
+
+  Two settings shape the curve:
+    - Deviation (sigma, 0.70 s): how wide each bell is. A smaller value leaves
+      sharper, more individual spikes; a larger value rolls the curve into a
+      smoother average. This is what decides how smooth the chart looks.
+    - Truncation (2.20 s): how far from a hit its bell is still counted. It only
+      needs to be at least half the largest gap between two hits (0.62 s in a
+      typical 6x rotation trial) so neighbouring bells overlap instead of
+      leaving a false dead zone in the curve.
+    Both values are already tuned for readability and are not exposed in the
+    interface.
+
+  Reading the peaks and dips:
+    - A peak means several hits landed close together: a burst window, a
+      multi-hit skill, or several characters' abilities overlapping. The taller
+      and wider the peak, the more damage was concentrated there.
+    - A dip means the rotation spent time without damage: a swap, a setup
+      skill, or a buff refresh. Compare where a dip falls with the Rotation
+      Timeline table (Section 6.4) to see exactly which action caused it.
+    - The dashed "Overall DPS" line is the trial's average. Anything above it is
+      a burst phase, anything below it is quiet time. Because the chart plots a
+      rate, a burst can read well above the average (about 1.6x on a typical
+      trial) without the trial dealing more damage than its total.
+
+  Accuracy: the area under the curve is the trial's total damage. A small share
+  is lost where the bell of a hit near the very start or end of the trial is cut
+  off by the trial window: the curve covers about 99.2% of the total. That share
+  is deliberately not scaled back up, because propping it up would invent damage
+  at the trial's edges.
+
+6.4 The Rotation Timeline table
   The timeline table provides a complete, chronological log of every event
   in the trial. At present, events consist of character swaps and damage
   instances. (Buff activations and stack gains aren't listed as standalone
@@ -276,7 +311,7 @@ files.
     is pinned, so the row's action stays visible while you scroll sideways
     through the buff columns.
 
-6.4 Detailed timeline column blocks
+6.5 Detailed timeline column blocks
   To make the damage math as clear as possible, the detailed table is
   organized into several main blocks:
 

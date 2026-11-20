@@ -3556,6 +3556,67 @@ def _run_trial_duration_check() -> dict:
     }
 
 
+def _run_dps_curve_check() -> dict:
+    """Gaussian-smoothed DPS curve (dps_curve.py): shape and conservation.
+
+    The curve is a RATE, so its area is damage: it can never exceed the trial's
+    total and only loses the tails clipped at the trial's first/last seconds.
+    Pinned here on one synthetic hit (closed-form peak) and on a preset trial
+    (conservation band + the diagnostics the chart caption prints).
+    """
+    import numpy as np
+
+    import dps_curve
+
+    out = {}
+
+    # 1. One isolated hit: peak = damage / (sigma * sqrt(2*pi)), area = damage.
+    dt = 0.05
+    _, curve = dps_curve.gaussian_dps([5.0], [100_000.0], sigma=0.2,
+                                      truncation=1.5, dt=dt, duration=10.0)
+    peak_expected = 100_000.0 / (0.2 * np.sqrt(2.0 * np.pi))
+    out["single_peak"] = abs(curve.max() / peak_expected - 1.0) < 0.01
+    out["single_area"] = abs(curve.sum() * dt - 100_000.0) <= 1e-6 * 100_000.0
+    out["single_bounds"] = bool(np.isfinite(curve).all() and curve.min() >= 0.0)
+
+    # 2. A hit at t=0 keeps its full peak but only its visible (right) half of
+    #    the area: clipped tails are NOT propped back up, otherwise the trial's
+    #    last hit would become a fake edge spike bigger than the real burst.
+    _, edge_curve = dps_curve.gaussian_dps([0.0], [100_000.0], sigma=0.2,
+                                           truncation=1.5, dt=dt, duration=10.0)
+    out["edge_peak"] = abs(edge_curve.max() / peak_expected - 1.0) < 0.01
+    # ~55 % of the bell is visible (the sample exactly at t=0 counts), never 100 %.
+    out["edge_fraction"] = edge_curve.sum() * dt / 100_000.0
+    out["edge_clipped"] = 0.4 <= out["edge_fraction"] <= 0.6
+
+    # 3. A preset trial: the curve area stays inside the conservation band, and
+    #    the auto truncation keeps every window pair overlapping.
+    timeline = RotationTimeline(party=presets.DEFAULT_PARTY)
+    duration = timeline.add_trial(
+        presets.STANDARD_TRIALS["Mizuki Sac Frag Pull out 6x rotations"])
+    timeline.evaluate_timeline()
+    analytics = timeline.get_analytics_summary(duration)
+    times, damages = dps_curve.hit_series(timeline.global_events)
+    params = dps_curve.auto_params(times, duration)
+    _, curve = dps_curve.gaussian_dps(
+        times, damages, sigma=params["sigma"], truncation=params["truncation"],
+        dt=params["dt"], duration=duration)
+
+    total = float(analytics["total_damage"])
+    out["hits"] = int(times.size)
+    out["total"] = total
+    out["sigma"] = params["sigma"]
+    out["gap_max"] = round(params["gaps"]["max"], 3)
+    out["peak"] = round(float(curve.max()))
+    out["area_pct"] = 100.0 * float(curve.sum() * params["dt"]) / total
+    # The visible area can never exceed the damage dealt, and the only loss is the
+    # tail clipped at both ends (~0.8% on the preset trials).
+    out["area_ok"] = 99.0 <= out["area_pct"] <= 100.0
+    out["curve_bounds"] = bool(np.isfinite(curve).all() and curve.min() >= 0.0)
+    out["overlap_ok"] = params["truncation"] >= params["gaps"]["max"] / 2.0
+    return out
+
+
 def run(verbose: bool = True) -> None:
     party = presets.DEFAULT_PARTY
     trial = presets.TEST_TRIAL_30S
@@ -4918,6 +4979,31 @@ def run(verbose: bool = True) -> None:
     if not save_failures and verbose:
         print(f"[OK] save/load round-trip: gear + enemy + trial restored "
               f"({save['size']} byte document), loaded builds stay editable")
+
+
+    # 2r. Gaussian-smoothed DPS curve (the results-tab chart).
+    dps = _run_dps_curve_check()
+    dps_checks = [
+        (dps["single_peak"],
+         "one isolated hit does not peak at damage/(sigma*sqrt(2*pi))"),
+        (dps["single_area"], "one isolated hit does not conserve its damage (area)"),
+        (dps["single_bounds"], "a single-hit curve is not finite/non-negative"),
+        (dps["edge_peak"], "a hit at t=0 loses its peak to the grid edge"),
+        (dps["edge_clipped"],
+         f"a hit at t=0 keeps {100 * dps['edge_fraction']:.0f}% of its area "
+         f"(should be roughly half, never inflated)"),
+        (dps["area_ok"],
+         f"the preset trial curve area is {dps['area_pct']:.2f}% of total_damage"),
+        (dps["curve_bounds"], "the preset trial curve is not finite/non-negative"),
+        (dps["overlap_ok"],
+         "auto truncation < max hit gap / 2 (neighbouring windows would not overlap)"),
+    ]
+    dps_failures = [msg for ok, msg in dps_checks if not ok]
+    failures.extend(dps_failures)
+    if not dps_failures and verbose:
+        print(f"[OK] DPS curve: {dps['hits']} hits, area = {dps['area_pct']:.1f}% of "
+              f"total damage ({dps['total']:,.0f}), peak {dps['peak']:,} DMG/s at "
+              f"sigma {dps['sigma']:.2f}, max hit gap {dps['gap_max']:.2f}s")
 
     if failures:
         print("\nSMOKE TEST FAILED:")
