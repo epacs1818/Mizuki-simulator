@@ -1,1 +1,37 @@
+# --- Python bytecode & caches (regenerated on every run) ---
 __pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyright/
+.ipynb_checkpoints/
+
+# --- Virtual environments ---
+.venv/
+venv/
+env/
+ENV/
+.conda/
+
+# --- Packaging / build artifacts ---
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# --- Streamlit: never commit secrets; config.toml stays tracked ---
+.streamlit/secrets.toml
+.env
+
+# --- OS / editor junk ---
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+
+# --- Logs / scratch ---
+*.log
+*.tmp
