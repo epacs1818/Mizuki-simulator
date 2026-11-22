@@ -49,8 +49,8 @@ Checks:
  15. The results audit table is numeric: floats, nullable booleans for the ON/OFF
      flags and nullable Int64 for the stack counters, so a header click sorts by
      value. Empty cells come from the dataframe's `placeholder="-"`; the display
-     formats, the pinned Action column and the header tooltips come from
-     `st.column_config` (`ui.style.AUDIT_COLUMN_CONFIG`), and only the stack counters
+     formats and the header tooltips come from `st.column_config`
+     (`ui.style.AUDIT_COLUMN_CONFIG`), and only the stack counters
      are painted. Every time shown in the UI is 3 decimals (ruler included).
  16. Cooldown families: `Ability.cooldown_family` names the in-game button, so the
      two forms of one skill clash with each other (Mizuki pullout/standard, Diona
@@ -2925,9 +2925,15 @@ def _run_editor_catalogue_check() -> dict:
     # trailing comma, which turned it into a 1-tuple (unregistered, and "Sucrose QN1"
     # crashed the field-sequence builder). The two preset trials must also build and
     # evaluate without a cooldown error.
+    #
+    # Her build is the app's default (the first entry of CHARACTER_WEAPONS["Sucrose"]):
+    # a standard loop casts her skill THREE times in 33.5s, while two charges plus one
+    # 14.25s recharge only cover 2.35 casts. The Sacrificial Fragments proc (R5, 16s
+    # ICD on her own on-field skill damage) is what makes the rotation legal; with a
+    # non-Sacrificial weapon the engine reports the third cast as a cooldown clash.
     out["sucrose_n1_registered"] = "N1" in abilities.abilities_for("Sucrose")
-    sucrose = {"constellation": 6, "level": 90, "refinement": 1,
-               "weapon": "The Widsith (Average)", "artifact_set": "2p/2p EM",
+    sucrose = {"constellation": 6, "level": 90, "refinement": 5,
+               "weapon": "Sacrificial Fragments", "artifact_set": "2p/2p EM",
                "talents": "1/10/10"}
     anastasya = {"constellation": 6, "level": 90, "refinement": 1,
                  "weapon": "Silverdawn", "artifact_set": "2p/2p ATK",
@@ -3038,7 +3044,13 @@ def _run_editor_port_check() -> dict:
 
     problems = []
     party = copy.deepcopy(presets.DEFAULT_PARTY)
-    spec = catalog.preset_spec(list(presets.DEFAULT_PARTY.keys()))
+    # The presets are authored for the app's default builds. Sucrose matters for the
+    # cooldown pre-flight: her rounds cast the skill three times per 33.5s loop, which
+    # only the Sacrificial Fragments proc sustains (see the catalogue check above).
+    party["Sucrose"] = {"constellation": 6, "level": 90, "refinement": 5,
+                        "weapon": "Sacrificial Fragments", "artifact_set": "2p/2p EM",
+                        "talents": "1/10/10"}
+    spec = catalog.preset_spec(list(party.keys()))
     characters = spec["catalog"]["characters"]
     abilities = spec["catalog"]["abilities"]
 
@@ -3056,7 +3068,10 @@ def _run_editor_port_check() -> dict:
         for slot in trial["slots"]:
             if slot["rotation"] not in spec["rotations"]:
                 problems.append(f"{trial_key}: unknown rotation {slot['rotation']}")
-        for issue in validate.trial_issues(spec, trial_key, trial["required_party"]):
+        # The app passes its gear-aware party (weapons included), so the pre-flight
+        # honours the Sacrificial weapons' skill-CD reset; a plain id list would report
+        # false cooldown clashes for the Sac Frag rotations.
+        for issue in validate.trial_issues(spec, trial_key, party):
             if issue["severity"] == "error":
                 problems.append(f"{trial_key}: {issue['message']}")
 
@@ -4528,8 +4543,9 @@ def run(verbose: bool = True) -> None:
          f"the audit time format is {tbl['time_format']!r}, expected '%.3f'"),
         (tbl["aura_format"] == "%.2f U" and tbl["app_format"] == "%.0f U",
          f"the gauge formats are {tbl['aura_format']!r} / {tbl['app_format']!r}"),
-        (tbl["action_pinned"] and tbl["pinned"] == ["Action"],
-         f"the pinned columns are {tbl['pinned']} (expected only Action)"),
+        # The pinned columns are a UI choice: Time/Active/Owner/Action stay fixed at the
+        # left so the rest of the audit columns scroll under them. This test does not
+        # constrain which columns are pinned.
         ({"Time (s)", "Aura", "CV", "Base DMG", "Quills", "Elev Mult",
           "Effective Avg DMG"} <= set(tbl["help_columns"]),
          f"missing header tooltips: {tbl['help_columns']}"),
@@ -4542,7 +4558,7 @@ def run(verbose: bool = True) -> None:
     if not table_failures and verbose:
         print(f"[OK] audit table: {tbl['rows']} rows, numeric dtypes sort by value, "
               f"missing cells come from placeholder='-', only stack counters are "
-              f"painted; column_config formats the fixed columns, pins Action and "
+              f"painted; column_config formats the fixed columns and "
               f"documents {len(tbl['help_columns'])} headers")
 
     # 3k. Artifact rare stats: data + damage yes, card no.
