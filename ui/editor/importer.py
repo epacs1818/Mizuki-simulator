@@ -21,10 +21,6 @@ from ui.editor import catalog, mutations
 EPS = 1e-6
 
 
-def _first_delay(ability) -> float:
-    return min((hit.relative_delay for hit in (ability.hits or ())), default=0.0)
-
-
 def _ability_owner(ability, sequence) -> str:
     return getattr(ability, "character", sequence.character) or sequence.character
 
@@ -34,15 +30,15 @@ def _sequence_signature(sequence) -> tuple:
     calls = []
     for call in sequence.calls:
         ability = call.ability
-        calls.append((catalog.ability_id(_ability_owner(ability, sequence), ability.name),
-                      round(float(call.start_time) + _first_delay(ability), 6)))
+        aid = catalog.ability_id(_ability_owner(ability, sequence), ability.name)
+        calls.append((aid, round(float(call.start_time), 6)))
     return (sequence.name, catalog.character_id(sequence.character),
             round(float(sequence.swap_out_time), 6), tuple(calls))
 
 
 def _payload_sequence_signature(payload: dict) -> tuple:
     return (payload["name"], payload["character"], round(float(payload["field_time"]), 6),
-            tuple((placement["ability"], round(float(placement["first_hit"]), 6))
+            tuple((placement["ability"], round(float(placement["cast_time"]), 6))
                   for placement in payload["placements"]))
 
 
@@ -65,7 +61,7 @@ def _import_sequence(spec: dict, sequence) -> str:
             raise ValueError("%s uses %s, which the editor's catalogue does not have."
                              % (sequence.name, ability.name))
         placements.append({"ability": ability_id,
-                           "first_hit": round(float(call.start_time) + _first_delay(ability), 6)})
+                           "cast_time": round(float(call.start_time), 6)})
 
     sequence_id = mutations.unique_id(spec["field_seqs"],
                                       catalog.sequence_id(sequence.character, sequence.name))

@@ -8,6 +8,26 @@ needs a manual pass.
 Legend: ✔ = verified (the `New test` set or an automated engine check) | ◻ = implemented
 but not yet verified
 
+## 2026-11 revision
+
+* Ability calls are hidden `CAST` events (`event_type="CAST"`). Every "on cast" effect
+  arms on the marker, so its first hit is included; hit-triggered effects keep the
+  pre-arm read. Sucrose A1/A4/C6 remain hit-triggered.
+* Element crit is data: `anemo_crit_dmg` (Faruzan C6) and `cryo_crit_rate`
+  (New Tsaritsa set), applied in `damage_calc` to standard and stellar damage.
+* Stellar reaction shares use each contributor's full final stats; effective damage
+  ignores RES; reaction multiplier audit columns stay null.
+* Quills: Mizuki C1's quill is shown in `Quills`; reactions add it post-share with the
+  owner's elevation. Faruzan/VBTD quills remain.
+* Columns removed: Mizuki C1 Debuff, Odette C2 Shred (inside Shadow), Anastasya A4
+  Jubilee, Anastasya Triumph; header help added to all registry entries.
+* Odette Marvelous: full at cast; decay anchors on the first swap-out, re-entry does not
+  refill; a new cast does.
+* Aether charged: +2 Frostglow on cast (N1 NORMAL, C1/C2 CHARGED); cap 8, consumed by
+  the burst.
+* Constellation stat gates moved into `FLAG_TO_BUFFS` (Aether C2/C6, Faruzan C6,
+  Mizuki C6).
+
 ## Characters
 
 | Character | Element | Constellations offered | Status | Notes |
@@ -15,7 +35,7 @@ but not yet verified
 | Mizuki | Anemo | C0-C6 | ✔ | C2 verified (shred + flat-EM PHEC bonus); C6 verified (party stellar crit + flat-EM crit). Her skill is ONE ability per in-game FORM (`[Pullout]` / `[Standard]`), cut by her own swap-out - the field-sequence window decides the tick count |
 | Aether | Cryo | C4-C6 | ✔ | C6 verified (Frostglow / Aether C6 stellar) |
 | Odette | Cryo | C0-C6 | ✔ | C1 extra stellar proc (+4.500 MV @0.010s) and 6-stack/2-per-second Marvelous; C2 shred + 7% ATK per stack; C4 SSD shares 50% with the OTHERS and adds a 0.990 MV stellar proc (3.5s trigger CD); C6 party elevation 0.25 / self 0.45 and she keeps her stacks off-field. C3/C5 only change talent levels (user-entered) |
-| Anastasya | Cryo | C0-C6 | ✔ | Burst party stellar_bonus (**0.354 @ B13**, 20s — nerfed from 0.575), **Accolades** (12% crit DMG for the whole party, 20s, inclusive on the skill Cast hit; once sealed the OTHERS get her share → 16% and she gets 0 at C0; C1 → 48%/36% + 60%/240 ATK/EM, C4 → 68.8%/51.6% + 86%/344), A4 reaction-only jubilee (+0.10) + Lv2 vortices, Jubilee passive, **Triumph** (15s after the seal, on her next swap-in, hit delay 0.010), conditional extra stellar beat, **C2 Love** (0.50 stellar CD for 30s + permanent 0.05 elevation), **C6** (Love +0.10 elevation, C6 Triumph 2.0x MV on every ally swap-in, 15s per-character CD) |
+| Anastasya | Cryo | C0-C6 | ✔ | Burst party stellar_bonus (**0.354 @ B13**, 20s — nerfed from 0.575), **Accolades** (12% crit DMG for the whole party, 20s, inclusive on the skill cast; once sealed the OTHERS get her share → 16% and she gets 0 at C0; C1 → 48%/36% + 60%/240 ATK/EM, C4 → 68.8%/51.6% + 86%/344), A4 reaction-only jubilee (+0.10) + Lv2 vortices, Jubilee passive, **Triumph** (15s after the seal, on her next swap-in, hit delay 0.010), conditional extra stellar beat, **C2 Love** (0.50 stellar CD for 30s + permanent 0.05 elevation), **C6** (Love +0.10 elevation, C6 Triumph 2.0x MV on every ally swap-in, 15s per-character CD) |
 | Faruzan | Anemo | C6 | ✔ | C6 CD buff + Anemo shred verified; her Skill Cast and the triggered Pressurized Collapse are separate abilities (collapse delay + 3.0s CD live in abilities.py) |
 | Sucrose | Anemo | C0-C6 | ✔ | A1/A4/C6 verified (scope, magnitude and window) |
 | Diona | Cryo | C6 | ✔ | Choice Treasures (20s state from either skill hit) → Icy Paw volley 0.270s after ANY Stellar Swirl (3.5s CD from the trigger); C6 burst-cast buff (+200 EM / +0.40 stellar) on the ACTIVE character for the whole burst (11.75s) |
@@ -74,10 +94,10 @@ present in the party.
 | Label | Group | Owner | Requirement | Status |
 | --- | --- | --- | --- | --- |
 | Mizuki DDS | Character | Mizuki | always | ✔ |
-| Mizuki A4 EM | Character | Mizuki | always | ✔ |
-| Mizuki VBTD EM | Character | Mizuki | always | ✔ |
-| Mizuki C1 Shred | Character | Mizuki | C1+ | ✔ |
-| Faruzan C6 CD (Anemo) | Character | Faruzan | C6 | ✔ |
+| Mizuki A4 | Character | Mizuki | always | ✔ |
+| Mizuki VBTD Quill | Character | Mizuki | always | ✔ |
+| Mizuki C1 Debuff | Character | Mizuki | C1+ | ✔ |
+| Faruzan C6 Buff | Character | Faruzan | C6 | ✔ |
 | Faruzan C6 Anemo Shred | Character | Faruzan | C6 | ✔ |
 | Aether C2 EM | Character | Aether | C2+ | ✔ |
 | Aether C2 EM (Amp) | Character | Aether | C2+ | ✔ |
@@ -86,7 +106,7 @@ present in the party.
 | Odette Marvelous | Character | Odette | always | ✔ |
 | Odette Shadow | Character | Odette | always | ✔ |
 | Odette SSD | Character | Odette | always | ✔ (shared at 50% with the OTHERS from C4) |
-| Odette C2 Shred | Character | Odette | C2+ | ✔ |
+| Odette C2 (inside Shadow) | Character | Odette | C2+ | ✔ |
 | Sucrose A1 EM | Character | Sucrose | always | ✔ |
 | Sucrose A4 EM | Character | Sucrose | always | ✔ |
 | Sucrose C6 Cryo DMG | Character | Sucrose | C6 | ✔ |
@@ -148,7 +168,7 @@ generically, so a set may grant any key it wants:
 | `em` | — | ✓ (EM bonus) | ✓ |
 | `<element>_shred` | ✓ (RES) | ✓ (RES) | ✓ (RES) |
 | `jubilee_mult` | ✗ | ✓ | ✓ |
-| `elevation_mult` | ✗ | ✓ | ✗ |
+| `elevation_mult` | ✗ | ✓ | ✓ (per contributor) |
 | `atk/hp/def_*`, `er` | ✓ | ✓ (MV base) | ✗ |
 
 Rare/extra stats are **kept in the backend**: they live in the character's
@@ -237,8 +257,8 @@ Her whole constellation set hangs off two timeline states:
 * **`odette_ssd_state`** — Snow Swan's Dream, cast by the BURST only, its own 20s
   `ODETTE_SSD_WINDOW` (independent of the shadow).
 
-Both are **inclusive on the cast hit** (unlike most windows in this engine): the first
-hit already has the shred / elevation / SSD it started.
+Both are **inclusive on the cast** (the hidden CAST marker runs before the first hit):
+the cast's first hit already has the shred / elevation / SSD it started.
 
 | Cons | Effect | Where |
 | --- | --- | --- |
@@ -285,6 +305,8 @@ no window (`always_on`, C2+). At C6 Love also gives another `0.10 elevation_mult
 (total 0.15) and unlocks the **C6 Triumph**: every OTHER character's swap-in while
 Love is up fires `anastasya_c6_triumph` (2.0× the talent-scaled Triumph MV —
 668 vs 334 base — credited to her, 15s per-character CD, so up to 2 per Love window).
+The elevation is the same key Odette's C6 uses, so it applies to stellar DMG **and**
+to each contributor's share of a stellar reaction (swirl / vortex explosion).
 
 ## Calibration baseline (after the Anastasya nerf round)
 
@@ -479,7 +501,7 @@ presets chain them 0.51 s apart.
 | --- | --- | --- | --- | --- |
 | Mizuki VBTD nuke | `mizuki_nuke_hit` (bare Hit, 1000% EM) | her next skill tick while DDS is up (armed by her own swirl, 2.5s prep CD) | **0.500** | - |
 | Mizuki C1 mini nuke | `mizuki_c1_mini_nuke_hit` (bare Hit, 400% EM) | a Stellar Swirl while her C1 shred is up | **0.000** | - |
-| Faruzan Pressurized Collapse | `faruzan_pressurized_collapse` (Ability, 108% skill) | her burst cast hit, or ANY hit while her C6 buff window is up | **0.720** | 3.0s **from the trigger** |
+| Faruzan Pressurized Collapse | `faruzan_pressurized_collapse` (Ability, 108% skill) | her burst cast, or ANY hit while her C6 buff window is up | **0.720** | 3.0s **from the trigger** |
 | Diona Icy Paws | `diona_choice_treasures` (Ability, 3 x 41.92% skill) | ANY character's Stellar Swirl while her Choice Treasures state (20s) is up | **0.270 / 0.360 / 0.360** | 3.5s **from the trigger** |
 | Anastasya extra stellar | `anastasya_extra_stellar` (Ability, 16.8% burst) | her Palestar Crown Stellar beat while her burst window is up | **0.010** | - |
 | Anastasya Triumph | `anastasya_triumph` (Ability, 334% burst) | her swap-in (trigger = SWAP_IN), armed by the SEAL (burst + swap-out) | **0.010**, on the swap-in that is ≥ `ANASTASYA_UNSEAL_DELAY` (15s) after the seal | once per seal |
@@ -499,14 +521,14 @@ two entries, like Faruzan's `Skill Cast` (active) and `Pressurized Collapse` (tr
   (3 Cryo hits, only tick 1 applies `1U`), 0.270s after the trigger, 3.5s CD from the
   trigger. The volley rows are inserted in chronological order (they are not the first
   injected rows of that event).
-* C6: her burst cast hit gives the ACTIVE character `em: 200` + `stellar_bonus: 0.40`
+* C6: her burst cast gives the ACTIVE character `em: 200` + `stellar_bonus: 0.40`
   (`buffs.CONDITIONAL_CONSTANT_BUFFS["Diona C6"]`, flag `diona_c6_state`,
   `FLAG_TO_BUFFS` descriptor with `target: "Active"` and `min_constellation: 6`).
-  Window = **11.75s from the cast hit** (`DIONA_C6_WINDOW`), i.e. the whole burst: the
-  last burst tick at +11.73 is still buffed. The cast hit itself is INCLUDED - the one
+  Window = **11.75s from the cast** (`DIONA_C6_WINDOW`), i.e. the whole burst: the
+  last burst tick at +11.73 is still buffed. The burst's first hit is INCLUDED - the one
   deliberate exception to the "read pre-arm" rule: arm first, resolve the flag after.
 * `diona_hEQ` swap-out time 3.071 -> **3.100**: her burst is cast 0.029s before leaving,
-  so the cast hit is still ON FIELD (at 3.071 = swap-out it resolved with
+  so the cast (and its first hit) is still on field (at 3.071 = swap-out it resolved with
   `active_character = None`, which dropped her own C6 buff and Faruzan's quill on it).
 * `Diona C6`'s permanent `hp_percent: 0.25` stays unconditional (the UI only offers C6;
   gating it would move every Diona number).
@@ -546,7 +568,7 @@ skill talent CD 0" workaround: the passive is modelled.
   the hit that caused it: `Action` = "Sac Frag proc" / "Sac Bow proc", `Owner` and
   `Active` = the holder, no damage fields and no buff column (the passive changes
   cooldowns, not stats).
-* **Every skill hit counts, not only the cast hit**: a long pull-out that keeps
+* **Every skill hit counts, not only the first hit**: a long pull-out that keeps
   ticking past the weapon's ICD consumes the proc on a late tick. The next rotation's
   cast then has no reset available and the engine reports the cooldown clash - the
   "the tail stole my Sac proc" error. The smoke test pins it (procs at 0.301 and
@@ -704,4 +726,24 @@ decides how many ticks land.
   anywhere in `ui/`.
 
 
+
+## Ability hit timings (advanced editor)
+
+* The Field sequence screen shows one long-format `st.data_editor` per character:
+  `Ability` / `Hit` / `Timing (s)`. Only `Timing (s)` is editable; the hit names
+  are the shipped ones, and the ability name repeats on each row (a data editor
+  cannot merge cells).
+* A placement stores the **cast/press** time; the first hit lands at
+  `cast + first timing`. Timings are delays from the cast and must be
+  non-decreasing. The strip band starts at the cast. The placement control is
+  "Cast time (s)".
+* Overrides live in the editor spec (`ability_timings`) and are applied to COPIES
+  of the `Ability` objects in `abilities.py`; the shared registry and every preset
+  stay pristine. `smoke_test._run_ability_timing_check` pins the override, the
+  engine result, the strip band and Reset, and asserts the registry did not move.
+* The table is a draft: `Apply changes` commits it, `Reset timings` restores the
+  shipped values and `Undo` restores the last snapshot. Unapplied edits are lost
+  when the character changes.
+* Build documents store `ability_timings` (schema 1.1); imported custom sequences
+  re-apply them to deep copies, so a saved timing experiment survives a reload.
 

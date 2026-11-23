@@ -1,10 +1,13 @@
 """Editor session state: one spec per session, seeded from the presets.
 
-No undo stack on purpose - every mutation is a single small change the user just
-made, and the strips redraw on the same rerun.
+No general undo stack on purpose - every mutation is a single small change the
+user just made, and the strips redraw on the same rerun. The ability-timing table
+is the one exception: Apply/Reset snapshot the spec so they can be undone.
 """
 
 from __future__ import annotations
+
+import copy
 
 import streamlit as st
 
@@ -14,6 +17,10 @@ from ui.state import invalidate_last_run
 
 SPEC_KEY = "trial_editor_spec"
 TRIAL_KEY = "trial_editor_trial"
+TIMINGS_KEY = "ability_timings"
+UNDO_KEY = "timing_undo"
+TIMING_REV_KEY = "timing_rev"
+MAX_UNDO = 20
 
 
 def current_party() -> dict:
@@ -29,14 +36,56 @@ def current_enemy() -> dict:
 
 def spec() -> dict:
     """The session spec, seeded from the presets on first use."""
-    if SPEC_KEY not in st.session_state:
-        st.session_state[SPEC_KEY] = catalog.preset_spec(list(current_party().keys()))
+    document = st.session_state.get(SPEC_KEY)
+    if document is None or document.get("catalog_version") != catalog.CATALOG_VERSION:
+        timings = st.session_state.get(TIMINGS_KEY) or {}
+        st.session_state[SPEC_KEY] = catalog.preset_spec(
+            list(current_party().keys()), timings)
+        clear_timing_state()
     return st.session_state[SPEC_KEY]
 
 
 def reset() -> None:
     """Throw the session spec away; the next spec() call re-seeds it."""
     st.session_state.pop(SPEC_KEY, None)
+    st.session_state.pop(TIMINGS_KEY, None)
+    clear_timing_state()
+
+
+def timing_snapshot(spec: dict) -> dict:
+    """The parts a timing edit can change, copied for Undo."""
+    return {"ability_timings": copy.deepcopy(spec.get("ability_timings") or {}),
+            "catalog_abilities": copy.deepcopy(spec["catalog"]["abilities"])}
+
+
+def push_timing_undo(snapshot: dict) -> None:
+    stack = st.session_state.setdefault(UNDO_KEY, [])
+    stack.append(snapshot)
+    del stack[:-MAX_UNDO]
+
+
+def pop_timing_undo():
+    stack = st.session_state.get(UNDO_KEY) or []
+    return stack.pop() if stack else None
+
+
+def restore_timing_undo(spec: dict, snapshot: dict) -> None:
+    spec["ability_timings"] = snapshot["ability_timings"]
+    spec["catalog"]["abilities"] = snapshot["catalog_abilities"]
+
+
+def bump_timing_revision() -> None:
+    """Give the timing table a new widget identity so it re-seeds from the spec."""
+    st.session_state[TIMING_REV_KEY] = st.session_state.get(TIMING_REV_KEY, 0) + 1
+
+
+def clear_timing_state() -> None:
+    """Drop the timing drafts and the undo stack (the spec is the source)."""
+    st.session_state.pop(UNDO_KEY, None)
+    bump_timing_revision()
+    for key in [key for key in st.session_state
+                if isinstance(key, str) and key.startswith("ed_hits_")]:
+        st.session_state.pop(key, None)
 
 
 def active_trial(spec_doc: dict | None = None) -> str:

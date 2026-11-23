@@ -9,6 +9,7 @@ from enum import Enum
 
 class ActionCategory(Enum):
     SWAP = "Swap"
+    CAST = "Cast"
     STANDARD_DMG = "Standard DMG"
     STELLAR_DMG = "Stellar DMG"
     STELLAR_REACTION = "Stellar Reaction"
@@ -65,6 +66,9 @@ class Ability:
     # seconds, and the recharge timer is started by the FIRST spend (later spends
     # do not push it back).
     ability_max_charges: int = 1
+    # Frostglow gained when this ability is CAST (Aether's charged attack: 2).
+    # The Elemental Skill ticks keep their own +1 rule in the timeline.
+    frostglow_on_cast: int = 0
 
     @property
     def cooldown_key(self) -> tuple:

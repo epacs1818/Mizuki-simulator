@@ -7,7 +7,14 @@ positioned items, a cursor and a zoom. Nothing here touches the engine.
 from __future__ import annotations
 
 from models import interrupted_hit_count
+import buff_registry
 from ui.editor import engine
+
+
+# Buff lanes are colour-coded by what grants them, so a strip of several windows
+# stays readable at a glance: weapons gold, artifact sets green, team auras blue.
+BUFF_COLOURS = {"Weapon": "#b99349", "Artifact": "#4f9d7a", "Team": "#6f8fc4"}
+_BUFF_COLOUR_FALLBACK = "#9aa4b2"
 
 
 def _stagger(items: list) -> list:
@@ -43,12 +50,27 @@ def _row_ids(blocks: list, hits: list) -> list:
     return order
 
 
+def _strip_hits(hits: list) -> list:
+    """The ticks a strip draws: reaction results stay out of the building view.
+
+    A Stellar Swirl / Vortex explosion is what the rotation *produces*, not part
+    of building it: it lands on whichever lane happened to own the trigger and
+    doubles the tick count the author is reading. The engine's rows keep them, so
+    the totals, the rotation log and the results table are unchanged - only the
+    strips drop them.
+    """
+    return [hit for hit in hits if not hit.get("reaction")]
+
+
 def _hit_items(spec: dict, hits: list, selected=None) -> list:
     """One tick per hit. ``off`` dims a hit whose owner was not on field.
 
     That flag is a paint cue only, straight from the engine's ``on_field``: the
     strip dims a hit that resolved from the backline (an ability tail after the
     swap, a trigger fired by someone else). No number is derived from it.
+
+    Callers pass the authored hits only (``_strip_hits``): Stellar reaction rows
+    are not drawn.
     """
     chars = spec["catalog"]["characters"]
     items = []
@@ -70,11 +92,86 @@ def _hit_items(spec: dict, hits: list, selected=None) -> list:
     return items
 
 
-def trial_payload(spec: dict, trial_id: str, result: dict, *, selected=None,
+def _buff_windows(events: list, key: str) -> list:
+    """[(start, end), ...] - one window per contiguous run of ON samples.
+
+    The engine writes every audit flag on EVERY event ("ON"/"OFF"), so a run is
+    dense: its bounds are the first and the last event that saw the buff up. A
+    window therefore ends where the rotation provably stopped enjoying it - the
+    strip draws the sampled uptime, not the theoretical expiry it cannot know.
+    """
+    windows: list = []
+    start = last = None
+    for event in events:
+        when = float(event.get("global_time") or 0.0)
+        if buff_registry.buff_is_active(event.get(key)):
+            if start is None:
+                start = when
+            last = when
+        elif start is not None:
+            windows.append((start, last))
+            start = last = None
+    if start is not None:
+        windows.append((start, last))
+    return windows
+
+
+def _buff_lane_items(result: dict, party, duration: float) -> tuple:
+    """Buff uptime lanes, drawn under the character lanes of a trial strip.
+
+    A lane exists only when the effect is BOTH equipped (buff_registry.strip_buffs
+    applies the same gate as the audit table) AND actually triggered somewhere in
+    this trial: an empty row would just push the strips the author is reading out
+    of view. The bars carry no text - the lane label names the buff - because a
+    30s window at 14px/s is thinner than its own name.
+    """
+    events = result.get("events") or []
+    rows, items = [], []
+    for entry in buff_registry.strip_buffs(party):
+        windows = _buff_windows(events, entry["key"])
+        if not windows:
+            continue
+        row_id = "b_" + entry["key"]
+        colour = BUFF_COLOURS.get(entry["group"], _BUFF_COLOUR_FALLBACK)
+        label = entry.get("strip") or entry["label"]
+        rows.append({"id": row_id, "label": label, "kind": "buff", "color": colour})
+        for start, end in windows:
+            # Clamp to the trial: a window that runs to the end must not stretch the
+            # canvas past tMax (which would add a phantom horizontal scroll).
+            start = min(start, duration) if duration else start
+            end = min(end, duration) if duration else end
+            items.append({
+                # A seg, not a band: an 8px pill is a read-out, it has no text, no
+                # drag handle and no click handler - the lane label names the buff.
+                "kind": "seg",
+                "row": row_id,
+                "id": entry["key"],
+                "refKind": "buff",
+                "start": round(start, 6),
+                "end": round(end, 6),
+                "color": colour,
+                # .seg opacity is 0.3 + 0.2 * stacks; 1 keeps it a calm 0.5 so the
+                # character lanes stay the loudest thing on the strip.
+                "stacks": 1,
+                "title": "%s  %.3fs - %.3fs (%.3fs up)" % (
+                    entry["label"], start, end, max(0.0, end - start)),
+            })
+    return rows, items
+
+
+def trial_payload(spec: dict, trial_id: str, result: dict, *, party=None, selected=None,
                   cursor=None, px_per_sec: float = 0.0) -> dict:
-    """The whole trial: one lane per character, one band per field sequence."""
+    """The whole trial: one lane per character, one band per field sequence.
+
+    With *party* (the gear-aware party that was simulated) the strip also gets the
+    uptime lanes of the equipment / aura buffs worth watching - see
+    _buff_lane_items. Without it the payload is exactly what it used to be, which
+    is what the rotation and field-sequence strips pass.
+    """
     chars = spec["catalog"]["characters"]
-    blocks, hits = result["blocks"], result["hits"]
+    # Reaction rows stay out of the strip (see _strip_hits), and the lanes follow:
+    # a character who only ever shows up as a swirl's contributor gets no lane here.
+    blocks, hits = result["blocks"], _strip_hits(result["hits"])
     duration = result["totals"]["duration"]
 
     items = []
@@ -102,10 +199,12 @@ def trial_payload(spec: dict, trial_id: str, result: dict, *, selected=None,
             "selected": selected == ("block", block["id"]),
         })
     items.extend(_hit_items(spec, hits, selected))
+    rows = _rows(spec, _row_ids(blocks, hits))
+    buff_rows, buff_items = ([], []) if party is None else _buff_lane_items(result, party, duration)
     return {
         "tMax": max(duration, 1.0),
-        "rows": _rows(spec, _row_ids(blocks, hits)),
-        "items": _stagger(items),
+        "rows": rows + buff_rows,
+        "items": _stagger(items + buff_items),
         "cursor": cursor,
         "pxPerSec": px_per_sec,
     }
@@ -130,8 +229,8 @@ def _tail_slack(spec: dict, rotation: dict) -> float:
         end = float(sequence["field_time"])
         for placement in sequence["placements"]:
             ability = abilities.get(placement["ability"]) or {}
-            last = max((hit["offset"] for hit in ability.get("hits") or ()), default=0.0)
-            slack = max(slack, float(placement["first_hit"]) + last - end)
+            last = max((hit["delay"] for hit in ability.get("hits") or ()), default=0.0)
+            slack = max(slack, float(placement["cast_time"]) + last - end)
     return max(slack, 0.0) + 0.5
 
 
@@ -169,7 +268,7 @@ def rotation_payload(spec: dict, rotation_id: str, preview: dict, *, selected=No
     loop_time = rotation_seconds(spec, rotation_id)
     blocks = [block for block in preview["blocks"] if block["start"] < loop_time - 1e-9]
     ids = {block["id"] for block in blocks}
-    hits = [hit for hit in preview["hits"] if hit["block"] in ids]
+    hits = _strip_hits([hit for hit in preview["hits"] if hit["block"] in ids])
 
     items = []
     for block in blocks:
@@ -225,8 +324,10 @@ def field_sequence_payload(spec: dict, sequence_key: str, *, selected=None,
             continue
         row_id = "p_" + placement["id"]
         rows.append({"id": row_id, "label": ability["name"], "kind": "lane", "color": colour})
-        first = float(placement["first_hit"])
-        times = [first + float(hit["offset"]) for hit in ability["hits"]]
+        cast = float(placement["cast_time"])
+        base = float(ability.get("first_hit_delay", 0.0))
+        first = cast + base
+        times = [cast + float(hit["delay"]) for hit in ability["hits"]]
         kept = times
         if ability.get("interrupt_on_swap_out"):
             kept = times[:interrupted_hit_count(times, field_time)]
@@ -237,11 +338,11 @@ def field_sequence_payload(spec: dict, sequence_key: str, *, selected=None,
             "row": row_id,
             "id": placement["id"],
             "refKind": "placement",
-            "start": first,
+            "start": cast,
             "end": last,
             "label": ability["name"],
-            "title": "%s  first hit %.3fs, last hit %.3fs%s" % (
-                ability["name"], first, last,
+            "title": "%s  cast %.3fs, first hit %.3fs, last hit %.3fs%s" % (
+                ability["name"], cast, first, last,
                 (", interrupted by the %.3fs swap-out (%d of %d hits land)"
                  % (field_time, len(kept), len(times))) if interrupted else ""),
             "color": colour,
@@ -255,7 +356,7 @@ def field_sequence_payload(spec: dict, sequence_key: str, *, selected=None,
             "selected": selected == ("placement", placement["id"]),
         })
         for index, hit in enumerate(ability["hits"][:len(kept)]):
-            when = first + hit["offset"]
+            when = cast + float(hit["delay"])
             items.append({
                 "kind": "hit",
                 "row": row_id,

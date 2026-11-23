@@ -374,12 +374,12 @@ FLAG_TO_BUFFS = {
     # Buff (crit_dmg + talent-scaled anemo_bonus) is gated to ANEMO hits in the
     # timeline, and applies to the whole party (so off-field collapse hits get it).
     "faruzan_buff_state": [
-        {"type": "constant",     "key": "Faruzan C6 Buff",               "target": "Party", "caster": "Faruzan"},
-        {"type": "non_constant", "key": "Faruzan C6 Anemo Bonus",        "target": "Party", "caster": "Faruzan"},
+        {"type": "constant",     "key": "Faruzan C6 Buff",               "target": "Party", "caster": "Faruzan", "min_constellation": 6},
+        {"type": "non_constant", "key": "Faruzan C6 Anemo Bonus",        "target": "Party", "caster": "Faruzan", "min_constellation": 6},
     ],
     # Faruzan debuff (anemo_shred) is party-wide for the duration of the debuff window.
     "faruzan_debuff_state": [
-        {"type": "constant",     "key": "Faruzan C6 Debuff",             "target": "Party", "caster": "Faruzan"},
+        {"type": "constant",     "key": "Faruzan C6 Debuff",             "target": "Party", "caster": "Faruzan", "min_constellation": 6},
     ],
 
     # ---- Aether C2 ---------------------------------------------------------
@@ -387,10 +387,10 @@ FLAG_TO_BUFFS = {
     # C2 Enhanced (+60 EM, cumulative) arms additionally when that active
     # character deals Stellar DMG or triggers a swirl.
     "aether_c2_state": [
-        {"type": "constant",     "key": "Aether C2 Buff Initial",        "target": "Active", "caster": "Aether"},
+        {"type": "constant",     "key": "Aether C2 Buff Initial",        "target": "Active", "caster": "Aether", "min_constellation": 2},
     ],
     "aether_c2_enhanced_state": [
-        {"type": "constant",     "key": "Aether C2 Buff Enhanced",       "target": "Active", "caster": "Aether"},
+        {"type": "constant",     "key": "Aether C2 Buff Enhanced",       "target": "Active", "caster": "Aether", "min_constellation": 2},
     ],
 
     # ---- Permanent / always-on dynamic buffs -------------------------------
@@ -434,6 +434,7 @@ FLAG_TO_BUFFS = {
         {"type": "non_constant", "key": "Mizuki Skill",                  "target": "Party",  "caster": "Mizuki"},
         {"type": "non_constant", "key": "Mizuki VBTD EM Share",          "target": "Party",  "caster": "Mizuki"},
         {"type": "constant",     "key": "Mizuki C2",                     "target": "Party",  "caster": "Mizuki", "min_constellation": 2},
+        {"type": "constant",     "key": "Mizuki C6 Stellar Crit",        "target": "Party",  "caster": "Mizuki", "min_constellation": 6},
         {"type": "non_constant", "key": "Mizuki C2 Pyro",                "target": "Party",  "caster": "Mizuki", "min_constellation": 2},
         {"type": "non_constant", "key": "Mizuki C2 Hydro",               "target": "Party",  "caster": "Mizuki", "min_constellation": 2},
         {"type": "non_constant", "key": "Mizuki C2 Cryo",                "target": "Party",  "caster": "Mizuki", "min_constellation": 2},
@@ -619,7 +620,7 @@ FLAG_TO_BUFFS = {
     # Aether C6 is a timed (15s) stack buff: each Frostglow stack consumed by
     # Burst adds +5% party stellar_bonus (0.05/stack via STACK_BUFFS).
     "aether_c6_state": [
-        {"type": "stack",        "key": "Aether C6",                        "target": "Party",  "caster": "Aether", "stack_flag": "aether_c6_stacks"},
+        {"type": "stack",        "key": "Aether C6",                        "target": "Party",  "caster": "Aether", "min_constellation": 6, "stack_flag": "aether_c6_stacks"},
     ],
     # ---- Odette shadow (single source of truth for the shadow-gated effects) --
     # C2 shred and C6 elevation share the exact same "shadow on field" condition,
@@ -892,13 +893,6 @@ def resolve_active_buffs(
     # Retrieve Mizuki party info for constellation & talent checks
     mizuki_data = party.get("Mizuki", {})
     mizuki_constellation = mizuki_data.get("constellation", 0)
-
-    # C6 Part 1: while she is in Dreamdrifter state, every party member's
-    # STELLAR damage and STELLAR reaction damage gets bonus crit (resolved as
-    # dedicated stellar_crit_rate / stellar_crit_dmg stats, consumed in damage_calc).
-    if event_flags.get("dreamdrifter_state") == "ON" and mizuki_constellation >= 6:
-        add("stellar_crit_rate", 0.10)
-        add("stellar_crit_dmg", 0.20)
 
     # Every talent-scaled effect declares its path in buffs.py and is resolved by
     # get_talent_value() through evaluate_dynamic_buff().

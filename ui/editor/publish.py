@@ -21,10 +21,6 @@ SEQUENCES_KEY = "custom_field_sequences"
 PENDING_SELECTION = "_pending_trial_selection"
 
 
-def _first_delay(ability) -> float:
-    return min((h.relative_delay for h in (ability.hits or ())), default=0.0)
-
-
 def _sequence(spec: dict, sequence_id: str, abilities: dict) -> FieldSequence:
     payload = spec["field_seqs"].get(sequence_id)
     if payload is None:
@@ -36,7 +32,7 @@ def _sequence(spec: dict, sequence_id: str, abilities: dict) -> FieldSequence:
         if ability is None:
             raise ValueError("%s places an ability that is not in the catalogue."
                              % payload["name"])
-        sequence.add_ability(float(placement["first_hit"]) - _first_delay(ability), ability)
+        sequence.add_ability(float(placement["cast_time"]), ability)
     return sequence
 
 
@@ -52,7 +48,7 @@ def build(spec: dict, trial_id: str):
     if not payload["slots"]:
         raise ValueError("Add at least one rotation before creating the trial.")
     characters = spec["catalog"]["characters"]
-    abilities = engine.ability_map()
+    abilities = engine.ability_map(spec)
     sequences: dict = {}
     pool_rotations: list = []
     played: list = []

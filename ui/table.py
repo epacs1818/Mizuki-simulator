@@ -94,6 +94,9 @@ def build_timeline_dataframe(timeline_events, party=None):
 
     rows = []
     for event in timeline_events:
+        # CAST markers are internal triggers, never table rows.
+        if event.get("event_type") == "CAST":
+            continue
         row = {}
         row["Time (s)"] = float(event["global_time"])
         row["Active"] = _text(event.get("active_character"))

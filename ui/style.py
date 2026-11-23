@@ -85,7 +85,9 @@ AUDIT_COLUMN_CONFIG = {
         help="Scaling stat x motion value, before any multiplier."),
     "Quills": st.column_config.NumberColumn(
         "Quills", format="%.1f",
-        help="Flat damage added after the bonus multiplier (Faruzan quill, VBTD)."),
+        help="Flat damage this hit adds outside its own multipliers: Faruzan quill, "
+             "Mizuki C1 quill, Mizuki VBTD quill. Reactions show the C1 quill added "
+             "once after the contributor shares."),
     "Bonus Mult": st.column_config.NumberColumn(
         "Bonus Mult", format="%.3f",
         help="Element / attack-type / stellar bonus multiplier (quills excluded)."),
@@ -109,6 +111,31 @@ AUDIT_COLUMN_CONFIG = {
         "Effective Avg DMG", format="%.1f",
         help="Average damage before the RES multiplier."),
 }
+
+def buff_column_config(party, frame):
+    """Header tooltips for the buff columns, straight from buff_registry.
+
+    The fixed columns get their help from AUDIT_COLUMN_CONFIG. Buff columns are
+    created dynamically from buff_registry.visible_buffs(), so their help text is
+    attached here, with the same [W]/[A]/[T] prefix ui/table.py uses.
+    """
+    import buff_registry
+    from ui.editors import BUFF_GROUP_TAG
+
+    out = {}
+    for entry in buff_registry.visible_buffs(party or {}):
+        label = BUFF_GROUP_TAG.get(entry.get("group"), "") + entry["label"]
+        if label not in frame.columns:
+            continue
+        text = entry.get("help")
+        if not text:
+            continue
+        if str(frame[label].dtype) == "boolean":
+            out[label] = st.column_config.CheckboxColumn(label, help=text)
+        else:
+            out[label] = st.column_config.NumberColumn(label, format="%d", help=text)
+    return out
+
 
 # A stack counter reads as "empty" when it is zero / missing. Only the STACK buff
 # columns are painted (see style_timeline_dataframe): the boolean flags render as

@@ -279,13 +279,13 @@ def _placement_end(spec: dict, placement: dict, field_time: float) -> float:
     the NEXT ability has to clear the in-air tick, not the full hit table.
     """
     ability = spec["catalog"]["abilities"].get(placement["ability"]) or {}
-    first = float(placement["first_hit"])
-    times = [first + float(hit["offset"]) for hit in ability.get("hits") or ()]
+    cast = float(placement["cast_time"])
+    times = [cast + float(hit["delay"]) for hit in ability.get("hits") or ()]
     if not times:
-        return first
+        return cast
     if ability.get("interrupt_on_swap_out"):
         times = times[:interrupted_hit_count(times, field_time)]
-    return times[-1] if times else first
+    return times[-1] if times else cast
 
 
 def add_placement(spec: dict, sequence_id: str, ability_id: str, at=None) -> str:
@@ -301,8 +301,9 @@ def add_placement(spec: dict, sequence_id: str, ability_id: str, at=None) -> str
         when = max([_placement_end(spec, p, field_time) for p in sequence["placements"]] + [0.0])
     placement_id = unique_id({p["id"] for p in sequence["placements"]},
                              sequence_id + "~" + catalog.slug(ability["name"]))
+    cast_time = max(0.0, float(when))
     sequence["placements"].append({"id": placement_id, "ability": ability_id,
-                                   "first_hit": round(max(0.0, float(when)), 3)})
+                                   "cast_time": round(cast_time, 3)})
     return placement_id
 
 
@@ -312,12 +313,12 @@ def remove_placement(spec: dict, sequence_id: str, placement_id: str) -> None:
     sequence["placements"] = [p for p in sequence["placements"] if p["id"] != placement_id]
 
 
-def move_placement(spec: dict, sequence_id: str, placement_id: str, first_hit) -> None:
+def move_placement(spec: dict, sequence_id: str, placement_id: str, cast_time) -> None:
     sequence = _item(spec, "field_seqs", sequence_id)
     _writable(sequence)
     for placement in sequence["placements"]:
         if placement["id"] == placement_id:
-            placement["first_hit"] = round(max(0.0, float(first_hit)), 3)
+            placement["cast_time"] = round(max(0.0, float(cast_time)), 3)
             return
     raise ValueError("That placement no longer exists.")
 
@@ -343,3 +344,58 @@ def set_sequence_text(spec: dict, sequence_id: str, *, name=None, character=None
         if character not in spec["catalog"]["characters"]:
             raise ValueError("Pick a character from the catalogue.")
         sequence["character"] = character
+
+
+def apply_ability_timings(spec: dict, changes: dict) -> list:
+    """Apply {ability id: [timings]} atomically; returns the changed ids.
+
+    A timing is the delay from the cast. Every list must be non-decreasing and
+    match the ability's hit table. Only the spec catalogue is rewritten, never the
+    shipped Ability objects in abilities.py.
+    """
+    abilities = spec["catalog"]["abilities"]
+    prepared = {}
+    for aid, delays in (changes or {}).items():
+        payload = abilities.get(aid)
+        if payload is None:
+            raise ValueError("That ability is not in the catalogue.")
+        if payload.get("category") == "triggered":
+            raise ValueError("That ability cannot be timed here.")
+        try:
+            values = [round(float(value), 6) for value in delays]
+        except (TypeError, ValueError):
+            raise ValueError("Timings must be numbers.") from None
+        resolved = catalog.apply_timings_to_payload(payload, values)
+        prepared[aid] = (resolved, values)
+
+    overrides = spec.setdefault("ability_timings", {})
+    for aid, (resolved, values) in prepared.items():
+        baseline = catalog.baseline_ability(aid)
+        baseline_hits = (baseline or {}).get("hits") or ()
+        unchanged = (baseline is not None and len(values) == len(baseline_hits)
+                     and all(abs(value - float(hit.get("delay", 0.0))) <= 1e-9
+                             for value, hit in zip(values, baseline_hits)))
+        if unchanged:
+            abilities[aid] = baseline
+            overrides.pop(aid, None)
+        else:
+            abilities[aid] = resolved
+            overrides[aid] = values
+    return sorted(prepared)
+
+
+def reset_character_timings(spec: dict, cid: str) -> list:
+    """Restore the shipped timings for every ability of character *cid*."""
+    abilities = spec["catalog"]["abilities"]
+    overrides = spec.setdefault("ability_timings", {})
+    reset = []
+    for aid in list(overrides):
+        payload = abilities.get(aid)
+        if payload is None or payload.get("character") != cid:
+            continue
+        baseline = catalog.baseline_ability(aid)
+        if baseline is not None:
+            abilities[aid] = baseline
+        overrides.pop(aid, None)
+        reset.append(aid)
+    return reset

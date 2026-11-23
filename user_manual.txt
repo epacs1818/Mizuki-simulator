@@ -186,19 +186,43 @@ multiplier for every hit in the detailed timeline table in Tab 4.
 
 5.2 Field sequences
   A field sequence represents one character's time on-field: which
-  abilities they use, when each ability starts (in seconds relative to
+  abilities they use, when each ability is cast (in seconds relative to
   when they swap in), and their total on-field duration. You can build one
   under "Create Custom Field Sequence":
     - Enter the sequence name, the character, and their total field
       (swap-out) time.
-    - Select an ability and its start time offset, then click "Add".
+    - Select an ability and its cast time, then click "Add".
     - Repeat for all abilities cast during that visit, then click "Save
       Field Sequence".
 
   Only abilities belonging to characters currently in your party are
-  available. Note that engine-injected procs (extra triggered hits,
-  coordinated attacks, passives) cannot be added manually—they fire
-  automatically based on their own in-game conditions.
+  available.
+
+  Ability hit timings (advanced editor):
+    Under the field-sequence strip, the "Ability hit timings" table lists
+    every hit of the selected character's abilities. "Timing (s)" is the
+    delay from the cast (the button press); edit it, then click "Apply
+    changes" to commit the draft. "Reset timings" restores the shipped
+    values, and "Undo" reverses the last Apply or Reset. Changes apply to
+    every sequence and trial that casts those abilities, and unapplied
+    edits are lost when you switch characters.
+
+  What the strips draw:
+    A tick is one hit the rotation authors (an ability's hit, or a proc a
+    trigger fires). Stellar reaction damage - Stellar Swirls and Vortex
+    explosions - is NOT drawn: it is a result of the rotation, not part of
+    building it, and it would land on whichever lane happened to own the
+    trigger. Those rows still count in the Damage / DPS / Hits tiles, the
+    rotation log and the Tab 4 audit table, which is where to inspect them.
+
+    Under the character lanes the TRIAL strip also draws uptime lanes
+    for the buffs worth watching: The Widsith (either variant), Viridescent
+    Venerer, Gilded Dreams, Instructor, Heart Of The Furnace and Cryo
+    Resonance. A lane appears only when that weapon / artifact set /
+    resonance is actually equipped in your party AND the buff triggers
+    somewhere in the trial; nothing is drawn for gear you do not wear. Bars
+    are the sampled uptime the rotation provably enjoyed (hover for the
+    exact window), and clicking one does nothing - they are a read-out.
 
 5.3 Rotations
   A rotation is an ordered sequence of character visits (field sequences)
@@ -399,9 +423,12 @@ the underlying formulas and multipliers they use:
      to each reaction and their individual contributions can independently
      crit, the final damage is calculated through a joint probability
      distribution. See Section 7.2 below for the complete breakdown.
-     Quills for this category (currently only Mizuki C1) are added after
-     contributor shares are distributed, scaling with the quill owner's crit
-     stats, without applying bonus multipliers.
+     Each contributor's share uses their own final stats (EM, stellar bonus,
+     Jubilee, elevation, RES, crit, stellar crit, and the reaction element's
+     crit). The Effective Avg DMG column ignores RES for this category.
+     Quills for this category (Mizuki C1) are added once after the shares,
+     using the quill owner's elevation and crit, without bonus multipliers;
+     the raw quill amount is shown in the Quills column.
 
 7.2 Stellar Swirl & Vortex mechanics
 When characters possessing the Stellar Linchpin effect are present in the

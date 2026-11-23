@@ -1,4 +1,5 @@
 import copy
+import re
 from typing import Dict, Tuple, Optional, Union
 from models import AttackType
 from models import ActionCategory
@@ -40,6 +41,32 @@ def get_ability_motion_value(character: str, category: str, sub_ability: str,
         return base_value * (1.0 + bonus_value)
 
     return base_value
+
+
+def _slug(text: str) -> str:
+    """Lower-case, underscore-separated id fragment (shared with the editor)."""
+    return re.sub(r"[^a-z0-9]+", "_", (text or "").lower()).strip("_")
+
+
+def ability_key(character: str, name: str) -> str:
+    """Stable id for one ability, used by the editor and the build format."""
+    return _slug(character) + "__" + _slug(name)
+
+
+def ability_with_hit_delays(ability: Ability, delays) -> Ability:
+    """A COPY of *ability* with each hit's relative_delay replaced by *delays*.
+
+    The module-level Ability objects are shared by every preset and every session,
+    so a timing override must never edit them in place. This is the one helper that
+    applies one, always to a deep copy.
+    """
+    values = [float(delay) for delay in delays]
+    if len(values) != len(ability.hits):
+        raise ValueError("Every hit needs one timing.")
+    resolved = copy.deepcopy(ability)
+    for hit, delay in zip(resolved.hits, values):
+        hit.relative_delay = delay
+    return resolved
 
 
 def update_ability_talent_level(ability: Ability, level: int):
@@ -96,6 +123,7 @@ aether_n1ca = Ability(
     "Aether",
     cooldown_family="charged",
     cooldown=15.0,
+    frostglow_on_cast=2,
     talent_level=10,
     talent_type="normal_talent",
     hits=[
@@ -110,14 +138,14 @@ aether_n1ca = Ability(
             "C1_Hit", 0.510, element="Cryo", category=ActionCategory.STELLAR_DMG,
             stat_ref=StatRef.ATK,
             motion_value=get_ability_motion_value("Aether", "Charged Attack", "C1_Hit", 10),
-            attack_type=AttackType.NORMAL,
+            attack_type=AttackType.CHARGED,
             scaling_key=("Aether", "Charged Attack", "C1_Hit")
         ),
         Hit(
             "C2_Hit", 0.720, element="Cryo", category=ActionCategory.STELLAR_DMG,
             stat_ref=StatRef.ATK,
             motion_value=get_ability_motion_value("Aether", "Charged Attack", "C2_Hit", 10),
-            attack_type=AttackType.NORMAL,
+            attack_type=AttackType.CHARGED,
             scaling_key=("Aether", "Charged Attack", "C2_Hit")
         )
     ]

@@ -10,7 +10,7 @@ from __future__ import annotations
 import copy
 
 import abilities as ab
-from models import FieldSequence, Rotation, Trial
+from models import ActionCategory, FieldSequence, Rotation, Trial
 from timeline import CooldownError, RotationTimeline
 
 from ui.editor import catalog
@@ -26,13 +26,21 @@ def _ability_map() -> dict:
     return out
 
 
-def ability_map() -> dict:
-    """ability id -> Ability. Public: publish.py rebuilds engine objects from it."""
-    return _ability_map()
+def ability_map(spec: dict | None = None) -> dict:
+    """ability id -> Ability, with the spec's timing overrides applied to copies.
 
-
-def _first_delay(ability) -> float:
-    return min((h.relative_delay for h in (ability.hits or ())), default=0.0)
+    Always a copy: the registry's Ability objects are shared by every preset and
+    every session, so the engine must never hold (or mutate) them.
+    """
+    overrides = (spec or {}).get("ability_timings") or {}
+    out = {}
+    for aid, ability in _ability_map().items():
+        delays = overrides.get(aid)
+        if delays and len(delays) == len(ability.hits):
+            out[aid] = ab.ability_with_hit_delays(ability, delays)
+        else:
+            out[aid] = copy.deepcopy(ability)
+    return out
 
 
 def _character_name(spec: dict, cid: str) -> str:
@@ -46,7 +54,7 @@ def _field_sequence(fs: dict, spec: dict, abilities: dict) -> FieldSequence:
         ability = abilities.get(placement["ability"])
         if ability is None:
             continue
-        seq.add_ability(float(placement["first_hit"]) - _first_delay(ability), ability)
+        seq.add_ability(float(placement["cast_time"]), ability)
     return seq
 
 
@@ -123,7 +131,7 @@ def _placement_index(blocks: list, spec: dict, abilities: dict) -> dict:
             ability = abilities.get(placement["ability"])
             if ability is None:
                 continue
-            cast = float(placement["first_hit"]) - _first_delay(ability)
+            cast = float(placement["cast_time"])
             hits = ability.hits or ()
             for position, hit in enumerate(hits):
                 when = round(block["start"] + cast + hit.relative_delay, 6)
@@ -144,7 +152,13 @@ def _block_for(blocks: list, character: str, t: float):
 
 
 def _hits(events: list, blocks: list, index: dict) -> list:
-    """Engine events -> the hit rows the strips and tables read."""
+    """Engine events -> the hit rows the strips and tables read.
+
+    ``reaction`` marks a Stellar Swirl / Vortex explosion: those rows carry the
+    engine's STELLAR_REACTION category and their own reaction metadata, and the
+    strips leave them out of the building view (ui/editor/payloads.py) while the
+    totals, the rotation log and the results table keep them.
+    """
     out = []
     for event in events:
         if event.get("event_type") != "HIT":
@@ -170,6 +184,7 @@ def _hits(events: list, blocks: list, index: dict) -> list:
             "hit_index": hit_index,
             "hit_count": hit_count,
             "on_field": event.get("active_character") == name,
+            "reaction": event.get("category") == ActionCategory.STELLAR_REACTION,
         })
     return out
 
@@ -219,7 +234,7 @@ def simulate(spec: dict, trial_id: str, party: dict, enemy: dict | None = None) 
         return _empty([], [_issue("error", "This trial no longer exists.",
                                   ("trial", trial_id))])
     blocks = _blocks(payload, spec)
-    abilities = _ability_map()
+    abilities = ability_map(spec)
     trial = _trial(payload, spec, abilities)
     timeline = RotationTimeline(party=copy.deepcopy(party or {}),
                                 enemy_stats=dict(enemy or {}))

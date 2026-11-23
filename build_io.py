@@ -21,7 +21,7 @@ import copy
 import datetime
 import json
 
-from abilities import ABILITY_REGISTRY
+from abilities import ABILITY_REGISTRY, ability_key, ability_with_hit_delays
 from characters import get_character_element
 from models import FieldSequence, Rotation, Trial
 from presets import (
@@ -38,7 +38,7 @@ from substats_standards import CARRIES, build_kqm_build, build_recommended_subs
 
 APP_NAME = "Yumemizuki Mizuki's Rotation Damage Calculator"
 
-SCHEMA_VERSION = "1.0"
+SCHEMA_VERSION = "1.1"
 
 PIECES = ("Flower", "Feather", "Sands", "Goblet", "Circlet")
 LOCKED_MAIN_PIECES = ("Flower", "Feather")
@@ -348,6 +348,8 @@ def field_sequence_payload(seq) -> dict:
         "calls": [
             {
                 "start_time": call.start_time,
+                "ability_id": ability_key(getattr(call.ability, "character", seq.character),
+                                          call.ability.name),
                 "ability_name": call.ability.name,
                 "ability_character": getattr(call.ability, "character", seq.character),
             }
@@ -356,9 +358,13 @@ def field_sequence_payload(seq) -> dict:
     }
 
 
-def sequence_from_payload(payload, warnings=None) -> FieldSequence:
+def sequence_from_payload(payload, warnings=None, ability_timings=None) -> FieldSequence:
     """Plain dict -> FieldSequence. Abilities are re-resolved by name; a vanished
-    ability is reported instead of silently dropping the whole sequence."""
+    ability is reported instead of silently dropping the whole sequence.
+
+    ``ability_timings`` is {ability id: [timings]}: a matching entry is applied to a
+    COPY of the ability, so the registry's shared objects stay untouched.
+    """
     warnings = warnings if warnings is not None else []
     name = payload.get("name") or "Unnamed Sequence"
     character = payload.get("character") or ""
@@ -367,14 +373,18 @@ def sequence_from_payload(payload, warnings=None) -> FieldSequence:
     for call in _as_list(payload.get("calls")):
         if not isinstance(call, dict):
             continue
-        ability = _ability_for(call.get("ability_name"),
-                               call.get("ability_character") or character)
+        owner = call.get("ability_character") or character
+        ability = _ability_for(call.get("ability_name"), owner)
         if ability is None:
             warnings.append(
                 f"Field sequence '{name}': ability '{call.get('ability_name')}' no longer "
                 f"exists in abilities.py — that call was skipped."
             )
             continue
+        aid = call.get("ability_id") or ability_key(owner, call.get("ability_name") or "")
+        delays = (ability_timings or {}).get(aid)
+        if delays and len(delays) == len(ability.hits):
+            ability = ability_with_hit_delays(ability, delays)
         seq.add_ability(float(call.get("start_time", 0.0) or 0.0), ability)
     return seq
 
@@ -397,12 +407,13 @@ def _lookup_sequence(name, custom_sequences=None):
     return None
 
 
-def rotation_from_payload(payload, warnings=None, custom_sequences=None) -> Rotation:
+def rotation_from_payload(payload, warnings=None, custom_sequences=None,
+                          ability_timings=None) -> Rotation:
     warnings = warnings if warnings is not None else []
     name = payload.get("name") or "Unnamed Rotation"
     sequences = []
     for seq_payload in _iter_payloads(payload.get("sequences")):
-        sequences.append(sequence_from_payload(seq_payload, warnings))
+        sequences.append(sequence_from_payload(seq_payload, warnings, ability_timings))
     if not sequences:
         # Schema 1.0 files stored `sequence_keys` (names) instead of definitions.
         for seq_name in _as_list(payload.get("sequence_keys")):
@@ -435,7 +446,7 @@ def trial_payload(trial) -> dict:
 
 
 
-def restore_custom_pools(doc, state, warnings=None) -> dict:
+def restore_custom_pools(doc, state, warnings=None, ability_timings=None) -> dict:
     """Rebuild the editor pools (sequences, rotations, trials) from a document.
 
     Every rotation used by a custom trial is re-registered in `custom_rotations`,
@@ -445,13 +456,13 @@ def restore_custom_pools(doc, state, warnings=None) -> dict:
 
     custom_sequences = {}
     for payload in _iter_payloads(doc.get("custom_field_sequences")):
-        seq = sequence_from_payload(payload, warnings)
+        seq = sequence_from_payload(payload, warnings, ability_timings)
         if seq.name:
             custom_sequences[seq.name] = seq
 
     custom_rotations = {}
     for payload in _iter_payloads(doc.get("custom_rotations")):
-        rot = rotation_from_payload(payload, warnings, custom_sequences)
+        rot = rotation_from_payload(payload, warnings, custom_sequences, ability_timings)
         if rot.name:
             custom_rotations[rot.name] = rot
 
@@ -609,6 +620,10 @@ def collect_build_document(state, simulation_name=None) -> dict:
         field_sequence_payload(seq)
         for seq in (state.get("custom_field_sequences") or {}).values()
     ]
+    spec = state.get("trial_editor_spec") or {}
+    timings = spec.get("ability_timings")
+    if timings is None:
+        timings = state.get("ability_timings") or {}
 
     return {
         "schema_version": SCHEMA_VERSION,
@@ -618,6 +633,7 @@ def collect_build_document(state, simulation_name=None) -> dict:
         "party": [collect_slot(state, slot_num) for slot_num in range(1, 5)],
         "enemy": collect_enemy(state),
         "selected_trial": state.get("trial_selector"),
+        "ability_timings": copy.deepcopy(timings),
         "custom_field_sequences": custom_sequences,
         "custom_rotations": list(rotation_payloads.values()),
         "custom_trials": [trial_payload(trial) for trial in custom_trials.values()],
@@ -815,7 +831,14 @@ def apply_build_document(doc, state, catalogue, warnings=None) -> list:
     for slot_num in range(len(party_slots) + 1, 5):
         _clear_slot(slot_num, state, catalogue)
 
-    restore_custom_pools(doc, state, warnings)
+    timings = doc.get("ability_timings") or {}
+    state["ability_timings"] = timings
+    state.pop("trial_editor_spec", None)
+    state.pop("timing_undo", None)
+    for key in [key for key in state
+                if isinstance(key, str) and key.startswith("ed_hits_")]:
+        state.pop(key, None)
+    restore_custom_pools(doc, state, warnings, ability_timings=timings)
 
     selected = doc.get("selected_trial")
     pool = state.get("active_trial_pool") or {}

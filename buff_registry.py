@@ -11,10 +11,14 @@ the owner that must be present for the effect to exist at all:
     owner              character / weapon / artifact-set / resonance name
     min_constellation  minimum owner constellation (0 = always available)
     team_requirement   ("element", "Cryo", 2) for resonance auras
+    strip              short lane label (optional): the effect is worth drawing
+                       as an uptime lane under a trial strip
 
 Buff columns are ordered characters (party order, then registry order), then
 weapons, then artifacts, then team auras.  visible_buffs() drops every effect
 whose owner is not equipped, so a table only shows effects that exist in the party.
+strip_buffs() is the same list narrowed to the entries that opted into a strip
+lane, so the lane and the audit column can never disagree about availability.
 """
 
 from characters import get_character_element, party_element_counts
@@ -24,37 +28,55 @@ GROUP_ORDER = ("Character", "Weapon", "Artifact", "Team")
 
 BUFFS = [
     # --- Characters --------------------------------------------------------
-    {"key": "dreamdrifter_state", "label": "Mizuki DDS", "group": "Character", "owner": "Mizuki"},
-    {"key": "mizuki_a4_state", "label": "Mizuki A4 EM", "group": "Character", "owner": "Mizuki"},
-    {"key": "vbtd_state", "label": "Mizuki VBTD EM", "group": "Character", "owner": "Mizuki"},
-    {"key": "c1_debuff_state", "label": "Mizuki C1 Shred", "group": "Character", "owner": "Mizuki", "min_constellation": 1},
-    {"key": "faruzan_buff_state", "label": "Faruzan C6 CD (Anemo)", "group": "Character", "owner": "Faruzan", "min_constellation": 6},
-    {"key": "faruzan_debuff_state", "label": "Faruzan C6 Anemo Shred", "group": "Character", "owner": "Faruzan", "min_constellation": 6},
-    {"key": "aether_c2_state", "label": "Aether C2 EM", "group": "Character", "owner": "Aether", "min_constellation": 2},
-    {"key": "aether_c2_enhanced_state", "label": "Aether C2 EM (Amp)", "group": "Character", "owner": "Aether", "min_constellation": 2},
-    {"key": "frostglow_stacks", "label": "Aether Frostglow", "group": "Character", "owner": "Aether"},
-    {"key": "aether_c6_state", "label": "Aether C6 Stellar", "group": "Character", "owner": "Aether", "min_constellation": 6},
-    {"key": "marvelous_stacks", "label": "Odette Marvelous", "group": "Character", "owner": "Odette"},
-    {"key": "odette_shadow_state", "label": "Odette Shadow", "group": "Character", "owner": "Odette"},
-    {"key": "odette_ssd_state", "label": "Odette SSD", "group": "Character", "owner": "Odette"},
-    {"key": "odette_c2_state", "label": "Odette C2 Shred", "group": "Character", "owner": "Odette", "min_constellation": 2},
-    {"key": "sucrose_a1_state", "label": "Sucrose A1 EM", "group": "Character", "owner": "Sucrose"},
-    {"key": "sucrose_a4_state", "label": "Sucrose A4 EM", "group": "Character", "owner": "Sucrose"},
-    {"key": "sucrose_c6_state", "label": "Sucrose C6 Cryo DMG", "group": "Character", "owner": "Sucrose", "min_constellation": 6},
-    {"key": "anastasya_burst_state", "label": "Anastasya Burst Stellar", "group": "Character", "owner": "Anastasya"},
-    {"key": "anastasya_accolades_state", "label": "Anastasya Accolades", "group": "Character", "owner": "Anastasya"},
-    {"key": "anastasya_sealed_state", "label": "Anastasya Sealed", "group": "Character", "owner": "Anastasya"},
-    {"key": "anastasya_love_state", "label": "Anastasya Love", "group": "Character", "owner": "Anastasya", "min_constellation": 2},
-    {"key": "anastasya_a4_state", "label": "Anastasya A4 Jubilee", "group": "Character", "owner": "Anastasya"},
-    {"key": "anastasya_triumph_ready", "label": "Anastasya Triumph", "group": "Character", "owner": "Anastasya"},
-    {"key": "diona_ct_state", "label": "Diona Choice Treasures", "group": "Character", "owner": "Diona"},
-    {"key": "diona_c6_state", "label": "Diona C6 Buff", "group": "Character", "owner": "Diona", "min_constellation": 6},
+    {"key": "dreamdrifter_state", "label": "Mizuki DDS", "group": "Character", "owner": "Mizuki",
+     "help": "Dreamdrifter state (starts at her skill cast). While ON: skill swirl stellar bonus, 10% flat-EM share, C2 RES shred + flat-EM elemental bonus (C2+), C6 stellar CR/CD."},
+    {"key": "mizuki_a4_state", "label": "Mizuki A4", "group": "Character", "owner": "Mizuki",
+     "help": "+100 EM to Mizuki for 4s after a Cryo hit during DDS."},
+    {"key": "vbtd_state", "label": "Mizuki VBTD Quill", "group": "Character", "owner": "Mizuki",
+     "help": "VBTD quill armed on this tick. The 10% EM share is part of DDS, not this column."},
+    {"key": "faruzan_buff_state", "label": "Faruzan C6 Buff", "group": "Character", "owner": "Faruzan", "min_constellation": 6,
+     "help": "+40% Anemo Crit DMG (anemo_crit_dmg) and the talent-scaled Anemo DMG bonus; applies to Anemo hits only."},
+    {"key": "faruzan_debuff_state", "label": "Faruzan C6 Anemo Shred", "group": "Character", "owner": "Faruzan", "min_constellation": 6,
+     "help": "-30% Anemo RES while the burst window is up; Pressurized Collapse refreshes it to at least +4s."},
+    {"key": "aether_c2_state", "label": "Aether C2 EM", "group": "Character", "owner": "Aether", "min_constellation": 2,
+     "help": "+60 EM to the active character (armed by Aether skill ticks; ends when that character swaps out)."},
+    {"key": "aether_c2_enhanced_state", "label": "Aether C2 EM (Amp)", "group": "Character", "owner": "Aether", "min_constellation": 2,
+     "help": "Another +60 EM for the active character after they deal Stellar DMG or trigger a swirl (+120 total)."},
+    {"key": "frostglow_stacks", "label": "Aether Frostglow", "group": "Character", "owner": "Aether",
+     "help": "Frostglow stacks (0-8): +1 per Elemental Skill tick, +2 from the charged attack; consumed by the burst."},
+    {"key": "aether_c6_state", "label": "Aether C6 Stellar", "group": "Character", "owner": "Aether", "min_constellation": 6,
+     "help": "+5% stellar_bonus per Frostglow stack consumed by the burst, 15s (max +40%)."},
+    {"key": "marvelous_stacks", "label": "Odette Marvelous", "group": "Character", "owner": "Odette",
+     "help": "Marvelous stacks: +15% stellar_bonus per stack (A1) and +7% ATK per stack (C2+)."},
+    {"key": "odette_shadow_state", "label": "Odette Shadow", "group": "Character", "owner": "Odette",
+     "help": "Shadow on field (skill/burst cast, 20s). While ON: Marvelous stacks, C2 RES shred + ATK per stack, C6 elevation (self 45% / others 25%)."},
+    {"key": "odette_ssd_state", "label": "Odette SSD", "group": "Character", "owner": "Odette",
+     "help": "Snow Swan's Dream (burst cast, 20s): self stellar bonus; C4 shares 50% with the others."},
+    {"key": "sucrose_a1_state", "label": "Sucrose A1 EM", "group": "Character", "owner": "Sucrose",
+     "help": "+50 EM to non-Anemo party members for 8s after Sucrose triggers a swirl."},
+    {"key": "sucrose_a4_state", "label": "Sucrose A4 EM", "group": "Character", "owner": "Sucrose",
+     "help": "20% of Sucrose flat EM to the others for 8s after any of her skill/burst hits."},
+    {"key": "sucrose_c6_state", "label": "Sucrose C6 Cryo DMG", "group": "Character", "owner": "Sucrose", "min_constellation": 6,
+     "help": "+20% Cryo DMG bonus to the party for one burst field (5.729s)."},
+    {"key": "anastasya_burst_state", "label": "Anastasya Burst Stellar", "group": "Character", "owner": "Anastasya",
+     "help": "Party stellar_bonus from her burst talent, 20s from the burst cast."},
+    {"key": "anastasya_accolades_state", "label": "Anastasya Accolades", "group": "Character", "owner": "Anastasya",
+     "help": "20s Accolades window: +12% Crit DMG; the sealed variants share stronger values with the others."},
+    {"key": "anastasya_sealed_state", "label": "Anastasya Sealed", "group": "Character", "owner": "Anastasya",
+     "help": "Sealed/shared Accolades state (burst + swap-out); lingers 8s after unsealing."},
+    {"key": "anastasya_love_state", "label": "Anastasya Love", "group": "Character", "owner": "Anastasya", "min_constellation": 2,
+     "help": "C2 Love: +50% Stellar Crit DMG to the party for 30s from her skill cast."},
+    {"key": "diona_ct_state", "label": "Diona Choice Treasures", "group": "Character", "owner": "Diona",
+     "help": "Choice Treasures state (20s from either skill cast): enables the Icy Paw volley on any Stellar Swirl."},
+    {"key": "diona_c6_state", "label": "Diona C6 Buff", "group": "Character", "owner": "Diona", "min_constellation": 6,
+     "help": "+200 EM and +40% stellar_bonus to the active character for 11.75s from her burst cast."},
     # --- Weapons -----------------------------------------------------------
     {"key": "exaiphanes_blade_state", "label": "Exaiphanes ATK%", "group": "Weapon", "owner": "Exaiphanes Blade"},
     {"key": "silver_light_stacks", "label": "Silver Light EM Stacks", "group": "Weapon", "owner": "Silver Light"},
-    # Widsith: both variants share one flag, so the column exists for either one.
+    # Widsith: both variants share one flag, so the column exists for either one -
+    # and one strip lane covers "both Widsiths" too.
     {"key": "widsith_state", "label": "Widsith Buff", "group": "Weapon",
-     "owner": ("The Widsith (Average)", "The Widsith (All EM)")},
+     "owner": ("The Widsith (Average)", "The Widsith (All EM)"), "strip": "Widsith"},
     {"key": "sacrificial_jade_state", "label": "Sacrificial Jade", "group": "Weapon", "owner": "Sacrificial Jade"},
     {"key": "sunny_swirl_state", "label": "Sunny Swirl EM", "group": "Weapon", "owner": "Sunny Morning Sleep-In"},
     {"key": "sunny_skill_state", "label": "Sunny Skill EM", "group": "Weapon", "owner": "Sunny Morning Sleep-In"},
@@ -75,19 +97,22 @@ BUFFS = [
     {"key": "silverdawn_extensions", "label": "Silverdawn Ext", "group": "Weapon", "owner": "Silverdawn"},
     {"key": "rainbow_bow_state", "label": "Rain Bow ATK%", "group": "Weapon", "owner": "Rainbow Serpent's Rain Bow"},
     # --- Artifact sets -----------------------------------------------------
-    {"key": "hotf_state", "label": "HotF Stellar", "group": "Artifact", "owner": "Heart Of The Furnace"},
-    {"key": "vv_state", "label": "VV Elemental Shred", "group": "Artifact", "owner": "Viridescent Venerer"},
-    {"key": "instructor_state", "label": "Instructor EM", "group": "Artifact", "owner": "Instructor"},
-    {"key": "gilded_state", "label": "Gilded Dreams", "group": "Artifact", "owner": "Gilded Dreams"},
+    {"key": "hotf_state", "label": "HotF Stellar", "group": "Artifact", "owner": "Heart Of The Furnace", "strip": "HotF Stellar"},
+    {"key": "vv_state", "label": "VV Elemental Shred", "group": "Artifact", "owner": "Viridescent Venerer", "strip": "VV Shred"},
+    {"key": "instructor_state", "label": "Instructor EM", "group": "Artifact", "owner": "Instructor", "strip": "Instructor"},
+    {"key": "gilded_state", "label": "Gilded Dreams", "group": "Artifact", "owner": "Gilded Dreams", "strip": "Gilded Dreams"},
     {"key": "noblesse_state", "label": "Noblesse ATK%", "group": "Artifact", "owner": "Noblesse Oblige"},
     {"key": "tenacity_state", "label": "Tenacity ATK%", "group": "Artifact", "owner": "Tenacity Of The Millelith"},
     {"key": "risingwinds_state", "label": "Rising Winds ATK%", "group": "Artifact", "owner": "A Day Carved From Rising Winds"},
     {"key": "scarlet_state", "label": "Scarlet Proof", "group": "Artifact", "owner": "Scarlet Proof"},
-    {"key": "tsaritsa_stacks", "label": "Tsaritsa Stacks", "group": "Artifact", "owner": "New Tsaritsa set"},
-    {"key": "tsaritsa_state", "label": "Tsaritsa Cryo CR", "group": "Artifact", "owner": "New Tsaritsa set"},
-    {"key": "tsaritsa_stellar_state", "label": "Tsaritsa Stellar CR", "group": "Artifact", "owner": "New Tsaritsa set"},
+    {"key": "tsaritsa_stacks", "label": "Tsaritsa Stacks", "group": "Artifact", "owner": "New Tsaritsa set",
+     "help": "2 stacks max: +1 per normal/skill/burst cast, -1 per 3s on field."},
+    {"key": "tsaritsa_state", "label": "Tsaritsa Cryo CR", "group": "Artifact", "owner": "New Tsaritsa set",
+     "help": "+20% Crit Rate on Cryo hits (cryo_crit_rate) while stacked."},
+    {"key": "tsaritsa_stellar_state", "label": "Tsaritsa Stellar CR", "group": "Artifact", "owner": "New Tsaritsa set",
+     "help": "+20% Stellar Crit Rate while stacked (all elements)."},
     # --- Team auras --------------------------------------------------------
-    {"key": "cryo_resonance_state", "label": "Cryo Resonance CR", "group": "Team", "owner": "Cryo Resonance", "team_requirement": ("element", "Cryo", 2)},
+    {"key": "cryo_resonance_state", "label": "Cryo Resonance CR", "group": "Team", "owner": "Cryo Resonance", "team_requirement": ("element", "Cryo", 2), "strip": "Cryo Resonance"},
 ]
 
 
@@ -154,4 +179,28 @@ def visible_buffs(party):
         registry_index[entry["key"]],
     ))
     return available
+
+
+def strip_buffs(party):
+    """The visible entries that opted into a strip lane, in display order.
+
+    Same gate as the audit table (visible_buffs), so a lane can never claim a
+    buff the table would call unequipped - the only extra filter is the opt-in
+    ``strip`` label, which keeps the lanes to the few windows worth watching.
+    """
+    return [entry for entry in visible_buffs(party) if entry.get("strip")]
+
+
+def buff_is_active(value) -> bool:
+    """True when a buff audit cell is not OFF / 0 / empty.
+
+    Lives here rather than in the UI: the strips, the audit table and any headless
+    caller have to agree on what "up" means. The engine writes "ON"/"OFF" strings,
+    stack counters as ints and a few flags as booleans; "-" is its "no data".
+    """
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return value.strip() not in ("", "OFF", "-")
+    return value != 0
 

@@ -1328,6 +1328,7 @@ def _run_table_format_check() -> dict:
         "text_numeric": [column for column in assert_columns
                          if str(frame[column].dtype) == "object"],
         "buff_dtypes": sorted({str(frame[column].dtype) for column in buff_columns}),
+        "cast_rows": int(frame["Action"].astype(str).str.startswith("Cast: ").sum()),
         "sortable": all(frame[column].dropna().sort_values().is_monotonic_increasing
                         for column in assert_columns),
         # The engine's placeholders must not reach the table as strings.
@@ -1611,8 +1612,17 @@ def _run_artifact_phase1_check() -> dict:
     hits = [e for e in t.global_events if e.get("event_type") == "HIT"]
     out["tsaritsa_max_stacks"] = max((int(e.get("tsaritsa_stacks") or 0) for e in hits), default=0)
     ts_on = next((e for e in hits if e.get("tsaritsa_state") == "ON"), None)
-    out["tsaritsa_cr"] = (round(_flag_delta(t, ts_on, "Aether", "tsaritsa_state", "CR"), 4)
-                          if ts_on else None)
+    ts_cryo = next((e for e in hits if e.get("character") == "Aether"
+                    and e.get("element") == "Cryo"
+                    and e.get("tsaritsa_state") == "ON"), None)
+    if ts_cryo is None:
+        out["tsaritsa_cr"] = None
+    else:
+        on_cryo = _buffed_stats(t, ts_cryo, "Aether").get("cryo_crit_rate", 0.0)
+        off_ev = dict(ts_cryo)
+        off_ev["tsaritsa_state"] = "OFF"
+        off_cryo = _buffed_stats(t, off_ev, "Aether").get("cryo_crit_rate", 0.0)
+        out["tsaritsa_cr"] = round(on_cryo - off_cryo, 4)
     out["tsaritsa_stellar_cr"] = (round(_flag_delta(t, ts_on, "Aether", "tsaritsa_stellar_state",
                                                     "Stellar CR"), 4) if ts_on else None)
 
@@ -1626,7 +1636,18 @@ def _run_artifact_phase1_check() -> dict:
                       rotations=[Rotation(name="r", sequences=[field], repetitions=1)]))
     t.evaluate_timeline()
     hits = [e for e in t.global_events if e.get("event_type") == "HIT"]
-    out["tsaritsa_anemo_cr_flag"] = any(e.get("tsaritsa_state") == "ON" for e in hits)
+    anemo = next((e for e in hits if e.get("character") == "Aether"
+                  and e.get("element") == "Anemo"), None)
+    from damage_calc import _crit_stats
+    if anemo is None:
+        out["tsaritsa_anemo_cr_flag"] = False
+    else:
+        on_stats = _buffed_stats(t, anemo, "Aether")
+        off_ev = dict(anemo)
+        off_ev["tsaritsa_state"] = "OFF"
+        off_stats = _buffed_stats(t, off_ev, "Aether")
+        out["tsaritsa_anemo_cr_flag"] = (
+            _crit_stats(on_stats, "anemo")[0] != _crit_stats(off_stats, "anemo")[0])
     out["tsaritsa_stacks_early"] = next((int(e.get("tsaritsa_stacks") or 0)
                                          for e in hits if e["global_time"] < 3.0), None)
     out["tsaritsa_stacks_decayed"] = all(int(e.get("tsaritsa_stacks") or 0) == 0
@@ -1808,6 +1829,24 @@ def _run_odette_constellation_check() -> dict:
         t6, closest(t6, "Aether", 22.451), "Aether")["Elevation Mult"], 4)
     out["elev_others_c2"] = round(_buffed_stats(
         t2, closest(t2, "Aether", 6.451), "Aether")["Elevation Mult"], 4)
+
+    # ---- Re-entry must not refill Marvelous --------------------------------
+    reentry_party = {
+        "Odette": {"constellation": 2, "level": 90, "refinement": 1,
+                   "weapon": "New Bough", "artifact_set": "2p/2p ATK",
+                   "talents": "1/13/13"},
+    }
+    back = FieldSequence("OdetteBack", "Odette", 1.0)
+    leave = FieldSequence("OdetteLeave", "Odette", 1.0)
+    t_re = RotationTimeline(party=reentry_party)
+    t_re.add_trial(Trial("reentry", end_mode="time", end_time=12.0,
+                         rotations=[Rotation("r", [odette_qe, back, leave])]))
+    t_re.evaluate_timeline()
+    odette_swaps = [e for e in t_re.global_events
+                    if e.get("character") == "Odette"
+                    and e.get("event_type") == "SWAP_OUT"]
+    out["reentry_swaps"] = [int(e.get("marvelous_stacks", 0) or 0)
+                            for e in odette_swaps]
     return out
 
 
@@ -2053,6 +2092,92 @@ def _run_hit_catalogue_check() -> dict:
 
     # What the editor offers for Mizuki (module-level sequence = registered).
     out["mizuki_ui"] = sorted(presets.field_sequences_for(["Mizuki"]))
+    return out
+
+
+def _run_ability_timing_check() -> dict:
+    """The timing editor writes the spec, never the shared Ability objects.
+
+    One Mizuki pull-out hit is moved 0.100s later: the engine must see the new
+    delay, the strip band must end at the new last hit, the registry must not move,
+    and Reset must put the shipped value back.
+    """
+    import abilities as ab
+    from ui.editor import catalog, engine, mutations, payloads, validate
+
+    out = {}
+    spec = catalog.preset_spec(["Mizuki", "Aether", "Odette", "Faruzan"])
+    rows = catalog.timing_rows(spec, "mizuki")
+    out["rows"] = len(rows)
+    aid = "mizuki__mizuki_skill_pullout"
+    delays = [row["timing"] for row in rows if row["ability_id"] == aid]
+    before = [hit.relative_delay for hit in ab.mizuki_skill_pullout.hits]
+
+    bad = list(delays)
+    bad[0], bad[1] = 0.3, 0.2
+    catalog_before = copy.deepcopy(spec["catalog"]["abilities"])
+    try:
+        mutations.apply_ability_timings(spec, {aid: bad})
+    except ValueError as exc:
+        out["order_error"] = str(exc)
+    else:
+        out["order_error"] = None
+    out["spec_unchanged_after_error"] = spec["catalog"]["abilities"] == catalog_before
+    names = [row["hit"] for row in rows if row["ability_id"] == aid][:2]
+    out["error_names"] = all(name in (out["order_error"] or "") for name in names)
+    out["error_ability"] = (spec["catalog"]["abilities"][aid]["name"]
+                            in (out["order_error"] or ""))
+
+    edited = list(delays)
+    edited[-1] = round(edited[-1] + 0.1, 6)
+    mutations.apply_ability_timings(spec, {aid: edited})
+    out["spec_timing"] = spec["ability_timings"][aid][-1]
+    out["engine_timing"] = engine.ability_map(spec)[aid].hits[-1].relative_delay
+    out["registry_unchanged"] = [hit.relative_delay for hit in ab.mizuki_skill_pullout.hits] == before
+    seq = catalog.sequence_id("Mizuki", "Skill Pullout 4 Nukes")
+    payload = payloads.field_sequence_payload(spec, seq)
+    bands = [item for item in payload["items"] if item["kind"] == "band"]
+    out["band_end"] = bands[0]["end"] if bands else None
+    out["band_expected"] = round(0.301 + edited[-1], 6)
+
+    # A nonzero first timing is the press -> first-hit gap: the press must stay
+    # put and the first hit must land later.
+    split = [round(max(0.2, value), 6) for value in delays]
+    mutations.apply_ability_timings(spec, {aid: split})
+    placement = spec["field_seqs"][seq]["placements"][0]
+    out["placement_cast"] = placement["cast_time"]
+    split_payload = payloads.field_sequence_payload(spec, seq)
+    split_bands = [item for item in split_payload["items"] if item["kind"] == "band"]
+    split_hits = [item for item in split_payload["items"] if item["kind"] == "hit"]
+    out["split_band_start"] = split_bands[0]["start"] if split_bands else None
+    out["split_first_hit"] = split_hits[0]["t"] if split_hits else None
+    resolved = engine.ability_map(spec)[aid]
+    out["split_engine_first"] = round(float(placement["cast_time"])
+                                      + resolved.hits[0].relative_delay, 6)
+
+    scratch = dict(spec)
+    scratch["rotations"] = dict(spec["rotations"])
+    scratch["trials"] = dict(spec["trials"])
+    scratch["rotations"]["__timing_probe__"] = {
+        "id": "__timing_probe__", "name": "probe", "blocks": [seq],
+        "repeat": 1, "preset": False}
+    scratch["trials"]["__timing_probe__"] = {
+        "id": "__timing_probe__", "name": "probe", "description": "",
+        "end_mode": "time", "end_time": 20.0, "required_party": [],
+        "slots": [{"id": "__timing_probe__~0", "rotation": "__timing_probe__", "repeat": 1}],
+        "preset": False}
+    casts, _ = validate.schedule(scratch, "__timing_probe__")
+    out["split_preflight_cast"] = next((t for t, _c, a, *_rest in casts if a == aid), None)
+
+    out["reset"] = bool(mutations.reset_character_timings(spec, "mizuki"))
+    out["reset_timing"] = spec["catalog"]["abilities"][aid]["hits"][-1]["delay"]
+    seeded = catalog.preset_spec(["Mizuki"], {aid: edited})
+    out["seed_timing"] = seeded["catalog"]["abilities"][aid]["hits"][-1]["delay"]
+    seq_payload = build_io.field_sequence_payload(
+        presets.STANDARD_FIELD_SEQUENCES["Mizuki E (Pullout)"])
+    rebuilt = build_io.sequence_from_payload(seq_payload, ability_timings={aid: edited})
+    out["build_sequence_timing"] = rebuilt.calls[0].ability.hits[-1].relative_delay
+    out["build_registry_unchanged"] = [hit.relative_delay for hit in ab.mizuki_skill_pullout.hits] == before
     return out
 
 
@@ -2311,13 +2436,15 @@ def _run_anastasya_check() -> dict:
         # Stellar REACTION damage moves by exactly the A4 factor.
         party_dict = {}
         for name in ("Mizuki", "Anastasya", "Odette", "Faruzan"):
-            st = _buffed_stats(timeline, swirl_ev, name)
-            party_dict[name] = {"level": 90, "EM": st.get("EM", 0.0),
-                                "CR": st.get("CR", 0.05), "CD": st.get("CD", 0.5)}
+            st = dict(_buffed_stats(timeline, swirl_ev, name))
+            st["level"] = 90
+            st["rv_mode"] = False
+            party_dict[name] = st
         on = calculate_damage(swirl_ev, fs, timeline.enemy_stats, party_dict=party_dict)
-        fs_off = dict(fs)
-        fs_off.pop("reaction_jubilee_mult", None)
-        off = calculate_damage(swirl_ev, fs_off, timeline.enemy_stats, party_dict=party_dict)
+        party_off = {name: {**st} for name, st in party_dict.items()}
+        for st in party_off.values():
+            st.pop("reaction_jubilee_mult", None)
+        off = calculate_damage(swirl_ev, fs, timeline.enemy_stats, party_dict=party_off)
         ratio = (off["average_damage"] / on["average_damage"]) if on["average_damage"] else 0.0
         jub = fs.get("jubilee_mult", 0.0)
         out["reaction_ratio_err"] = round(
@@ -2448,6 +2575,10 @@ def _run_anastasya_constellation_check() -> dict:
     Everything runs on the preset Anastasya loop so the real cycle happens:
         skill Cast @0.601 (Accolades + Love, UNSEALED) -> burst @2.371 ->
         swap-out @2.851 (SEALED) -> the 8s linger keeps it shared after the unseal.
+
+    Love's permanent elevation half is checked twice: as the stat every stellar hit
+    reads, and directly on a Stellar reaction (swirl) resolved with and without it -
+    the elevation must reach BOTH damage families, exactly like Odette's C6.
     """
     from abilities import anastasya_tap, anastasya_burst, anastasya_triumph
     out = {}
@@ -2511,6 +2642,38 @@ def _run_anastasya_constellation_check() -> dict:
             "stellar_cd": delta(t, mid, "Mizuki", "anastasya_love_state", "Stellar CD"),
             "elevation": round(_buffed_stats(t, mid, "Mizuki")["Elevation Mult"], 6),
         }
+
+    # ---- Love elevation (C2 / C6) reaches BOTH families of stellar damage ------
+    # The same `elevation_mult` key Odette's C6 uses feeds calculate_stellar_damage
+    # AND each contributor's share of calculate_stellar_reaction_damage, so a swirl
+    # must scale by exactly (1 + elevation). A missing multiplication in the
+    # reaction path would be invisible in the stellar columns above, hence the
+    # direct probe on the real swirl of each timeline.
+    from damage_calc import calculate_damage
+
+    def reaction_elevation_ratio(t):
+        """Average reaction damage with the party elevation / without it."""
+        ev = next((e for e in hits(t)
+                   if e.get("category") == ActionCategory.STELLAR_REACTION), None)
+        if ev is None:
+            return None
+        stats = {}
+        for name in t.party:
+            st = dict(_buffed_stats(t, ev, name))
+            st["level"] = 90
+            st["rv_mode"] = False
+            stats[name] = st
+        owner = ev.get("character")
+        on = calculate_damage(ev, stats.get(owner, {}), t.enemy_stats, party_dict=stats)
+        flat = {name: {**st, "elevation_mult": 0.0, "Elevation Mult": 0.0}
+                for name, st in stats.items()}
+        off = calculate_damage(ev, flat.get(owner, {}), t.enemy_stats, party_dict=flat)
+        if not off["average_damage"]:
+            return None
+        return round(on["average_damage"] / off["average_damage"], 6)
+
+    out["love_reaction"] = {cons: reaction_elevation_ratio(tl[cons])
+                            for cons in (1, 2, 6)}
 
     # ---- C6 Triumph: every ally swap-in while Love is up -------------------
     out["c6"] = {}
@@ -3034,10 +3197,16 @@ def _run_editor_port_check() -> dict:
     is simulated both ways and compared, then the payload builders are fed one of
     those results to prove they describe exactly the blocks and hits they were given.
     The strip's one off-field cue is checked as well: a tick may only be dimmed when
-    the hit's owner was off field, and dimming may not be flattened away.
+    the hit's owner was off field, and dimming may not be flattened away. Stellar
+    reaction rows (swirls, vortex explosions) are results of the rotation, not part
+    of building it, so no strip may draw one as a tick - while the totals, the
+    rotation log and the results table keep them. The trial strip's buff lanes are
+    held to the registry's party gate: a lane exists only for equipped gear that
+    actually triggered, and the rotation / field-sequence strips never draw one.
     """
     import copy
 
+    import buff_registry
     import presets
     from timeline import RotationTimeline
     from ui.editor import catalog, engine, payloads, validate
@@ -3097,13 +3266,28 @@ def _run_editor_port_check() -> dict:
 
     sample = "triple_cryo_rotation"
     result = engine.simulate(spec, sample, party, {})
-    payload = payloads.trial_payload(spec, sample, result, px_per_sec=14.0)
-    bands = [item for item in payload["items"] if item["kind"] == "band"]
+    payload = payloads.trial_payload(spec, sample, result, party=party, px_per_sec=14.0)
+    # Ability bands only: a buff lane draws slim seg pills, never a band.
+    bands = [item for item in payload["items"]
+             if item["kind"] == "band" and item.get("refKind") == "block"]
+    buff_bars = [item for item in payload["items"]
+                 if item["kind"] == "seg" and item.get("refKind") == "buff"]
+    buff_rows = [row for row in payload["rows"] if row["kind"] == "buff"]
     ticks = [item for item in payload["items"] if item["kind"] == "hit"]
+    # The strips draw the authored hits only: a Stellar Swirl / Vortex explosion is
+    # what the rotation produces, not part of building it, so it is not a tick.
+    reaction_hits = [hit for hit in result["hits"] if hit["reaction"]]
+    visible_hits = [hit for hit in result["hits"] if not hit["reaction"]]
     if len(bands) != len(result["blocks"]):
         problems.append(f"{sample}: {len(bands)} bands for {len(result['blocks'])} blocks")
-    if len(ticks) != len(result["hits"]):
-        problems.append(f"{sample}: {len(ticks)} ticks for {len(result['hits'])} hits")
+    if len(ticks) != len(visible_hits):
+        problems.append(f"{sample}: {len(ticks)} ticks for {len(visible_hits)} authored hits")
+    # The sample trial has to trigger reactions, otherwise the filter is untested.
+    if not reaction_hits:
+        problems.append(f"{sample}: no Stellar reaction to keep out of the strip")
+    reaction_ids = {hit["ability"] for hit in reaction_hits}
+    if any(tick["id"] in reaction_ids for tick in ticks):
+        problems.append(f"{sample}: a Stellar reaction is still drawn as a tick")
     if payload["tMax"] < max(block["end"] for block in result["blocks"]) - 1e-6:
         problems.append(f"{sample}: the strip axis ends before the last block")
     # Trial bands are whole field sequences: faded, with their hits on top - the
@@ -3114,16 +3298,66 @@ def _run_editor_port_check() -> dict:
     # not the active character. It is a paint flag only, so it must mirror the
     # engine's on_field exactly and must not be flattened back to False.
     dimmed_ticks = [tick for tick in ticks if tick["off"]]
-    off_field_hits = [hit for hit in result["hits"] if not hit["on_field"]]
+    off_field_hits = [hit for hit in visible_hits if not hit["on_field"]]
     if len(dimmed_ticks) != len(off_field_hits):
         problems.append(f"{sample}: {len(dimmed_ticks)} dimmed ticks for "
                         f"{len(off_field_hits)} off-field hits")
     elif not dimmed_ticks:
         problems.append(f"{sample}: no hit is dimmed, the off-field cue is flat")
 
+    # Buff lanes (trial strip only): the equipment / aura windows worth watching.
+    # They use the SAME party gate as the audit table (buff_registry.strip_buffs),
+    # they exist only when the trial actually saw the window, and they stay inside
+    # the strip's time axis.
+    available = {entry["key"] for entry in buff_registry.strip_buffs(party)}
+    lanes = {row["id"][2:] for row in buff_rows}
+    if not lanes:
+        problems.append(f"{sample}: no buff lane is drawn, the lanes are untested")
+    if not lanes <= available:
+        problems.append(f"{sample}: buff lanes for unequipped effects: "
+                        f"{sorted(lanes - available)}")
+    for key in lanes:
+        mine = [item for item in buff_bars if item["id"] == key]
+        if not mine:
+            problems.append(f"{sample}: the {key} lane has no window")
+        elif any(item["start"] < -1e-9 or item["end"] > payload["tMax"] + 1e-6
+                 for item in mine):
+            problems.append(f"{sample}: a {key} window leaves the strip")
+        elif any(item["end"] < item["start"] - 1e-9 for item in mine):
+            problems.append(f"{sample}: a {key} window ends before it starts")
+    # The default party wears Instructor and has 2+ Cryo, so those two may show up;
+    # the gear it does NOT wear must never appear - that is the gate, not a list.
+    unseen_gear = {"widsith_state", "vv_state", "gilded_state", "hotf_state"}
+    if lanes & unseen_gear:
+        problems.append(f"{sample}: lanes for gear this party does not wear: "
+                        f"{sorted(lanes & unseen_gear)}")
+    # ... and equipping exactly that gear has to add its lanes.
+    geared = copy.deepcopy(party)
+    geared["Mizuki"]["artifact_set"] = "Viridescent Venerer"
+    geared["Faruzan"]["artifact_set"] = "Gilded Dreams"
+    geared["Odette"]["weapon"] = "The Widsith (Average)"
+    geared["Aether"]["artifact_set"] = "Heart Of The Furnace"
+    geared_result = engine.simulate(spec, sample, geared, {})
+    geared_payload = payloads.trial_payload(spec, sample, geared_result,
+                                            party=geared, px_per_sec=14.0)
+    geared_lanes = {row["id"][2:] for row in geared_payload["rows"]
+                    if row["kind"] == "buff"}
+    added = geared_lanes - lanes
+    if not added:
+        problems.append(f"{sample}: equipping Widsith/VV/Gilded/HotF added no buff lane")
+    elif not added <= unseen_gear:
+        problems.append(f"{sample}: equipping gear produced unrelated lanes: "
+                        f"{sorted(added - unseen_gear)}")
+    if not geared_lanes <= {entry["key"] for entry in buff_registry.strip_buffs(geared)}:
+        problems.append(f"{sample}: a geared lane is not in the geared party's registry")
+
     rotation_key = "standard_mizuki_loop"
     preview = payloads.rotation_preview(spec, rotation_key, party, {})
     loop = payloads.rotation_payload(spec, rotation_key, preview)
+    # Buff lanes are a trial-strip read-out: the rotation and field-sequence strips
+    # stay exactly as lean as they were.
+    if any(row["kind"] == "buff" for row in loop["rows"]):
+        problems.append(f"{rotation_key}: the rotation strip draws buff lanes")
     markers = [item for item in loop["items"] if item["kind"] == "marker"]
     if len(markers) != 2:
         problems.append(f"{rotation_key}: expected a loop start and a loop end marker")
@@ -3132,7 +3366,16 @@ def _run_editor_port_check() -> dict:
     loop_ticks = [item for item in loop["items"] if item["kind"] == "hit"]
     first_loop = payloads.rotation_seconds(spec, rotation_key)
     drawn = {block["id"] for block in preview["blocks"] if block["start"] < first_loop - 1e-9}
-    loop_hits = [hit for hit in preview["hits"] if hit["block"] in drawn]
+    # Same rule on the rotation strip: the loop's authored hits are the ticks, and
+    # the reactions it triggers are not drawn.
+    loop_all = [hit for hit in preview["hits"] if hit["block"] in drawn]
+    loop_hits = [hit for hit in loop_all if not hit["reaction"]]
+    if len(loop_ticks) != len(loop_hits):
+        problems.append(f"{rotation_key}: {len(loop_ticks)} ticks for "
+                        f"{len(loop_hits)} authored hits in one loop")
+    loop_reaction_ids = {hit["ability"] for hit in loop_all if hit["reaction"]}
+    if any(tick["id"] in loop_reaction_ids for tick in loop_ticks):
+        problems.append(f"{rotation_key}: a Stellar reaction is still drawn as a tick")
     dimmed_loop = [tick for tick in loop_ticks if tick["off"]]
     off_field_loop = [hit for hit in loop_hits if not hit["on_field"]]
     if len(dimmed_loop) != len(off_field_loop):
@@ -3176,6 +3419,8 @@ def _run_editor_port_check() -> dict:
     focus = payloads.field_sequence_payload(spec, sequence_key)
     if not any(item["kind"] == "marker" for item in focus["items"]):
         problems.append(f"{sequence_key}: the swap markers are missing")
+    if any(row["kind"] == "buff" for row in focus["rows"]):
+        problems.append(f"{sequence_key}: the field-sequence strip draws buff lanes")
 
     # The focus strip is display only, and its ability bars are faded so they never
     # hide their own hit ticks: dragging is gone and the bars sit behind the hits.
@@ -3186,10 +3431,12 @@ def _run_editor_port_check() -> dict:
         problems.append(f"{sequence_key}: the ability bars are not soft behind their hits")
 
     # The field-sequence strip is the reference: all three draw a band the same way -
-    # faded, named, with a minimum width, and never filling the whole lane.
+    # faded, named, with a minimum width, and never filling the whole lane. Buff
+    # windows are seg pills rather than bands, so they are not part of this contract.
     for tag, items in (("trial", payload["items"]), ("rotation", loop["items"]),
                        ("focus", focus["items"])):
-        tagged = [item for item in items if item["kind"] == "band"]
+        tagged = [item for item in items
+                  if item["kind"] == "band" and item.get("refKind") != "buff"]
         if not tagged:
             problems.append(f"{tag}: no bands to compare")
         elif any(item.get("fill") for item in tagged):
@@ -3244,6 +3491,10 @@ def _run_editor_port_check() -> dict:
         "hits": hits_by_trial,
         "active": spec["active_trial"],
         "dimmed": {"trial": len(dimmed_ticks), "rotation": len(dimmed_loop)},
+        "reactions": {"trial": len(reaction_hits), "rotation": len(loop_all) - len(loop_hits),
+                      "ticks": len(ticks), "visible": len(visible_hits)},
+        "buff_lanes": sorted(lanes | geared_lanes),
+        "buff_windows": len(buff_bars),
     }
 
 
@@ -3287,7 +3538,7 @@ def _run_editor_edit_check() -> dict:
     mutations.move_placement(spec, sequence_id, placement_id, 0.5)
     mutations.set_field_time(spec, sequence_id, 2.5)
     placed = spec["field_seqs"][sequence_id]["placements"][0]
-    if abs(placed["first_hit"] - 0.5) > 1e-9:
+    if abs(placed["cast_time"] - 0.5) > 1e-9:
         problems.append("moving a placement did not stick")
     if abs(spec["field_seqs"][sequence_id]["field_time"] - 2.5) > 1e-9:
         problems.append("the swap-out time did not stick")
@@ -3529,6 +3780,13 @@ def _run_editor_ui_check() -> dict:
         app.run()
         if check("the Field sequence screen"):
             seen.append(("Field sequence", len(app.metric)))
+            frames = [getattr(table, "value", None) for table in app.data_editor]
+            frames = [frame for frame in frames if hasattr(frame, "columns")]
+            if not frames:
+                problems.append("the Field sequence screen has no ability timing table")
+            elif list(frames[0].columns) != ["Ability", "Hit", "Timing (s)"]:
+                problems.append("the ability timing table has columns %r"
+                                % (list(frames[0].columns),))
         if len(seen) == 3:
             # The pill is the owner selector, so it must take the whole screen with
             # it: the sequence dropdown, and the name and field time of whatever it
@@ -3913,6 +4171,16 @@ def run(verbose: bool = True) -> None:
         failures.append("no Aether burst was substituted (no Enhanced/Standard events)")
     if max_frostglow == 0:
         failures.append("Frostglow stacks never accumulated")
+    charged = [e for e in events if e.get("event_type") == "CAST"
+               and e.get("ability_name") == "Charged Attack"]
+    charged_gain = any(int(e.get("frostglow_on_cast") or 0) == 2
+                       for e in charged)
+    if "Aether" in party and not charged_gain:
+        failures.append("Aether charged attack did not grant 2 Frostglow")
+    elif verbose and charged_gain:
+        print("[OK] Aether charged attack grants 2 Frostglow")
+    if max_frostglow > 8:
+        failures.append(f"Frostglow exceeded the 8-stack cap ({max_frostglow})")
     if c6_on and verbose:
         print(f"[OK] Aether C6 window activated")
     if c2_on and verbose:
@@ -3923,17 +4191,23 @@ def run(verbose: bool = True) -> None:
     # 3b. Odette kit auditors (shadow, Marvelous, C2 shred) on the standard run.
     odette_marvel_on = "Odette" in party and any(int(e.get("marvelous_stacks", 0) or 0) > 0 for e in hit_events)
     odette_shadow_on = "Odette" in party and any(e.get("odette_shadow_state") == "ON" for e in hit_events)
-    odette_c2_on = "Odette" in party and any(e.get("odette_c2_state") == "ON" for e in hit_events)
+    odette_c2_shred = False
+    if "Odette" in party:
+        sample = next((e for e in hit_events
+                       if e.get("odette_shadow_state") == "ON"), None)
+        if sample is not None:
+            shred = _buffed_stats(timeline, sample, "Mizuki").get("cryo_shred", 0.0)
+            odette_c2_shred = abs(shred - 0.20) <= 1e-9
     if odette_marvel_on and verbose:
         print("[OK] Odette Marvelous activated")
     if not odette_marvel_on:
         failures.append("Odette Marvelous never activated")
     if not odette_shadow_on:
         failures.append("Odette shadow state never activated")
-    if odette_c2_on and verbose:
-        print("[OK] Odette C2 shred activated")
-    if "Odette" in party and not odette_c2_on:
-        failures.append("Odette C2 shred never activated")
+    if odette_c2_shred and verbose:
+        print("[OK] Odette C2 shred active (20%)")
+    if "Odette" in party and not odette_c2_shred:
+        failures.append("Odette C2 shred missing while the shadow is up")
 
     # 3c. Odette's "Snow Swan's Dream": self-only, talent-scaled, 20s from the cast.
     ob = _run_odette_burst_check()
@@ -3978,6 +4252,8 @@ def run(verbose: bool = True) -> None:
          f"C6 Odette lost her own stacks off-field: {oc['stacks'][6]['own_after_swap']}"),
         (any(s < 6 for s in oc["stacks"][2]["own_after_swap"]),
          "C2 Odette did not transfer her stacks off-field"),
+        (bool(oc["reentry_swaps"]) and all(s < 6 for s in oc["reentry_swaps"][1:]),
+         f"Odette Marvelous refilled on re-entry: {oc['reentry_swaps']}"),
         (oc["stacks"][6]["party_after_window"] == 0
          and oc["stacks"][0]["party_after_window"] == 0,
          "Marvelous stacks outlived the shadow window"),
@@ -4039,6 +4315,23 @@ def run(verbose: bool = True) -> None:
         print("[OK] Faruzan quill fired on anemo hits")
     if "Faruzan" in party and not faruzan_quill_on:
         failures.append("Faruzan quill never applied to anemo standard hits")
+    faruzan_first_on = False
+    if "Faruzan" in party:
+        first_burst = next((e for e in hit_events
+                            if e.get("character") == "Faruzan"
+                            and e.get("ability_name") == "Elemental Burst"), None)
+        faruzan_first_on = (bool(first_burst)
+                            and first_burst.get("faruzan_buff_state") == "ON")
+        if not faruzan_first_on:
+            failures.append("Faruzan burst first hit is not buffed")
+        elif verbose:
+            print("[OK] Faruzan cast includes its first hit")
+    c1_quills = [e for e in hit_events if e.get("c1_quill")]
+    if "Mizuki" in party:
+        if not c1_quills or (c1_quills[0].get("quills_total") or 0) <= 0:
+            failures.append("Mizuki C1 quill is missing from Quills")
+        elif verbose:
+            print("[OK] Mizuki C1 quill shown in Quills")
 
     # 3e. Sucrose kit: A1 (50 EM, non-Anemo), A4 (20% flat EM, others), C6 field.
     suc = _run_sucrose_check()
@@ -4524,6 +4817,7 @@ def run(verbose: bool = True) -> None:
          f"numeric audit columns are still text: {tbl['text_numeric']}"),
         (tbl["buff_dtypes"] == ["Int64", "boolean"],
          f"buff column dtypes are {tbl['buff_dtypes']}"),
+        (tbl["cast_rows"] == 0, "CAST marker rows leaked into the results table"),
         (tbl["sortable"], "an audit column does not sort by value"),
         (not tbl["empty_text"],
          "the engine's '-'/'None' sentinels still reach the table as text: "
@@ -4777,6 +5071,52 @@ def run(verbose: bool = True) -> None:
         print(f"[OK] hit catalogue: {hits_cat['sequences']} sequences / "
               f"{hits_cat['abilities']} abilities, every hit scales and fits its field")
 
+    # 3q-bis. Ability hit-timing editor: overrides are spec data, not registry data.
+    timing = _run_ability_timing_check()
+    timing_checks = [
+        (timing["rows"] > 0, "the timing editor has no rows"),
+        (timing["order_error"] is not None,
+         "an out-of-order timing was accepted"),
+        (timing["spec_unchanged_after_error"],
+         "a refused timing changed the spec"),
+        (timing["error_ability"] and timing["error_names"],
+         "the timing error does not name the ability and offending hits"),
+        (timing["registry_unchanged"],
+         "a timing override leaked into abilities.py"),
+        (abs(timing["engine_timing"] - timing["spec_timing"]) <= 1e-9,
+         "the engine does not see the edited timing"),
+        (timing["band_end"] is not None
+         and abs(timing["band_end"] - timing["band_expected"]) <= 1e-6,
+         f"the strip band ends at {timing['band_end']}, expected {timing['band_expected']}"),
+        (timing["reset"], "Reset did not restore a timing override"),
+        (abs(timing["reset_timing"] - 9.869) <= 1e-9,
+         f"Reset left {timing['reset_timing']} instead of 9.869"),
+        (abs(timing["seed_timing"] - timing["spec_timing"]) <= 1e-9,
+         "seeding a saved timing did not apply it"),
+        (abs(timing["build_sequence_timing"] - timing["spec_timing"]) <= 1e-9,
+         "the build loader did not apply the saved timing"),
+        (timing["build_registry_unchanged"],
+         "the build loader leaked a timing override into abilities.py"),
+        (timing["split_band_start"] is not None
+         and abs(timing["split_band_start"] - timing["placement_cast"]) <= 1e-9,
+         "the strip band does not start at the cast"),
+        (timing["split_first_hit"] is not None
+         and abs(timing["split_first_hit"] - (timing["placement_cast"] + 0.2)) <= 1e-6,
+         "the first hit did not move relative to the cast"),
+        (timing["split_engine_first"] is not None
+         and abs(timing["split_engine_first"] - timing["split_first_hit"]) <= 1e-6,
+         "the engine and the strip disagree on the first hit"),
+        (timing["split_preflight_cast"] is not None
+         and abs(timing["split_preflight_cast"] - timing["placement_cast"]) <= 1e-6,
+         "the pre-flight cast time is not the press"),
+    ]
+    timing_failures = [msg for ok, msg in timing_checks if not ok]
+    failures.extend(timing_failures)
+    if not timing_failures and verbose:
+        print(f"[OK] ability timing editor: {timing['rows']} rows, override "
+              f"{timing['spec_timing']} / engine {timing['engine_timing']}, "
+              f"registry unchanged")
+
     # 3r. Mizuki's burst: hit register only (BURST damage, no Dreamdrifter leakage).
     mz = _run_mizuki_burst_check()
     mz_checks = [
@@ -4979,6 +5319,15 @@ def run(verbose: bool = True) -> None:
          f"Love elevation is {anc['love'][1]['elevation']}/"
          f"{anc['love'][2]['elevation']}/{anc['love'][6]['elevation']} at C1/C2/C6, "
          f"expected 0 / 0.05 / 0.15"),
+        # The elevation half has to land on stellar REACTION damage too, exactly like
+        # Odette's C6: a swirl scales by (1 + elevation), so 1.0 / 1.05 / 1.15.
+        (anc["love_reaction"][1] is not None
+         and abs(anc["love_reaction"][1] - 1.0) <= 1e-9
+         and abs(anc["love_reaction"][2] - 1.05) <= 1e-9
+         and abs(anc["love_reaction"][6] - 1.15) <= 1e-9,
+         f"Love elevation scales a stellar reaction by {anc['love_reaction'][1]}/"
+         f"{anc['love_reaction'][2]}/{anc['love_reaction'][6]} at C1/C2/C6, "
+         f"expected 1 / 1.05 / 1.15"),
         (anc["c6"][5]["count"] == 0, f"C6 Triumph fired below C6 ({anc['c6'][5]['count']})"),
         (anc["c6"][6]["count"] > 6, f"only {anc['c6'][6]['count']} C6 Triumphs fired"),
         (anc["c6"][6]["delay_ok"],
@@ -5005,7 +5354,7 @@ def run(verbose: bool = True) -> None:
               f"{acc1['shared_cd_self']} crit +{acc1['shared_atk_cryo']} ATK / "
               f"{acc1['shared_em_anemo']} EM, C4 {acc4['shared_cd_ally']}/"
               f"{acc4['shared_cd_self']}, C2 Love {anc['love'][2]['stellar_cd']}, "
-              f"C6 elev {anc['love'][6]['elevation']}, "
+              f"C6 elev {anc['love'][6]['elevation']} (reaction x{anc['love_reaction'][6]}), "
               f"{anc['c6'][6]['count']} C6 Triumphs")
         print("     preset totals by constellation: "
               + ", ".join(f"C{c}={v:,.1f}" for c, v in anc["totals"].items()))
@@ -5251,8 +5600,12 @@ def run(verbose: bool = True) -> None:
         print(f"[OK] trial editor port: {port['trial_count']} presets match the runner "
               f"exactly ({port['sequence_count']} sequences / {port['rotation_count']} rotations); "
               f"off-field dimming: {port['dimmed']['trial']} of "
-              f"{port['hits']['triple_cryo_rotation']} ticks in the sample trial, "
-              f"{port['dimmed']['rotation']} in one loop; the rotation table adds up")
+              f"{port['reactions']['ticks']} ticks in the sample trial, "
+              f"{port['dimmed']['rotation']} in one loop, "
+              f"{port['reactions']['trial']} swirl/vortex rows kept out of the strips, "
+              f"buff lanes {', '.join(port['buff_lanes'])} with "
+              f"{port['buff_windows']} windows gated by the equipped gear; "
+              f"the rotation table adds up")
 
 
     # 2s. The editor builds a trial from nothing, and refuses the bad edits.

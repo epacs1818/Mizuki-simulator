@@ -41,10 +41,11 @@ CONDITIONAL_CONSTANT_BUFFS = {
         "electro_shred":0.20,
         "anemo_shred": 0.20,
     },
-    #"Mizuki C6 Stellar Crit": {
-    #    "crit_rate" : 0.100,
-    #    "crit_dmg" : 0.200,
-    #},
+    # C6 part 1: party-wide stellar crit while DDS is up (C6+).
+    "Mizuki C6 Stellar Crit": {
+        "stellar_crit_rate": 0.10,
+        "stellar_crit_dmg": 0.20,
+    },
 
     #Aether
     "Aether C2 Buff Initial":{
@@ -64,8 +65,9 @@ CONDITIONAL_CONSTANT_BUFFS = {
     # Odette's "Snow Swan's Dream" (SSD) is talent-scaled, so its value lives in
     # CONDITIONAL_NON_CONSTANT_BUFFS: self-only below C4, 20s from her burst cast.
     # C6: while the shadow is on field the OTHERS gain +25% elevation_mult and she
-    # gains +45% total (0.25 party + 0.20 personal). Elevation applies to STELLAR
-    # damage only, never to stellar reactions.
+    # gains +45% total (0.25 party + 0.20 personal). Elevation is one shared key and
+    # damage_calc reads it on BOTH paths: calculate_stellar_damage and each
+    # contributor's share of a Stellar reaction (swirl / vortex explosion).
     "Odette C6 self":{
         "elevation_mult": 0.45,
     },
@@ -74,11 +76,12 @@ CONDITIONAL_CONSTANT_BUFFS = {
     },
     
     #Faruzan
-    # +40% crit_dmg, applied only to ANEMO-element hits (faruzan_buff_state is gated
-    # to anemo events in the timeline). The talent-scaled party anemo_bonus is
-    # provided separately by "Faruzan C6 Anemo Bonus" (non_constant).
+    # +40% Anemo Crit DMG. The stat key itself is element-specific, so the timeline
+    # only has to know the buff window; damage_calc applies it to Anemo hits.
+    # The talent-scaled party anemo_bonus is provided separately by
+    # "Faruzan C6 Anemo Bonus" (non_constant).
     "Faruzan C6 Buff":{
-        "crit_dmg" : 0.400,
+        "anemo_crit_dmg": 0.400,
     },
     "Faruzan C6 Debuff":{
         "anemo_shred": 0.30,
@@ -161,6 +164,8 @@ CONDITIONAL_CONSTANT_BUFFS = {
     "Anastasya Love Elevation C6":{      # C6: stacks on top of the C2 part
         "elevation_mult": 0.10,
     },
+    # Both parts are the same elevation key Odette's C6 uses, so damage_calc applies
+    # them to stellar DMG and to each contributor's share of a stellar reaction.
     # A4: while she is in the party, STELLAR SWIRL REACTION damage gains +0.10
     # jubilee (a separate key: stellar DMG is unaffected). This is her party-wide
     # stellar multiplier at every constellation; her ATK-scaled Jubilee passive
@@ -245,11 +250,11 @@ CONDITIONAL_CONSTANT_BUFFS = {
         "atk_percent":[0.20, 0.25, 0.30, 0.35, 0.40],
         "em":[100.0, 125.0, 150.0, 175.0, 200.0],
     },
-    # New Tsaritsa set: while stacked, the holder gains crit rate on CRYO hits
-    # (the timeline only flags it on Cryo events, like Faruzan C6 does for Anemo)
-    # and stellar crit rate everywhere.
+    # New Tsaritsa set: while stacked, the holder gains Cryo Crit Rate (an
+    # element-specific key, applied only to Cryo hits) and stellar crit rate
+    # everywhere. A Cryo stellar hit receives both, by design.
     "New Tsaritsa set CR":{
-        "crit_rate": 0.20,
+        "cryo_crit_rate": 0.20,
     },
     "New Tsaritsa set Stellar CR":{
         "stellar_crit_rate": 0.20,

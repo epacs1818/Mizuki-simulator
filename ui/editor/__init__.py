@@ -7,6 +7,7 @@
   validate.py   pre-flight warnings: structure, party fit, window fit, cooldowns
   payloads.py   the strip payloads (trial / rotation / field sequence)
   strips.py     the vendored strip component and its intent accessors
+  timings.py    the ability hit-timing table (draft, apply / reset / undo)
   results.py    the slim hit log, per-slot damage, the metrics and the rotation table
   screens.py    the three screens: Trial / Rotation / Field sequence
   publish.py    spec -> Trial/Rotation/FieldSequence objects for the runner pools

@@ -41,14 +41,16 @@ def sequence_issues(spec: dict, sequence_key: str) -> list:
         if ability is None:
             issues.append(_issue(ERROR, "%s references an unknown ability." % label, where))
             continue
-        when = float(placement["first_hit"])
+        cast = float(placement["cast_time"])
         window = float(sequence["field_time"])
-        if when > window + 1e-9:
-            issues.append(_issue(INFO, "%s starts at %.3fs, after the %.3fs swap-out: it resolves off-field." % (ability["name"], when, window), where))
+        base = float(ability.get("first_hit_delay", 0.0))
+        first = cast + base
+        if first > window + 1e-9:
+            issues.append(_issue(INFO, "%s's first hit lands at %.3fs, after the %.3fs swap-out: it resolves off-field." % (ability["name"], first, window), where))
         hits = ability.get("hits") or ()
         kept = len(hits)
         if ability.get("interrupt_on_swap_out"):
-            times = [when + float(hit["offset"]) for hit in hits]
+            times = [cast + float(hit["delay"]) for hit in hits]
             kept = interrupted_hit_count(times, window)
         if 0 < kept < len(hits):
             issues.append(_issue(INFO, "%s is interrupted by the %.3fs swap-out: %d of its %d hits land." % (ability["name"], window, kept, len(hits)), where))
@@ -97,7 +99,7 @@ def schedule(spec: dict, trial_key: str):
                 for placement in sequence["placements"]:
                     ability = spec["catalog"]["abilities"].get(placement["ability"]) or {}
                     casts.append((
-                        round(t + float(placement["first_hit"]), 6),
+                        round(t + float(placement["cast_time"]), 6),
                         sequence["character"],
                         placement["ability"],
                         ability.get("name", ""),

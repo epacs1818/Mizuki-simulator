@@ -9,7 +9,8 @@ from dps_curve import (DEFAULT_SIGMA, DEFAULT_TRUNCATION, auto_params,
                        gaussian_dps, hit_series)
 from ui.cards import render_party_card
 from ui.paths import ASSETS
-from ui.style import AUDIT_COLUMN_CONFIG, blend_chart, style_timeline_dataframe
+from ui.style import (AUDIT_COLUMN_CONFIG, blend_chart, buff_column_config,
+                      style_timeline_dataframe)
 from ui.table import build_timeline_dataframe
 
 
@@ -280,9 +281,12 @@ def render() -> None:
                         ]
                         view = df_timeline[[c for c in preview_order if c in df_timeline.columns]]
                     st.dataframe(style_timeline_dataframe(view),
-                                 column_config={name: config for name, config
-                                                in AUDIT_COLUMN_CONFIG.items()
-                                                if name in view.columns},
+                                 column_config={
+                                     **{name: config for name, config
+                                        in AUDIT_COLUMN_CONFIG.items()
+                                        if name in view.columns},
+                                     **buff_column_config(sim_party, view),
+                                 },
                                  width="stretch", hide_index=False, placeholder="-")
 
                     st.markdown("<br><hr>", unsafe_allow_html=True)

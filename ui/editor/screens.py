@@ -10,7 +10,7 @@ from __future__ import annotations
 import streamlit as st
 
 from ui.editor import (catalog, mutations, payloads, publish, results, store,
-                        strips, validate)
+                        strips, timings, validate)
 from models import interrupted_hit_count
 from ui.state import toast
 
@@ -135,7 +135,7 @@ def _trial_actions(spec: dict, trial_id: str) -> None:
         def make() -> None:
             store.select(mutations.new_trial(spec, "New trial",
                                              next(iter(spec["rotations"]), None), party))
-        _apply(make, "Trial created.")
+        _apply(make, "New Trial added.")
     if columns[1].button("Duplicate", key="ed_dup_trial", use_container_width=True,
                          disabled=not trial):
         def twin() -> None:
@@ -275,10 +275,14 @@ def _trial_preview(spec: dict, trial_id: str) -> None:
     st.markdown("#### " + trial["name"])
     if trial.get("description"):
         st.caption(trial["description"])
-    payload = payloads.trial_payload(spec, trial_id, result, px_per_sec=TRIAL_PX_PER_SEC)
+    payload = payloads.trial_payload(spec, trial_id, result,
+                                     party=store.current_party(),
+                                     px_per_sec=TRIAL_PX_PER_SEC)
     strips.render(payload, key=TRIAL_STRIP)
     pick = strips.event("select", key=TRIAL_STRIP)
-    if pick:
+    # Only authored things navigate: a buff lane's bar is a read-out, so clicking it
+    # must not run the hit lookup below.
+    if pick and pick.get("kind") in ("block", "hit"):
         block_id = pick.get("id") if pick.get("kind") == "block" else _block_of_hit(result, pick)
         block = next((item for item in result["blocks"] if item["id"] == block_id), None)
         if block is not None and block["rotation"] in spec["rotations"]:
@@ -562,24 +566,25 @@ def _placement_list(spec: dict, sequence_id: str) -> None:
     for placement in placements:
         ability = abilities.get(placement["ability"]) or {"name": "(missing ability)", "hits": []}
         hits = ability.get("hits") or ()
+        cast = float(placement["cast_time"])
         kept = len(hits)
         if ability.get("interrupt_on_swap_out"):
-            times = [float(placement["first_hit"]) + float(hit["offset"]) for hit in hits]
+            times = [cast + float(hit["delay"]) for hit in hits]
             kept = interrupted_hit_count(times, float(sequence["field_time"]))
         columns = st.columns([0.5, 0.24, 0.12])
+        detail = ("%d hit(s)" % kept if kept == len(hits) else
+                  "%d of %d hit(s) - cut by the %.3fs swap-out"
+                  % (kept, len(hits), float(sequence["field_time"])))
         columns[0].markdown("%s <span style='opacity:.6'>%s</span>"
-                            % (ability["name"],
-                               "%d hit(s)" % kept if kept == len(hits) else
-                               "%d of %d hit(s) - cut by the %.3fs swap-out"
-                               % (kept, len(hits), float(sequence["field_time"]))),
+                            % (ability["name"], detail),
                             unsafe_allow_html=True)
-        when = columns[1].number_input("First hit time (s)", min_value=0.0, max_value=300.0, step=0.01,
-                                       value=float(placement["first_hit"]),
+        when = columns[1].number_input("Cast time (s)", min_value=0.0, max_value=300.0, step=0.01,
+                                       value=cast,
                                        format="%0.3f",
                                        key="ed_place_time_" + placement["id"],
                                        label_visibility="collapsed", disabled=locked,
-                                       help="Adjust when the first hit lands.")
-        if abs(when - float(placement["first_hit"])) > 1e-9:
+                                       help="When the character presses the button.")
+        if abs(when - cast) > 1e-9:
             _try(lambda: mutations.move_placement(spec, sequence_id,
                                                   placement["id"], when))
         if columns[2].button("\u2715", key="ed_place_del_" + placement["id"],
@@ -591,7 +596,7 @@ def _placement_list(spec: dict, sequence_id: str) -> None:
             st.rerun(scope="fragment")
     if locked:
         return
-    options = catalog.abilities_of(sequence["character"])
+    options = catalog.castable_abilities_of(sequence["character"])
     if not options:
         st.caption("This character has no abilities in the catalogue.")
         return
@@ -620,7 +625,6 @@ def _sequence_preview(spec: dict, sequence_id: str) -> None:
     pick = strips.event("select", key=SEQUENCE_STRIP)
     if pick and pick.get("kind") == "placement" and pick.get("id"):
         st.session_state[SELECTION_KEY] = ("placement", pick["id"])
-    results.render_issues(validate.sequence_issues(spec, sequence_id))
 
 
 def _character_pills(spec: dict, current: str) -> str:
@@ -666,3 +670,5 @@ def sequence_screen(spec: dict) -> None:
         _sequence_apply(spec, current)
     with right:
         _sequence_preview(spec, current)
+        results.render_issues(validate.sequence_issues(spec, current))
+        timings.render(spec, current, owner)

@@ -3,6 +3,7 @@
 import streamlit as st
 
 from abilities import ABILITY_REGISTRY, abilities_for
+from buff_registry import buff_is_active
 from presets import field_sequences_for
 
 
@@ -56,11 +57,8 @@ def select_trial_label(key: str, trial) -> str:
 
 BUFF_GROUP_TAG = {"Character": "", "Weapon": "[W] ", "Artifact": "[A] ", "Team": "[T] "}
 
-
-def buff_is_active(value):
-    """True when a buff audit cell is not OFF / 0 / empty."""
-    if value is None:
-        return False
-    if isinstance(value, str):
-        return value.strip() not in ("", "OFF", "-")
-    return value != 0
+# buff_is_active is re-exported from buff_registry: the strips need the same ON/OFF
+# test headlessly, and two copies would be two answers to one question.
+__all__ = ["BUFF_GROUP_TAG", "buff_is_active", "party_characters",
+           "available_field_sequences", "available_abilities",
+           "rotation_field_time", "trial_field_time", "select_trial_label"]

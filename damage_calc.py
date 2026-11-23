@@ -128,6 +128,11 @@ def calculate_standard_damage(hit, final_stats, enemy_stats, quill_damage=0.0, c
     # 3. Crit Multipliers
     crit_rate = final_stats.get("CR", final_stats.get("crit_rate", 0.05))
     crit_dmg = final_stats.get("CD", final_stats.get("crit_dmg", 0.50))
+    # Element-specific crit (Faruzan anemo_crit_dmg, Tsaritsa cryo_crit_rate)
+    # is defined by the buff itself, not gated in the timeline.
+    elem_lower = hit.element.lower() if hit.element else "physical"
+    crit_rate += final_stats.get(f"{elem_lower}_crit_rate", 0.0)
+    crit_dmg += final_stats.get(f"{elem_lower}_crit_dmg", 0.0)
 
     if final_stats.get("rv_mode"):
         # 100% RV mode: single Crit Value, no crit/non-crit variance.
@@ -221,6 +226,9 @@ def calculate_stellar_damage(hit, final_stats, enemy_stats, quill_damage=0.0):
     # 4. Crit Multipliers
     crit_rate = final_stats.get("CR", final_stats.get("crit_rate", 0.05))
     crit_dmg = final_stats.get("CD", final_stats.get("crit_dmg", 0.50))
+    elem_lower = hit.element.lower() if hit.element else "physical"
+    crit_rate += final_stats.get(f"{elem_lower}_crit_rate", 0.0)
+    crit_dmg += final_stats.get(f"{elem_lower}_crit_dmg", 0.0)
 
     # Systematic C6 Part 1 Stellar Crit: applied via dedicated stellar crit stats,
     # which are resolved for every party member during Mizuki's Dreamdrifter state.
@@ -298,21 +306,51 @@ def get_base_damage_for_level(level: int) -> float:
     closest_level = min(available_levels, key=lambda x: abs(x - level))
     return level_table[closest_level]
 
-def calculate_stellar_reaction_damage(hit, final_stats, enemy_stats, party_dict=None, quill_damage=0.0):
-    """
-    Calculates Stellar Reaction Damage by computing individual contributor stats,
-    evaluating all 2^n crit scenarios using pre-sort damages, applying shares, 
-    and returning the final expected damage and effective expected damage.
+def _res_multiplier(enemy_res, shred):
+    """Enemy RES multiplier for one element (shared by all damage paths)."""
+    net = enemy_res - shred
+    if net < 0:
+        return 1.0 - net / 2.0
+    if net < 0.75:
+        return 1.0 - net
+    return 1.0 / (1.0 + 4.0 * net)
+
+
+def _elevation(info):
+    """One contributor's elevation multiplier (raw adders are converted)."""
+    val = float(info.get("elevation_mult", info.get("Elevation Mult", 0.0)))
+    return val if val >= 1.0 else 1.0 + val
+
+
+def _crit_stats(info, element):
+    """(CR, CD) for one contributor: base + stellar crit + element crit."""
+    rate = float(info.get("CR", info.get("crit_rate", 0.05)))
+    dmg = float(info.get("CD", info.get("crit_dmg", 0.50)))
+    rate += float(info.get("stellar_crit_rate", info.get("Stellar CR", 0.0)))
+    dmg += float(info.get("stellar_crit_dmg", info.get("Stellar CD", 0.0)))
+    rate += float(info.get(f"{element}_crit_rate", 0.0))
+    dmg += float(info.get(f"{element}_crit_dmg", 0.0))
+    return min(max(rate, 0.0), 1.0), dmg
+
+
+def calculate_stellar_reaction_damage(hit, final_stats, enemy_stats,
+                                      party_dict=None, quill_damage=0.0):
+    """Stellar reaction damage with PER-CONTRIBUTOR multipliers.
+
+    Each contributor's share uses their own final stats: EM, stellar_bonus,
+    jubilee, reaction jubilee, elevation, RES shred, CR/CD, stellar crit and
+    the reaction element's crit. A Cryo contributor's share of an Anemo swirl
+    therefore gets Faruzan's anemo_crit_dmg if their snapshot has that buff.
+    Shares are 0.6 / 0.3 / 0.05 / 0.05 by descending pre-share damage; the
+    expected value covers all 2^n crit scenarios. The effective value ignores
+    RES. Multiplier audit columns stay null for reactions.
     """
     party_dict = party_dict or {}
 
-    # 1. Extract contributors and reaction coefficient from metadata
     swirl_meta = getattr(hit, "swirl_metadata", None)
     vortex_meta = getattr(hit, "vortex_metadata", None)
-
     contributors = []
-    reaction_coef = 0.75  # Default for standard stellar swirls
-
+    reaction_coef = 0.75
     if vortex_meta:
         level = vortex_meta.get("level", 1)
         reaction_coef = 2.0 if level == 1 else 3.0
@@ -320,140 +358,56 @@ def calculate_stellar_reaction_damage(hit, final_stats, enemy_stats, party_dict=
         cryo_list = vortex_meta.get("cryo_contributors", [])
         contributors = [c for c in set(anemo_list + cryo_list) if c]
     elif swirl_meta:
-        reaction_coef = 0.75
         anemo_char = swirl_meta.get("anemo_contributor")
         cryo_list = swirl_meta.get("cryo_contributors", [])
-        raw_contribs = ([anemo_char] if anemo_char else []) + [c for c in cryo_list if c and c != anemo_char]
-        contributors = [c for c in raw_contribs if c]
-
-    # Fallback if no metadata contributors are found
+        raw = [anemo_char] if anemo_char else []
+        raw += [c for c in cryo_list if c and c != anemo_char]
+        contributors = [c for c in raw if c]
     if not contributors:
-        fallback_char = getattr(hit, "character", None) or "Mizuki"
-        contributors = [fallback_char]
+        contributors = [getattr(hit, "character", None) or "Mizuki"]
 
+    element = (hit.element or "physical").lower()
+    enemy_res = enemy_stats.get(f"{element}_res", 0.1)
     n = len(contributors)
 
-    # 2. Compute individual global multipliers (Bonus, Elevation, RES, Quills)
-    em = final_stats.get("EM", final_stats.get("em", 0.0))
-    em_bonus = (6.0 * em) / (2000.0 + em)
-    stellar_bonus = final_stats.get("stellar_bonus", final_stats.get("Stellar Bonus", 0.0))
-    jubilee_mult = final_stats.get("jubilee_mult", final_stats.get("Jubilee Mult", 0.0))
-    # Anastasya A4: extra jubilee that applies to STELLAR SWIRL REACTIONS only
-    # (never to plain stellar damage).
-    reaction_jubilee = final_stats.get("reaction_jubilee_mult", 0.0)
-    # The team Jubilee (Aether + Odette) multiplies the swirl reaction bonus too.
-    bonus_mult = (1.0 + jubilee_mult + reaction_jubilee) * (1.0 + em_bonus + stellar_bonus)
-    quill_damage = quill_damage or final_stats.get("quill_damage", 0.0) or (hit.get("quill_damage", 0.0) if isinstance(hit, dict) else getattr(hit, "quill_damage", 0.0))
-
-    elevation_val = final_stats.get("elevation_mult", final_stats.get("Elevation Mult", 0.0))
-    elevation_mult = elevation_val if elevation_val >= 1.0 else (1.0 + elevation_val)
-
-    # RES Multiplier
-    elem_lower = hit.element.lower() if hit.element else "physical"
-    enemy_res = enemy_stats.get(f"{elem_lower}_res", 0.1)
-    res_shred = final_stats.get(f"{elem_lower}_shred", 0.0)
-    net_res = enemy_res - res_shred
-
-    if net_res < 0:
-        res_mult = 1.0 - net_res / 2.0
-    elif 0 <= net_res < 0.75:
-        res_mult = 1.0 - net_res
-    else:
-        res_mult = 1.0 / (1.0 + 4.0 * net_res)
-
-    # 3. Build per-contributor dictionaries for tracking
-    contrib_base_damage = {}
-    contrib_bonus_mult = {}
-    contrib_elevation_mult = {}
-    contrib_crit_mult_average = {}
-    contrib_crit_mult_absolute = {}
-    contrib_res_mult = {}
-    contrib_non_crit = {}
-    contrib_crit_damage = {}
-    contrib_average_damage = {}
-
-    # Internal lists for the scenario loop
-    non_crit_damages_list = []
-    crit_damages_list = []
-    crit_rates_list = []
-
-    for char_name in contributors:
-        char_info = party_dict.get(char_name, {})
-        char_level = char_info.get("level", 90)
-        
-        # Base damage for this contributor
-        b_val = get_base_damage_for_level(char_level) * reaction_coef
-        contrib_base_damage[char_name] = b_val
-        # em_bonus uses THIS contributor's EM at the event moment; the swirl-wide
-        # stellar_bonus and team Jubilee stay constant across contributors.
-        em_c = float(char_info.get("EM", char_info.get("em", em)))
-        em_bonus_c = (6.0 * em_c) / (2000.0 + em_c)
-        bonus_mult_c = (1.0 + jubilee_mult + reaction_jubilee) * (1.0 + em_bonus_c + stellar_bonus)
-        contrib_bonus_mult[char_name] = bonus_mult_c
-        contrib_elevation_mult[char_name] = elevation_mult
-        contrib_res_mult[char_name] = res_mult
-
-        # Crit stats
-        c_rate = char_info.get("CR", char_info.get("crit_rate", final_stats.get("CR", final_stats.get("crit_rate", 0.05))))
-        c_dmg = char_info.get("CD", char_info.get("crit_dmg", final_stats.get("CD", final_stats.get("crit_dmg", 0.50))))
-
-        # Systematic C6 Part 1 Stellar Crit for Reactions: party-wide during DDS.
-        c_rate = float(c_rate) + final_stats.get("stellar_crit_rate", 0.0)
-        c_dmg = float(c_dmg) + final_stats.get("stellar_crit_dmg", 0.0)
-
-        c_rate = min(max(c_rate, 0.0), 1.0)
-        c_dmg = float(c_dmg)
-        crit_rates_list.append(c_rate)
-
-        if party_dict.get(char_name, {}).get("rv_mode"):
-            # 100% RV contributor: single Crit Value, no crit/non-crit variance.
-            crit_mult = crit_mult_from_crit_value(c_rate, c_dmg)
-            contrib_crit_mult_average[char_name] = crit_mult
-            contrib_crit_mult_absolute[char_name] = crit_mult
+    contrib = {}
+    non_crit_values, crit_values = [], []
+    eff_non_crit, eff_crit, crit_rates = [], [], []
+    for name in contributors:
+        info = party_dict.get(name, {})
+        base = get_base_damage_for_level(info.get("level", 90)) * reaction_coef
+        em = float(info.get("EM", info.get("em", 0.0)))
+        em_bonus = (6.0 * em) / (2000.0 + em)
+        stellar = float(info.get("stellar_bonus", info.get("Stellar Bonus", 0.0)))
+        jub = float(info.get("jubilee_mult", info.get("Jubilee Mult", 0.0)))
+        rjub = float(info.get("reaction_jubilee_mult", 0.0))
+        bonus = (1.0 + jub + rjub) * (1.0 + em_bonus + stellar)
+        elev = _elevation(info)
+        shred = float(info.get(f"{element}_shred", 0.0))
+        res = _res_multiplier(enemy_res, shred)
+        rate, dmg = _crit_stats(info, element)
+        if info.get("rv_mode"):
+            crit_mult = crit_mult_from_crit_value(rate, dmg)
+            nc = cd = avg = base * bonus * elev * res * crit_mult
+            nc_eff = cd_eff = base * bonus * elev * crit_mult
+            rate = 1.0
         else:
-            contrib_crit_mult_average[char_name] = 1.0 + c_rate * c_dmg
-            contrib_crit_mult_absolute[char_name] = 1.0 + c_dmg
+            nc = base * bonus * elev * res
+            cd = base * bonus * (1.0 + dmg) * elev * res
+            avg = base * bonus * (1.0 + rate * dmg) * elev * res
+            nc_eff = base * bonus * elev
+            cd_eff = base * bonus * (1.0 + dmg) * elev
+        contrib[name] = {"base_damage": base, "bonus_mult": bonus,
+                         "elevation_mult": elev, "res_mult": res,
+                         "crit_rate": rate, "crit_dmg": dmg,
+                         "non_crit": nc, "crit_damage": cd,
+                         "average_damage": avg}
+        crit_rates.append(rate)
+        non_crit_values.append(nc)
+        crit_values.append(cd)
+        eff_non_crit.append(nc_eff)
+        eff_crit.append(cd_eff)
 
-        # Contributor pre-share metrics. The quill is NOT folded in here: it is applied
-        # once at the AGGREGATE level, after the contribution weighting (see below).
-        q_base = b_val * bonus_mult_c
-
-        # non_crit: base with 0% crit (crit factor = 1.0)
-        nc_val = q_base * elevation_mult * res_mult
-        contrib_non_crit[char_name] = nc_val
-        non_crit_damages_list.append(nc_val)
-
-        # crit_damage: base with 100% crit (crit factor = 1 + CD)
-        cd_val = q_base * (1.0 + c_dmg) * elevation_mult * res_mult
-        contrib_crit_damage[char_name] = cd_val
-        crit_damages_list.append(cd_val)
-
-        # average_damage (useful for inspection/returning)
-        avg_val = q_base * (1.0 + c_rate * c_dmg) * elevation_mult * res_mult
-        contrib_average_damage[char_name] = avg_val
-
-    non_crit_arr = np.array(non_crit_damages_list, dtype=float)
-    crit_damages_arr = np.array(crit_damages_list, dtype=float)
-    crit_rates_arr = np.array(crit_rates_list, dtype=float)
-
-    # 100% RV / KQM contributors are DETERMINISTIC: their crit is one Crit Value, so
-    # their scenario collapses to a single outcome that carries the CV multiplier
-    # (probability 1) instead of the 1 + CR*CD branches built above. This keeps the
-    # expected-value loop, the crit/non-crit aggregates and the audit dicts aligned
-    # with the standard/stellar paths (which already use crit_mult_from_crit_value).
-    for idx, contributor in enumerate(contributors):
-        if not party_dict.get(contributor, {}).get("rv_mode"):
-            continue
-        rv_mult = contrib_crit_mult_average[contributor]
-        rv_value = non_crit_damages_list[idx] * rv_mult
-        non_crit_arr[idx] = rv_value
-        crit_damages_arr[idx] = rv_value
-        crit_rates_arr[idx] = 1.0
-        contrib_non_crit[contributor] = rv_value
-        contrib_crit_damage[contributor] = rv_value
-        contrib_average_damage[contributor] = rv_value
-
-    # 4. Determine share weights dynamically based on contributor count
     if n >= 4:
         weights = np.array([0.6, 0.3, 0.05, 0.05])
     elif n == 3:
@@ -463,63 +417,58 @@ def calculate_stellar_reaction_damage(hit, final_stats, enemy_stats, party_dict=
     else:
         weights = np.array([0.6])
 
-    # 5. Statistical Expected Value loop over all 2^n crit combinations
-    expected_damage = 0.0
+    nc_arr = np.array(non_crit_values, dtype=float)
+    cd_arr = np.array(crit_values, dtype=float)
+    eff_nc = np.array(eff_non_crit, dtype=float)
+    eff_cd = np.array(eff_crit, dtype=float)
+    rates = np.array(crit_rates, dtype=float)
 
+    expected = 0.0
+    expected_eff = 0.0
     for scenario in itertools.product([0, 1], repeat=n):
-        scenario = np.array(scenario)  # 1 = crit (uses crit_damage), 0 = non-crit (uses non_crit)
+        scenario = np.array(scenario)
+        prob = np.prod(np.where(scenario == 1, rates, 1.0 - rates))
+        values = np.where(scenario == 1, cd_arr, nc_arr)
+        values_eff = np.where(scenario == 1, eff_cd, eff_nc)
+        expected += prob * np.dot(np.sort(values)[::-1], weights[:n])
+        expected_eff += prob * np.dot(np.sort(values_eff)[::-1], weights[:n])
 
-        # Probability of this specific combination of crits occurring
-        prob = np.prod(np.where(scenario == 1, crit_rates_arr, 1.0 - crit_rates_arr))
-
-        # Select corresponding pre-share value for each contributor based on scenario (crit vs non-crit)
-        scenario_values = np.where(scenario == 1, crit_damages_arr, non_crit_arr)
-
-        # Sort values in descending order (highest to lowest damage) *before* applying shares
-        sorted_values = np.sort(scenario_values)[::-1]
-
-        # Apply share weights
-        current_weights = weights[:len(sorted_values)]
-        scenario_score = np.dot(sorted_values, current_weights)
-
-        # Accumulate probability-weighted score into total expected damage
-        expected_damage += prob * scenario_score
-
-    # Quill added POST-contribution: applied once to the aggregate. It skips
-    # bonus_mult but keeps elevation, res and an expected crit factor (share-weighted
-    # average over the contributors).
-    w1 = weights[:n]
-    wsum = float(w1.sum()) or 1.0
-    exp_crit = float(np.dot(np.array([contrib_crit_mult_average[c] for c in contributors]), w1) / wsum)
-    exp_abs = float(np.dot(np.array([contrib_crit_mult_absolute[c] for c in contributors]), w1) / wsum)
+    # Quill: once after the shares, no bonus_mult, owner's elevation/RES/crit.
     if getattr(hit, "c1_quill", False):
-        mizuki_em_at_event = float(party_dict.get("Mizuki", {}).get("EM", 0.0) or 0.0)
-        quill_damage = 5.5 * mizuki_em_at_event
-    quill_crit = contrib_crit_mult_average.get("Mizuki", exp_crit)
-    q_nc = quill_damage * res_mult * quill_crit
+        owner_info = party_dict.get("Mizuki", {})
+        quill_damage = 5.5 * float(
+            owner_info.get("EM", owner_info.get("em", 0.0)) or 0.0)
+    else:
+        owner_info = party_dict.get(
+            getattr(hit, "character", None) or contributors[0], {})
+    if quill_damage:
+        q_rate, q_dmg = _crit_stats(owner_info, element)
+        q_elev = _elevation(owner_info)
+        q_shred = float(owner_info.get(f"{element}_shred", 0.0))
+        q_res = _res_multiplier(enemy_res, q_shred)
+        if owner_info.get("rv_mode"):
+            q_crit = crit_mult_from_crit_value(q_rate, q_dmg)
+        else:
+            q_crit = 1.0 + q_rate * q_dmg
+        q_value = quill_damage * q_elev * q_res * q_crit
+        q_value_eff = quill_damage * q_elev * q_crit
+    else:
+        q_value = q_value_eff = 0.0
 
-    expected_damage += q_nc
-    effective_expected_damage = expected_damage / res_mult if res_mult > 0 else expected_damage
-
-    non_crit = float(np.dot(np.sort(non_crit_arr)[::-1], weights[:len(non_crit_arr)])) + q_nc
-    crit_damage = float(np.dot(np.sort(crit_damages_arr)[::-1], weights[:len(crit_damages_arr)])) + q_nc
-    average_damage = float(expected_damage)
-    effective_average_damage = float(effective_expected_damage)
-
+    non_crit = float(np.dot(np.sort(nc_arr)[::-1], weights[:n])) + q_value
+    crit_damage = float(np.dot(np.sort(cd_arr)[::-1], weights[:n])) + q_value
+    average = float(expected + q_value)
+    effective = float(expected_eff + q_value_eff)
     return {
-        "contributor_base_damage": contrib_base_damage,
-        "contributor_bonus_mult": contrib_bonus_mult,
-        "contributor_elevation_mult": contrib_elevation_mult,
-        "contributor_crit_mult_average": contrib_crit_mult_average,
-        "contributor_crit_mult_absolute": contrib_crit_mult_absolute,
-        "contributor_res_mult": contrib_res_mult,
-        "contributor_non_crit": contrib_non_crit,
-        "contributor_crit_damage": contrib_crit_damage,
-        "contributor_average_damage": contrib_average_damage,
-        "expected_damage": expected_damage,
-        "effective_expected_damage": effective_expected_damage,
+        "contributor_stats": contrib,
+        "contributor_non_crit": {c: contrib[c]["non_crit"] for c in contributors},
+        "contributor_crit_damage": {c: contrib[c]["crit_damage"] for c in contributors},
+        "contributor_average_damage": {c: contrib[c]["average_damage"] for c in contributors},
+        "expected_damage": average,
+        "effective_expected_damage": effective,
+        "quill_damage": quill_damage,
         "non_crit": non_crit,
         "crit_damage": crit_damage,
-        "average_damage": average_damage,
-        "effective_average_damage": effective_average_damage,
+        "average_damage": average,
+        "effective_average_damage": effective,
     }

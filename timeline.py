@@ -247,7 +247,7 @@ class RotationTimeline:
 
             self.global_events = [
                 ev for ev in self.global_events
-                if not (ev.get("event_type") == "HIT" and
+                if not (ev.get("event_type") in ("HIT", "CAST") and
                         ev.get("character") == field_sequence.character and
                         ev.get("ability_name") == c_ability.name and
                         ev["global_time"] >= ability_start_global)
@@ -260,6 +260,35 @@ class RotationTimeline:
             if is_aether_burst:
                 self._burst_call_seq += 1
             burst_call_id = self._burst_call_seq if is_aether_burst else None
+
+            # The ability CALL is its own event, hidden from the results table. It is the
+            # trigger for every "on cast" effect, so a delayed first hit still gains the
+            # buff (the marker is processed before that hit). Cast bookkeeping lives here;
+            # hits keep only the family needed to attribute Sacrificial-weapon procs.
+            cast_event = {
+                "global_time": ability_start_global,
+                "character": field_sequence.character,
+                "action": f"Cast: {c_ability.name}",
+                "category": ActionCategory.CAST,
+                "elem_app": "-",
+                "element": None,
+                "event_type": "CAST",
+                "hit_name": "Cast",
+                "ability_name": c_ability.name,
+                "attack_type": c_ability.hits[0].attack_type if c_ability.hits else None,
+                "hit_offset": 0.0,
+                "cast_time": ability_start_global,
+                "cast_cooldown": c_ability.cooldown,
+                "cast_family": c_ability.cooldown_family or c_ability.name,
+                "cast_max_charges": c_ability.ability_max_charges,
+                "cast_is_skill": c_ability.talent_type == "skill_talent",
+                "cast_start": True,
+                "frostglow_on_cast": c_ability.frostglow_on_cast,
+            }
+            if is_aether_burst:
+                cast_event["burst_variant"] = "auto"
+                cast_event["burst_call_id"] = burst_call_id
+            self.global_events.append(cast_event)
 
             # A skill FORM can be cut by the swap-out (Mizuki): every hit up to and
             # including the FIRST hit after the swap-out still lands (that tick is in
@@ -300,10 +329,8 @@ class RotationTimeline:
                     "cast_family": c_ability.cooldown_family or c_ability.name,
                     "cast_max_charges": c_ability.ability_max_charges,
                     "cast_is_skill": c_ability.talent_type == "skill_talent",
-                    "cast_start": hit is c_ability.hits[0],
                 }
                 if is_aether_burst:
-                    ev["burst_variant"] = "auto"
                     ev["burst_call_id"] = burst_call_id
                 self.global_events.append(ev)
 
@@ -361,7 +388,7 @@ class RotationTimeline:
         # Cast bookkeeping: a triggered hit is not a cast, so it must never look
         # like the start of one to the Sacrificial-weapon cooldown plan.
         "cast_time", "cast_cooldown", "cast_family", "cast_max_charges",
-        "cast_is_skill", "cast_start",
+        "cast_is_skill", "cast_start", "frostglow_on_cast",
     )
 
     def _resolved_triggered_ability(self, ability, character: Optional[str] = None):
@@ -522,7 +549,7 @@ class RotationTimeline:
             if e_type == "SWAP_OUT":
                 active = None
                 continue
-            if e_type != "HIT":
+            if e_type not in ("CAST", "HIT"):
                 continue
 
             reset = self.skill_cd_resets.get(char)
@@ -534,22 +561,22 @@ class RotationTimeline:
             # clashes with the other (Mizuki's two skill forms, Diona's tap/hold).
             key = (char, event.get("cast_family") or event.get("ability_name"))
 
-            # 1. Charge legality, checked at the cast's own start (the eager
-            #    scheduling check was deferred for a holder), then a charge is spent.
-            if event.get("cast_start"):
+            # 1. CAST: charge legality (the eager scheduling check was deferred for a
+            #    holder), then a charge is spent. A cast is never a damage source.
+            if e_type == "CAST":
                 cooldown = float(event.get("cast_cooldown") or 0.0)
-                cast_time = float(event.get("cast_time", t))
                 if cooldown > 0:
                     pool = pools.get(key)
                     if pool is None:
                         pool = pools[key] = ChargePool(
                             event.get("cast_max_charges") or 1)
-                    available = pool.block_until(cooldown, cast_time)
+                    available = pool.block_until(cooldown, t)
                     if available is not None:
                         raise CooldownError(char, event.get("ability_name"), available)
-                    pool.consume(cooldown, cast_time)
+                    pool.consume(cooldown, t)
                 if event.get("cast_is_skill"):
                     skill_keys.setdefault(char, set()).add(key)
+                continue
 
             # 2. SKILL damage by the on-field holder -> guaranteed proc. Only
             #    STANDARD damage carries an attack type, so the type IS the check;
@@ -761,11 +788,12 @@ class RotationTimeline:
             element = event.get("element")
             ability_name = event.get("ability_name", "")
             hit_name = event.get("hit_name", "")
+            is_cast = e_type == "CAST"
 
-            # 0. Aether Burst resolution: at cast time pick the variant by Frostglow
-            #    stacks (enhanced at 8, standard otherwise), consume the stacks, and
-            #    substitute the scheduled hits. Works on both scheduled variants.
-            if (e_type == "HIT" and char == "Aether" and ability_name == "Elemental Burst"
+            # 0. Aether Burst resolution: at the CAST, pick the variant by Frostglow
+            #    stacks (enhanced at 8, standard otherwise), consume the stacks and
+            #    replace the pre-scheduled hits with the chosen variant's hits.
+            if (is_cast and char == "Aether" and ability_name == "Elemental Burst"
                     and event.get("burst_variant") == "auto"):
                 burst_call_id = event.get("burst_call_id")
                 consumed = aether_frostglow
@@ -787,49 +815,47 @@ class RotationTimeline:
                 mv = get_ability_motion_value("Aether", "Burst (Stellar Swirl)",
                                               "Ice Javelin Single Strike DMG", b_lvl, stacks=consumed)
 
-                # Drop any LATER pre-scheduled hits of THIS burst call (they will be
-                # replaced below with the chosen variant's ticks).
+                # Drop the pre-scheduled hits of THIS burst call from the cast instant
+                # onwards and insert the chosen variant's hits at cast + their own
+                # delay. The >= matters: the ability's own first tick lands exactly on
+                # the cast time, and the old "rewrite that tick in place" step is gone,
+                # so keeping it would draw the first tick twice (the stale scheduled
+                # one with its unscaled MV, plus the variant's).
                 if burst_call_id is not None:
                     self.global_events = [
                         ev for ev in self.global_events
-                        if not (ev.get("burst_call_id") == burst_call_id and ev.get("global_time") > t)
+                        if not (ev.get("event_type") == "HIT"
+                                and ev.get("burst_call_id") == burst_call_id
+                                and ev["global_time"] >= t - _WINDOW_EPS)
                     ]
-                    event = self.global_events[i]
-
-                # Rewrite the first tick in place, then insert the remaining ticks
-                # of the chosen variant right after it so they evaluate in order.
+                    # The filter may remove events that sat before the marker, so
+                    # re-anchor it before inserting the variant's ticks after it.
+                    i = next(k for k, ev in enumerate(self.global_events) if ev is event)
                 offset = 1
                 for h in variant.hits:
-                    if h.relative_delay == 0.0:
-                        event["action"] = f"{h.name}"
-                        event["hit_name"] = h.name
-                        event["elem_app"] = h.elemental_app if h.elemental_app else "-"
-                        event["element"] = h.element
-                        event["stat_ref"] = h.stat_ref
-                        event["attack_type"] = h.attack_type
-                        event["motion_value"] = mv
-                        event["burst_variant"] = variant_name
-                        event["frostglow_consumed"] = consumed
-                    else:
-                        sub = {
-                            "global_time": t + h.relative_delay,
-                            "character": "Aether",
-                            "action": f"{h.name}",
-                            "category": h.category,
-                            "elem_app": h.elemental_app if h.elemental_app else "-",
-                            "element": h.element,
-                            "event_type": "HIT",
-                            "hit_name": h.name,
-                            "ability_name": "Elemental Burst",
-                            "stat_ref": h.stat_ref,
-                            "motion_value": mv,
-                            "attack_type": h.attack_type,
-                            "burst_variant": variant_name,
-                            "burst_call_id": burst_call_id,
-                            "frostglow_consumed": consumed,
-                        }
-                        self.global_events.insert(i + offset, sub)
-                        offset += 1
+                    sub = {
+                        "global_time": t + h.relative_delay,
+                        "character": "Aether",
+                        "action": f"Elemental Burst ({h.name})",
+                        "category": h.category,
+                        "elem_app": h.elemental_app if h.elemental_app else "-",
+                        "element": h.element,
+                        "event_type": "HIT",
+                        "hit_name": h.name,
+                        "ability_name": "Elemental Burst",
+                        "stat_ref": h.stat_ref,
+                        "motion_value": mv,
+                        "attack_type": h.attack_type,
+                        "hit_offset": h.relative_delay,
+                        "cast_time": t,
+                        "burst_variant": variant_name,
+                        "burst_call_id": burst_call_id,
+                        "frostglow_consumed": consumed,
+                    }
+                    self.global_events.insert(i + offset, sub)
+                    offset += 1
+                event["burst_variant"] = variant_name
+                event["frostglow_consumed"] = consumed
 
                 # Aether C6: Burst consuming Frostglow opens a 15s window where the
                 # whole party gains 5% stellar_bonus per consumed stack.
@@ -838,8 +864,11 @@ class RotationTimeline:
                     aether_c6_stacks = consumed
                     event["aether_c6_consumed_on"] = t
 
-            # ---- Frostglow gain: every Aether skill TICK grants one stack (max 8).
-            #      The initial cast (Skill_Initial) does NOT grant a stack. ----
+            # ---- Frostglow gain: a CAST can grant a flat amount (charged = 2);
+            #      every Elemental Skill TICK grants one (max 8). The initial hit
+            #      (Skill_Initial) does NOT grant a stack. ----
+            if is_cast and char == "Aether" and event.get("frostglow_on_cast"):
+                aether_frostglow = min(8, aether_frostglow + int(event["frostglow_on_cast"]))
             if (e_type == "HIT" and char == "Aether" and ability_name == "Elemental Skill"
                     and hit_name != "Skill_Initial"):
                 aether_frostglow = min(8, aether_frostglow + 1)
@@ -897,7 +926,7 @@ class RotationTimeline:
 
                 if char == "Mizuki":
                     # DDS Enters immediately at skill cast
-                    if e_type == "HIT" and is_mizuki_skill and hit_name == "Cast":
+                    if is_cast and char == "Mizuki" and event.get("cast_is_skill"):
                         mizuki_dreamdrifter_active = True
 
                     # DDS Exits on Swap Out or last tick (Tick13)
@@ -948,13 +977,6 @@ class RotationTimeline:
                 # Faruzan's BASE ATK (character + weapon base, ignoring atk% / flat).
                 faruzan_base_atk = self.char_initial_stats_map.get("Faruzan", {}).get("base_atk", 0.0)
 
-                # Resolve the DEBUFF state from the PRIOR expiration (before this event's
-                # own refresh), so the applying hit never benefits from the shred it spawned.
-                faruzan_debuff_active = (faruzan_debuff_expiration is not None) and (t <= faruzan_debuff_expiration)
-                # Same for her buff window: her own burst cast arms it, so it is read
-                # from the pre-event expiration (the cast's damage comes first).
-                faruzan_buff_active = (faruzan_buff_expiration is not None) and (t <= faruzan_buff_expiration)
-
                 # Pressurized Collapse is a TRIGGERED ability: its 0.72s trigger delay
                 # and its motion value both come from abilities.py (the MV is resolved
                 # at the party's skill talent level), never from this module.
@@ -962,17 +984,22 @@ class RotationTimeline:
                     return self._resolved_triggered_ability(
                         faruzan_pressurized_collapse, "Faruzan").hits[0]
 
-                # 1. Insertion upon Burst Cast
-                if e_type == "HIT" and char == "Faruzan" and ability_name == "Elemental Burst" and hit_name == "Burst_Cast":
+                # The burst CAST arms the 22s buff/shred windows before any hit, so
+                # the burst's own first hit is included.
+                if is_cast and char == "Faruzan" and ability_name == "Elemental Burst":
                     faruzan_buff_expiration = t + 22.0
-                    # Debuff "bigger number wins": burst opens the full 22s window.
+                    # Debuff "bigger number wins": the burst opens the full 22s window.
                     old_debuff = faruzan_debuff_expiration if faruzan_debuff_expiration is not None else 0.0
                     faruzan_debuff_expiration = max(old_debuff, t + 22.0)
                     # CD measured FROM THE TRIGGER (same rule as every other proc).
                     faruzan_collapse_cd_expires = t + FARUZAN_COLLAPSE_CD
-                    self._insert_triggered_hit(
+                    self._insert_triggered_hit_chrono(
                         _collapse_hit(), event, t, faruzan_pressurized_collapse.name,
-                        index=i + 1, hit_name="Pressurized_Collapse", owner="Faruzan")
+                        start_index=i + 1, hit_name="Pressurized_Collapse", owner="Faruzan")
+
+                # Read the windows AFTER the cast arm above: the first hit is included.
+                faruzan_debuff_active = (faruzan_debuff_expiration is not None) and (t <= faruzan_debuff_expiration)
+                faruzan_buff_active = (faruzan_buff_expiration is not None) and (t <= faruzan_buff_expiration)
 
                 # Pressurized Collapse refreshes the debuff by 4s, but never overrides
                 # a longer 22s window already in effect (bigger number priority).
@@ -997,7 +1024,7 @@ class RotationTimeline:
 
                 # Buff stat effects (crit_dmg / anemo_bonus) apply only to ANEMO hits,
                 # so the buff state is shown as ON for Anemo-element events only.
-                event["faruzan_buff_state"] = "ON" if (faruzan_buff_active and element == "Anemo" and char == active_character) else "OFF"
+                event["faruzan_buff_state"] = "ON" if faruzan_buff_active else "OFF"
                 # Window-only flag: gates Faruzan's buff PER-CONTRIBUTOR in swirl reactions
                 # (the buff only reaches the ACTIVE character).
                 event["faruzan_buff_window"] = "ON" if faruzan_buff_active else "OFF"
@@ -1258,11 +1285,8 @@ class RotationTimeline:
             #      Silver Light: the holder gains +1 stack per skill cast (and Odette
             #      recast), each stack expiring after 12s.
             silver_holder = self._weapon_holder("Silver Light")
-            # One stack per cast action (the cast / first recast hit), not per damage tick.
-            if (silver_holder == char and e_type == "HIT"
-                    and ((ability_name == "Skill Cast" and hit_name == "Cast")
-                         or (ability_name == "Skill Recast" and hit_name == "Skill_Recast1")
-                         or (ability_name == "Elemental Skill" and hit_name == "Skill_Initial"))):
+            # One stack per skill CAST (any skill ability, recast included).
+            if is_cast and silver_holder == char and event.get("cast_is_skill"):
                 silver_light_stack_expiries.append(t + 12.0)
             if silver_holder is not None:
                 silver_light_stack_expiries = [x for x in silver_light_stack_expiries if x > t]
@@ -1366,9 +1390,8 @@ class RotationTimeline:
             #      (first hit of a skill ability). Every stellar swirl by ANYONE while
             #      it is up adds a stack; refreshing or expiring resets them to 0.
             if starsealed_holder is not None:
-                if (e_type == "HIT" and char == starsealed_holder
-                        and event.get("attack_type") == AttackType.SKILL
-                        and event.get("hit_offset") == 0.0):
+                if (is_cast and char == starsealed_holder
+                        and event.get("attack_type") == AttackType.SKILL):
                     starsealed_expiration = t + 20.0
                     starsealed_stacks = 0
                 starsealed_on = (starsealed_expiration is not None
@@ -1484,14 +1507,13 @@ class RotationTimeline:
                 if not newbough_window:
                     newbough_expiration = None
                     newbough_stacks = 0
-                if e_type == "HIT" and char == newbough_holder:
-                    if event.get("attack_type") == AttackType.SKILL:
-                        newbough_expiration = t + 12.0
-                        newbough_window = True
-                    if (newbough_window and newbough_stacks < 3
-                            and t >= newbough_last_gain + 1.0):
-                        newbough_stacks += 1
-                        newbough_last_gain = t
+                if is_cast and char == newbough_holder and event.get("attack_type") == AttackType.SKILL:
+                    newbough_expiration = t + 12.0
+                    newbough_window = True
+                if (e_type == "HIT" and char == newbough_holder and newbough_window
+                        and newbough_stacks < 3 and t >= newbough_last_gain + 1.0):
+                    newbough_stacks += 1
+                    newbough_last_gain = t
                 event["newbough_stacks"] = newbough_stacks
             else:
                 event["newbough_stacks"] = 0
@@ -1504,7 +1526,7 @@ class RotationTimeline:
                 # opens it does not benefit from it.
                 silverdawn_on = (silverdawn_expiration is not None
                                  and t <= silverdawn_expiration + _WINDOW_EPS)
-                if (e_type == "HIT" and char == silverdawn_holder
+                if (is_cast and char == silverdawn_holder
                         and event.get("attack_type") in (AttackType.SKILL, AttackType.BURST)):
                     silverdawn_expiration = t + 6.0
                     silverdawn_extensions = 0
@@ -1530,11 +1552,10 @@ class RotationTimeline:
                 marvelous_max = 6 if odette_cons7 >= 1 else 4
                 marvelous_rate = 2 if odette_cons7 >= 1 else 1
 
-                # The FIRST hit of either cast (skill or burst) spawns the shadow.
-                # hit_offset == 0 identifies it without pinning hit names/timings.
-                is_cast = (e_type == "HIT" and char == "Odette"
-                           and event.get("hit_offset", 1.0) == 0.0
-                           and ability_name in ("Skill Cast", "Odette Burst"))
+                # The CAST of the skill or burst spawns/refreshes the shadow (the
+                # recast does not).
+                is_odette_cast = (is_cast and char == "Odette"
+                                  and ability_name in ("Skill Cast", "Odette Burst"))
 
                 # The shadow is INCLUSIVE on its own cast hit (that hit already has
                 # the shred / elevation), unlike most windows in this engine.
@@ -1542,17 +1563,21 @@ class RotationTimeline:
                              and t <= odette_shadow_expiration + _WINDOW_EPS)
                 ssd_on = (odette_ssd_expiration is not None
                           and t <= odette_ssd_expiration + _WINDOW_EPS)
-                if is_cast:
+                if is_odette_cast:
                     # Skill cast OR burst cast (NOT recast) spawns/refreshes it.
                     odette_shadow_expiration = t + ODETTE_SHADOW_WINDOW
                     odette_swap_time = None
                     # SSD is cast by the BURST only; its window is independent.
                     if ability_name == "Odette Burst":
                         odette_ssd_expiration = t + ODETTE_SSD_WINDOW
-                shadow_active = shadow_on or is_cast
-                ssd_active = ssd_on or (is_cast and ability_name == "Odette Burst")
+                shadow_active = shadow_on or is_odette_cast
+                ssd_active = ssd_on or (is_odette_cast and ability_name == "Odette Burst")
 
-                if e_type == "SWAP_OUT" and char == "Odette" and shadow_active:
+                if (e_type == "SWAP_OUT" and char == "Odette" and shadow_active
+                        and odette_swap_time is None):
+                    # Anchor the decay clock at her FIRST swap-out after the cast.
+                    # Later swap-outs must not re-anchor it (that would refill the
+                    # pool on re-entry); only a new cast sets it back to None.
                     odette_swap_time = t
 
                 odette_stacks = 0
@@ -1576,9 +1601,6 @@ class RotationTimeline:
                                              else party_stacks)
                 event["odette_shadow_state"] = "ON" if shadow_active else "OFF"
                 event["odette_ssd_state"] = "ON" if ssd_active else "OFF"
-                # C2 audit column: the shred shares the shadow window (C2+ only).
-                event["odette_c2_state"] = ("ON" if shadow_active and odette_cons7 >= 2
-                                            else "OFF")
 
                 # ---- C1: extra stellar hit right after the recast's stellar hit ----
                 if (odette_cons7 >= 1 and e_type == "HIT" and char == "Odette"
@@ -1602,24 +1624,25 @@ class RotationTimeline:
                 event["marvelous_stacks"] = 0
                 event["odette_shadow_state"] = "OFF"
                 event["odette_ssd_state"] = "OFF"
-                event["odette_c2_state"] = "OFF"
 
             # 7b. Anastasya: Accolades (unsealed/shared), Love, the conditional extra
             #     stellar beat and both Triumph procs.
             if "Anastasya" in self.party:
                 ana_cons = self.party["Anastasya"].get("constellation", 0)
-                is_ana_skill_cast = (e_type == "HIT" and char == "Anastasya"
-                                     and ability_name == "Skill Tap" and hit_name == "Cast")
-                is_ana_burst_cast = (e_type == "HIT" and char == "Anastasya"
-                                     and ability_name == "To the New World"
-                                     and hit_name == "Burst_Cast")
+                is_ana_skill_cast = (is_cast and char == "Anastasya"
+                                     and ability_name == "Skill Tap")
+                is_ana_burst_cast = (is_cast and char == "Anastasya"
+                                     and ability_name == "To the New World")
 
-                # Her burst window is read BEFORE this event arms it (the burst cast
-                # hit does not gain its own buff).
+                # Cast windows are armed before the first hit, so the burst's own
+                # first hit is included.
+                if is_ana_burst_cast:
+                    anastasya_burst_expiration = t + 20.0
+                    anastasya_burst_this_visit = True
                 ana_burst_open = (anastasya_burst_expiration is not None
                                   and t <= anastasya_burst_expiration + _WINDOW_EPS)
 
-                # Accolades and Love are INCLUSIVE on the skill Cast hit.
+                # Accolades and Love are INCLUSIVE on the skill cast.
                 if is_ana_skill_cast:
                     anastasya_accolades_expiration = t + ANASTASYA_ACCOLADES_WINDOW
                     if ana_cons >= 2:
@@ -1628,12 +1651,6 @@ class RotationTimeline:
                                       and t <= anastasya_accolades_expiration + _WINDOW_EPS)
                 ana_love_open = (anastasya_love_expiration is not None
                                  and t <= anastasya_love_expiration + _WINDOW_EPS)
-
-                # Burst cast: party stellar_bonus for 20s (talent-scaled) plus the
-                # extra stellar beat window; it also arms the SEAL for this visit.
-                if is_ana_burst_cast:
-                    anastasya_burst_expiration = t + 20.0
-                    anastasya_burst_this_visit = True
 
                 # Seal: she used her burst and then swapped out. Unseal: her next
                 # swap-in, once ANASTASYA_UNSEAL_DELAY has passed SINCE THE SEAL; that
@@ -1692,12 +1709,7 @@ class RotationTimeline:
                     "ON" if ana_accolades_open and ana_shared else "OFF")
                 event["anastasya_sealed_state"] = "ON" if ana_shared else "OFF"
                 event["anastasya_love_state"] = "ON" if ana_love_open else "OFF"
-                event["anastasya_triumph_ready"] = (
-                    "ON" if (anastasya_triumph_armed
-                             and anastasya_triumph_ready_at is not None
-                             and t >= anastasya_triumph_ready_at - _WINDOW_EPS) else "OFF")
                 # A4 is a permanent passive while she is in the party.
-                event["anastasya_a4_state"] = "ON"
             else:
                 event["anastasya_burst_state"] = "OFF"
                 event["anastasya_accolades_state"] = "OFF"
@@ -1705,8 +1717,6 @@ class RotationTimeline:
                 event["anastasya_accolades_shared_state"] = "OFF"
                 event["anastasya_sealed_state"] = "OFF"
                 event["anastasya_love_state"] = "OFF"
-                event["anastasya_triumph_ready"] = "OFF"
-                event["anastasya_a4_state"] = "OFF"
 
             # 7c. Diona: the "Choice Treasures" state (20s, refreshed by her tap/hold
             #     skill hits), the Icy Paw volley she fires on any Stellar Swirl while
@@ -1714,8 +1724,8 @@ class RotationTimeline:
             if "Diona" in self.party:
                 diona_c6_unlocked = self.party.get("Diona", {}).get("constellation", 0) >= 6
 
-                # Any hit of her tap or hold cast (re)opens the 20s state.
-                if (e_type == "HIT" and char == "Diona"
+                # Either skill CAST (re)opens the 20s state.
+                if (is_cast and char == "Diona"
                         and ability_name in DIONA_SKILL_ABILITIES):
                     diona_ct_expiration = t + DIONA_CHOICE_TREASURES_WINDOW
 
@@ -1747,8 +1757,8 @@ class RotationTimeline:
                 # bonus) for the whole burst field, and INCLUDING the cast hit itself.
                 # That is the one deliberate exception to the "read pre-arm" rule: the
                 # window is armed first and the flag resolved after it.
-                if (e_type == "HIT" and char == "Diona" and diona_c6_unlocked
-                        and ability_name == "Diona Burst" and hit_name == "Burst Cast"):
+                if (is_cast and char == "Diona" and diona_c6_unlocked
+                        and ability_name == "Diona Burst"):
                     diona_c6_expiration = t + DIONA_C6_WINDOW
 
                 diona_c6_on = (diona_c6_expiration is not None
@@ -1792,9 +1802,8 @@ class RotationTimeline:
             if noblesse_holder is not None:
                 noblesse_on = (noblesse_expiration is not None
                                and t <= noblesse_expiration + _WINDOW_EPS)
-                if (e_type == "HIT" and char == noblesse_holder
-                        and event.get("attack_type") == AttackType.BURST
-                        and event.get("hit_offset") == 0.0):
+                if (is_cast and char == noblesse_holder
+                        and event.get("attack_type") == AttackType.BURST):
                     noblesse_expiration = t + 12.0
                 event["noblesse_state"] = "ON" if noblesse_on else "OFF"
             else:
@@ -1856,22 +1865,22 @@ class RotationTimeline:
                     tsaritsa_last_t = None
 
                 attack_type = event.get("attack_type")
-                is_cast = (attack_type in (AttackType.SKILL, AttackType.BURST)
-                           and event.get("hit_offset") == 0.0)
-                is_normal_standard = (cat == ActionCategory.STANDARD_DMG
-                                      and attack_type == AttackType.NORMAL)
-                # The crit / stellar-crit flags are read from the PRE-gain stack count,
-                # so the hit that grants a stack does not benefit from it.
                 stacks_before = tsaritsa_stacks
-                if e_type == "HIT" and char == tsaritsa_holder and (is_cast or is_normal_standard):
+                if (is_cast and char == tsaritsa_holder
+                        and attack_type in (AttackType.NORMAL, AttackType.SKILL,
+                                            AttackType.BURST)):
                     tsaritsa_stacks = min(2, tsaritsa_stacks + 1)
                     tsaritsa_active_accum = 0.0
+                    # The CAST includes its first hit: report the post-gain count.
+                    stacks_before = tsaritsa_stacks
 
                 event["tsaritsa_stacks"] = tsaritsa_stacks
-                cryo_hit = (element == "Cryo" and char == tsaritsa_holder)
+                # Element gating lives in the stat key (cryo_crit_rate), so the
+                # column only reports the holder stacked window.
                 event["tsaritsa_state"] = (
-                    "ON" if (stacks_before > 0 and cryo_hit) else "OFF")
-                event["tsaritsa_stellar_state"] = "ON" if stacks_before > 0 else "OFF"
+                    "ON" if (stacks_before > 0 and char == tsaritsa_holder) else "OFF")
+                event["tsaritsa_stellar_state"] = (
+                    "ON" if (stacks_before > 0 and char == tsaritsa_holder) else "OFF")
             else:
                 event["tsaritsa_stacks"] = 0
                 event["tsaritsa_state"] = "OFF"
@@ -1918,45 +1927,41 @@ class RotationTimeline:
                 final_stats["rv_mode"] = is_rv_mode(char_data)
 
                 # Prepare party_stats_dict for reaction contributors
+                # Reaction contributors use THEIR OWN final stats (full snapshot), so
+                # element crit, stellar crit, elevation and RES are per share.
                 party_stats_dict = {}
                 for p_name, p_d in self.party.items():
                     p_init = self.char_initial_stats_map.get(p_name, {})
                     party_stats_dict[p_name] = {
+                        **p_init,
                         "level": p_d.get("level", 90),
-                        "CR": p_init.get("crit_rate", 0.05),
-                        "CD": p_init.get("crit_dmg", 0.50),
-                        "crit_rate": p_init.get("crit_rate", 0.05),
-                        "crit_dmg": p_init.get("crit_dmg", 0.50),
-                        "EM": p_init.get("em", p_init.get("EM", 0.0)),
                         "rv_mode": is_rv_mode(p_d),
                     }
-                    if event.get("cryo_resonance_state") == "ON":
-                        party_stats_dict[p_name]["CR"] += 0.15
-                        party_stats_dict[p_name]["crit_rate"] += 0.15
+                party_stats_dict[char] = {
+                    **final_stats,
+                    "level": char_level,
+                    "rv_mode": is_rv_mode(char_data),
+                }
 
-                if char in party_stats_dict:
-                    party_stats_dict[char]["CR"] = final_stats.get("CR", party_stats_dict[char]["CR"])
-                    party_stats_dict[char]["CD"] = final_stats.get("CD", party_stats_dict[char]["CD"])
-                    party_stats_dict[char]["crit_rate"] = final_stats.get("CR", party_stats_dict[char]["crit_rate"])
-                    party_stats_dict[char]["crit_dmg"] = final_stats.get("CD", party_stats_dict[char]["crit_dmg"])
-                    party_stats_dict[char]["EM"] = final_stats.get("EM", final_stats.get("em", party_stats_dict[char]["EM"]))
-                    party_stats_dict[char]["rv_mode"] = is_rv_mode(char_data)
-
-                # Reaction contributors resolve their buffed stats AT THIS EVENT (swirls
-                # and vortex explosions), so each contributor's crit / EM is taken from
-                # the moment of the hit. Faruzan's buff reaches only the ACTIVE char.
                 vmeta = event.get("vortex_metadata")
                 smeta = event.get("swirl_metadata")
                 contributor_names = []
                 if vmeta:
                     contributor_names = [c for c in set(
-                        (vmeta.get("anemo_contributors") or []) + (vmeta.get("cryo_contributors") or [])) if c]
+                        (vmeta.get("anemo_contributors") or [])
+                        + (vmeta.get("cryo_contributors") or [])) if c]
                 elif smeta:
                     ac = smeta.get("anemo_contributor")
                     cl = smeta.get("cryo_contributors", []) or []
-                    contributor_names = list(dict.fromkeys(([ac] if ac else []) + [c for c in cl if c]))
+                    contributor_names = list(dict.fromkeys(
+                        ([ac] if ac else []) + [c for c in cl if c]))
 
-                for cname in contributor_names:
+                stats_names = list(contributor_names)
+                if event.get("c1_quill") and "Mizuki" in self.party:
+                    if "Mizuki" not in stats_names:
+                        stats_names.append("Mizuki")
+
+                for cname in stats_names:
                     if cname not in party_stats_dict:
                         continue
                     c_data = self.party.get(cname, {})
@@ -1965,13 +1970,9 @@ class RotationTimeline:
                         c_init = build_initial_stats(cname, None, None, {}, {})
                         c_init = apply_permanent_buffs(c_init, cname)
                         self.char_initial_stats_map[cname] = c_init
-                    c_flags = dict(event)
-                    c_flags["faruzan_buff_state"] = (
-                        "ON" if (cname == active_char and event.get("faruzan_buff_window") == "ON") else "OFF"
-                    )
                     c_snap = build_snapshot_stats(
                         initial_stats=c_init,
-                        event_flags=c_flags,
+                        event_flags=event,
                         party=self.party,
                         refinement=c_data.get("refinement", 1),
                         char_name=cname,
@@ -1979,11 +1980,11 @@ class RotationTimeline:
                         char_initial_stats_map=self.char_initial_stats_map,
                     )
                     c_final = compute_final_stats(c_snap)
-                    party_stats_dict[cname]["CR"] = c_final.get("CR", party_stats_dict[cname]["CR"])
-                    party_stats_dict[cname]["CD"] = c_final.get("CD", party_stats_dict[cname]["CD"])
-                    party_stats_dict[cname]["crit_rate"] = c_final.get("CR", party_stats_dict[cname]["crit_rate"])
-                    party_stats_dict[cname]["crit_dmg"] = c_final.get("CD", party_stats_dict[cname]["crit_dmg"])
-                    party_stats_dict[cname]["EM"] = c_final.get("EM", c_final.get("em", party_stats_dict[cname]["EM"]))
+                    party_stats_dict[cname] = {
+                        **c_final,
+                        "level": c_data.get("level", 90),
+                        "rv_mode": is_rv_mode(c_data),
+                    }
 
                 dmg = calculate_damage(
                     hit=event,
@@ -2171,6 +2172,8 @@ class RotationTimeline:
 
         # Print Rows
         for event in self.global_events:
+            if event.get("event_type") == "CAST":
+                continue
             nc_str = f"{event['non_crit']:.1f}" if event.get("non_crit") is not None else "-"
             cd_str = f"{event['crit_damage']:.1f}" if event.get("crit_damage") is not None else "-"
             avg_str = f"{event['average_damage']:.1f}" if event.get("average_damage") is not None else "-"
