@@ -4,7 +4,6 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
-from build_io import document_to_json, suggested_file_name
 from dps_curve import (DEFAULT_SIGMA, DEFAULT_TRUNCATION, auto_params,
                        gaussian_dps, hit_series)
 from ui.cards import render_party_card
@@ -289,23 +288,3 @@ def render() -> None:
                                  },
                                  width="stretch", hide_index=False, placeholder="-")
 
-                    st.markdown("<br><hr>", unsafe_allow_html=True)
-                                        
-                    # 2. EXPORT CONFIGURATION FOR THIS SPECIFIC RUN
-                    st.subheader("Export Run")
-                    st.markdown(
-                        "Save the exact gear, team, trial and custom setups used for this run. "
-                        "The file loads again in **Team & Gear Setup → Save / Load Build** and "
-                        "stays fully editable."
-                    )
-
-                    run_doc = entry["snapshot_build"]
-                    run_doc["simulation_name"] = entry["sim_name"]
-                    st.download_button(
-                        label=f"Export JSON Config for '{entry['sim_name']}'",
-                        data=document_to_json(run_doc),
-                        file_name=suggested_file_name(run_doc),
-                        mime="application/json",
-                        key=f"export_hist_{real_idx}",
-                        use_container_width=True
-                    )

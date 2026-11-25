@@ -57,7 +57,7 @@ but not yet verified
 | A Thousand Floating Dreams | Catalyst | ✔ (permanent stats from party composition: EM per same-element ally, elemental DMG bonus per different-element ally, +EM to the others) |
 | Wandering Evenstar | Catalyst | ✔ (10s cycle / 12s buff, stacks to 2, self + others) |
 | Thrilling Tales of Dragon Slayers | Catalyst | ✔ (swap-out proc → next character, 10s, 20s CD) |
-| Starsealed Edict | Catalyst | ✔ (permanent CD% + 20s skill-cast EM window + swirl stacks) |
+| Starsealed Edict | Catalyst | ✔ (permanent CD% + 20s skill-cast EM window + swirl stacks, cap 3) |
 | Whitelake Frostfeather | Sword | ✔ (3 stacks × 8s, stellar crit DMG at 3) |
 | Finale Of The Deep | Sword | ✔ (15s ATK% window, 10s CD) |
 | Azurelight | Sword | ✔ (permanent ATK% only) |
@@ -398,6 +398,10 @@ insertions shift by one hit). Per-hit differences are exactly the triggering hit
 
 `required_party` was `MIZUKI_SACFRAG_TEAM` although the rotation only plays
 Aether, which tripped the preset-gating check; it is now `["Aether"]`.
+
+Retired in the Sucrose preset pass: the trial is no longer offered in the preset
+list. The smoke test now builds the same one-shot Aether rotation locally, and
+the new one-pass Sucrose trials replaced it for real rotations.
 
 ### Decisions recorded
 

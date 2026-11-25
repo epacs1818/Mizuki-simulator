@@ -521,27 +521,29 @@ party, the team's standard Swirl reaction transforms into Stellar Swirl:
     multipliers block for now.
 
 ----------------------------------------------------------------------
-8. SAVING AND LOADING A BUILD
+8. SAVING AND LOADING YOUR WORK
 ----------------------------------------------------------------------
-Found in: Tab 1 (Team & Gear Setup) -> Save / Load Build
+One file holds everything: party, gear (main stats and substats), enemy,
+custom field sequences, rotations, trials, ability timings and the
+currently selected trial. There is no separate "build file" and
+"trial file".
 
-  Export Current Build (.json)
-      Exports a JSON file containing the full party setup, gear (main
-      stats and substats), enemy configuration, custom field sequences,
-      rotations, trials, and the currently selected trial.
+Found in: Tab 1 (Team & Gear Setup) and at the bottom of the Trial
+Editor (Tab 3) -> Save / Load
 
-  Upload Saved Build (.json)
-      Restores a previously exported build file, loading all settings into
-      the interface while keeping everything fully editable. A loaded file
-      applies once upon upload; upload it again if you want to revert back
-      to it.
+  Save file (.json)
+      Downloads the JSON file with everything listed above. When used
+      from the Trial Editor, unpublished drafts are synced first, so the
+      file contains exactly what you see in the editor.
+
+  Load a saved file (.json)
+      Restores a previously saved file, loading all settings into the
+      interface while keeping everything fully editable. A loaded file
+      applies once upon upload; upload it again if you want to revert
+      back to it.
 
   User Manual (.txt)
       Downloads a copy of this manual file.
-
-Note: You can also export individual runs directly from Tab 4 using the
-"Export Run" button, which bundles that specific run's party, gear, and
-trial setup.
 
 ----------------------------------------------------------------------
 9. ASSUMPTIONS AND LIMITATIONS

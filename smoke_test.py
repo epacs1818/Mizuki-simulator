@@ -541,7 +541,7 @@ def _run_weapon_phase2_check() -> dict:
             _flag_delta(t, stacked, "Mizuki", "starsealed_state", "EM"), 3)
         out["starsealed_stack_em"] = round(
             _flag_delta(t, stacked, "Mizuki", "starsealed_stacks", "EM"), 3)
-        out["starsealed_want_stack_em"] = round(48.0 * stacks, 3)
+        out["starsealed_want_stack_em"] = round(48.0 * stacks * 1.10, 3)  # + 10% DDS share
     else:
         out["starsealed_const_em"] = None
         out["starsealed_stack_em"] = out["starsealed_want_stack_em"] = None
@@ -1932,7 +1932,7 @@ def _run_cryo_resonance_check() -> dict:
 def _run_rv_mode_check() -> dict:
     """100% RV / KQM standard: crit is ONE Crit Value, not 1 + CR*CD.
 
-    Uses the preset "Test Aether" trial (the one the UI offers) so the check runs
+    Runs a one-shot Aether rotation through RotationTimeline so the check runs
     through the same path as a real simulation:
       * the party entry carries `rv_mode`,
       * crit_mult == cv - 1 (CV > 4) instead of 1 + CR*CD,
@@ -1965,7 +1965,9 @@ def _run_rv_mode_check() -> dict:
     out["summary"] = build_io.party_rv_summary(party)
 
     t = RotationTimeline(party=party)
-    t.add_trial(presets.STANDARD_TRIALS["Test Aether"])
+    t.add_trial(Trial(name="rv probe", end_mode="last_swap",
+                      rotations=[Rotation(name="r", sequences=[presets.aether_en1],
+                                          repetitions=1)]))
     t.evaluate_timeline()
     hits = [e for e in t.global_events
             if e.get("event_type") == "HIT" and e.get("character") == "Aether"]
@@ -2274,6 +2276,14 @@ def _run_buff_catalogue_check() -> dict:
                 malformed.append(f"{key}: basis 'talent' needs a path")
         elif "ratio" not in desc and "ratio_from_talent" not in desc:
             malformed.append(f"{key}: needs ratio or ratio_from_talent")
+        # An EM non-constant buff must declare which side of the flat-EM basis
+        # it is on: a flat amount counts (Gilded Dreams), a percentage share
+        # never does. Required, so a new EM buff cannot silently default to
+        # the wrong side the way Gilded Dreams did.
+        if desc.get("target_stat") == "em" and "counts_as_flat_em" not in desc:
+            malformed.append(f"{key}: EM non-constant needs counts_as_flat_em")
+        if desc.get("counts_as_flat_em") and basis == "flat_em":
+            malformed.append(f"{key}: counts_as_flat_em would recurse on basis flat_em")
 
     return {
         "missing": missing,
@@ -3976,6 +3986,9 @@ def _run_save_load_check() -> dict:
     out["substats_saved"] = (parsed["party"][0]["pieces"]["Sands"]["substats"][0]
                              == {"stat": "EM", "value": "40"})
     out["trial_saved"] = [t["name"] for t in parsed["custom_trials"]] == [trial.name]
+    # The Trial Editor stores ITS active trial through this override.
+    out["selected_override"] = (
+        build_io.collect_build_document(state, "x", selected_trial="Trial X")["selected_trial"] == "Trial X")
 
     restored = {}
     out["restore_warnings"] = build_io.apply_build_document(parsed, restored, catalogue)
@@ -4428,17 +4441,22 @@ def run(verbose: bool = True) -> None:
         (wp["widsith_on_early"], "The Widsith never procced on taking the field"),
         (not wp["widsith_on_mid"], "The Widsith re-procced inside its 30s cooldown"),
         (wp["widsith_on_late"], "The Widsith did not proc again after the 30s cooldown"),
-        (abs((wp["widsith_em"] or 0.0) - 160.0) <= 1e-6,
-         f"Widsith EM roll is {wp['widsith_em']}, expected 160 at R5"),
+        # The flag delta includes Mizuki kit knock-ons: the roll EM feeds her
+        # flat-EM basis, so her DDS 10% share adds on top of the direct 160.
+        (abs((wp["widsith_em"] or 0.0) - 160.0 * 1.10) <= 1e-6,
+         f"Widsith EM roll is {wp['widsith_em']}, expected 176 (160 + 10% DDS share) at R5"),
         (abs((wp["widsith_atk_pct"] or 0.0) - 0.40) <= 1e-6,
          f"Widsith ATK% roll is {wp['widsith_atk_pct']}, expected 0.40 at R5"),
-        (abs((wp["widsith_cryo"] or 0.0) - 0.32) <= 1e-6,
-         f"Widsith elemental roll is {wp['widsith_cryo']}, expected 0.32 at R5"),
+        # Mizuki C2 adds 0.04% of her FLAT EM to Cryo bonus; the roll 160 EM is
+        # part of that basis now, so the delta gains 0.0004 * 160 = 0.064.
+        (abs((wp["widsith_cryo"] or 0.0) - (0.32 + 0.0004 * 160.0)) <= 1e-6,
+         f"Widsith elemental roll is {wp['widsith_cryo']}, expected 0.384 (0.32 + C2) at R5"),
         (wp["jade_on_early"], "Sacrificial Jade did not start active"),
         (wp["jade_off_onfield"], "Sacrificial Jade stayed active after 10s on-field"),
         (wp["jade_on_after_bench"], "Sacrificial Jade did not return after 5s off-field"),
-        (abs((wp["jade_em"] or 0.0) - 40.0) <= 1e-6,
-         f"Sacrificial Jade EM is {wp['jade_em']}, expected 40 at R1"),
+        # 40 direct + 10% DDS share now that the Jade EM feeds Mizuki basis.
+        (abs((wp["jade_em"] or 0.0) - 40.0 * 1.10) <= 1e-6,
+         f"Sacrificial Jade EM is {wp['jade_em']}, expected 44 (40 + 10% DDS share) at R1"),
         (abs((wp["jade_hp_pct"] or 0.0) - 0.32) <= 1e-6,
          f"Sacrificial Jade HP% is {wp['jade_hp_pct']}, expected 0.32 at R1"),
         (wp["sunny_swirl_on"], "Sunny Morning swirl window never opened"),
@@ -4502,8 +4520,9 @@ def run(verbose: bool = True) -> None:
          "Starsealed Edict window did not open on the skill CAST hit"),
         (wp2["starsealed_max_stacks"] >= 1, "Starsealed Edict never gained a swirl stack"),
         (wp2["starsealed_off_tail"], "Starsealed Edict window outlived its 20s"),
-        (abs((wp2["starsealed_const_em"] or 0.0) - 96.0) <= 1e-6,
-         f"Starsealed constant EM is {wp2['starsealed_const_em']}, expected 96 at R5"),
+        # 96 direct + 10% DDS share (the window EM feeds Mizuki flat-EM basis).
+        (abs((wp2["starsealed_const_em"] or 0.0) - 96.0 * 1.10) <= 1e-6,
+         f"Starsealed constant EM is {wp2['starsealed_const_em']}, expected 105.6 (96 + 10% DDS share) at R5"),
         (wp2["starsealed_stack_em"] is not None
          and abs(wp2["starsealed_stack_em"] - wp2["starsealed_want_stack_em"]) <= 1e-6,
          f"Starsealed stack EM is {wp2['starsealed_stack_em']}, "
@@ -5018,7 +5037,7 @@ def run(verbose: bool = True) -> None:
          f"(collect_slot -> {rv['collect_standard']})"),
         ("Aether 100% RV" in (rv["summary"] or ""),
          f"party_rv_summary() is {rv['summary']!r}, expected it to mention Aether"),
-        (rv["hits"] >= 2, f"the Test Aether trial produced {rv['hits']} Aether hits"),
+        (rv["hits"] >= 2, f"the one-shot Aether rotation produced {rv['hits']} Aether hits"),
         (all(rv[f"flag_{i}"] for i in range(2)),
          "RV hits were not marked rv_mode in the event table"),
         (all(abs(rv[f"mult_{i}"] - rv[f"expected_{i}"]) <= 1e-6 for i in range(2)),
@@ -5663,6 +5682,8 @@ def run(verbose: bool = True) -> None:
          f"build document schema is {save['schema']}"),
         (save["substats_saved"], "artifact substats are not written to the build file"),
         (save["trial_saved"], "the custom trial is not written to the build file"),
+        (save["selected_override"],
+         "collect_build_document ignored the selected_trial parameter"),
         (not save["restore_warnings"],
          "loading a build reported warnings: " + "; ".join(save["restore_warnings"])),
         (not save["widget_mismatches"],

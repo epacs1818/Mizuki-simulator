@@ -290,6 +290,12 @@ CONDITIONAL_NON_CONSTANT_BUFFS = {
     #   value = min(floor + ratio * max(basis - offset, 0), cap)
     #
     # No lambdas: every value is plain data that evaluate_dynamic_buff() resolves.
+    #
+    # EM buffs must say which side of the flat-EM basis they are on:
+    #   "counts_as_flat_em": True   a flat EM amount -> counts in compute_flat_em
+    #   "counts_as_flat_em": False  a percentage share -> never feeds the basis
+    # Required for every target_stat "em" entry (the smoke test enforces it), so a
+    # new EM buff cannot silently land on the wrong side like Gilded Dreams did.
     # ------------------------------------------------------------------
     ## Mizuki
     # Skill swirl bonus: talent-scaled % of her FLAT EM -> party stellar_bonus
@@ -307,9 +313,11 @@ CONDITIONAL_NON_CONSTANT_BUFFS = {
         "target_stat": "em",
         "basis": "flat_em",
         "ratio": 0.10,
+        "counts_as_flat_em": False,   # percentage share: excluded from the basis
     },
     # C2: 0.04% of her FLAT EM as PHEC elemental bonus (no anemo bonus).
-    # "Flat" = base + weapon + artifacts + flat buffs (A4, Aether C2, Instructor...);
+    # "Flat" = base + weapon + artifacts + flat buffs (A4, Aether C2, Instructor,
+    # Starsealed EM, Silver Light stacks - holder sentinels resolve fine);
     # percentage shares (her VBTD 10%, Sucrose A4) never feed it, exactly like
     # C6-2 and the skill swirl bonus.
     "Mizuki C2 Pyro": {
@@ -340,6 +348,7 @@ CONDITIONAL_NON_CONSTANT_BUFFS = {
     "Aether A4": {
         "caster": "Aether", "target_stat": "em",
         "basis": "atk", "ratio": 0.08, "cap": 160.0,
+        "counts_as_flat_em": False,   # % of ATK conversion: not a flat EM source
     },
     # Jubilee: party jubilee_mult = 0.0035% of his ATK, capped at 7%.
     "Aether_jubilee": {
@@ -383,6 +392,7 @@ CONDITIONAL_NON_CONSTANT_BUFFS = {
     "Sucrose A4 Share": {
         "caster": "Sucrose", "target_stat": "em",
         "basis": "flat_em", "ratio": 0.20,
+        "counts_as_flat_em": False,   # percentage share: excluded from the basis
     },
     ## Anastasya
     # Burst cast: the whole party gains stellar_bonus equal to her burst talent
@@ -410,6 +420,9 @@ CONDITIONAL_NON_CONSTANT_BUFFS = {
     "Gilded Dreams EM": {
         "caster": "holder:Gilded Dreams", "target_stat": "em",
         "basis": "allies_diff_element", "ratio": 50.0,
+        # A flat EM amount, not a percentage share: compute_flat_em must count
+        # it. Any future dynamic-but-flat EM buff opts in the same way.
+        "counts_as_flat_em": True,
     },
     ## Weapons
     # Wandering Evenstar: a periodic (10s) self ATK buff worth [24%..48%] of the

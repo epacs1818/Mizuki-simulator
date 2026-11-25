@@ -4,8 +4,7 @@ import datetime
 
 import streamlit as st
 
-from build_io import (assemble_party, collect_build_document, collect_slot,
-                      party_rv_summary)
+from build_io import assemble_party, collect_slot, party_rv_summary
 from timeline import CooldownError, RotationTimeline
 from ui.editors import (party_characters, rotation_field_time,
                         select_trial_label, trial_field_time)
@@ -117,12 +116,6 @@ def render():
                     "snapshot_enemy": copy.deepcopy(enemy),
                     "snapshot_custom_fs": copy.deepcopy(st.session_state.get("custom_field_sequences", {})),
                     "snapshot_custom_rots": copy.deepcopy(st.session_state.get("custom_rotations", {})),
-                    # Full, gear-complete build document for THIS run: the per-run
-                    # export writes it, so the run can be re-imported and tweaked.
-                    "snapshot_build": collect_build_document(
-                        st.session_state,
-                        trial_labels.get(selected_trial_key, selected_trial_key),
-                    ),
                 }
 
                 if "history" not in st.session_state:

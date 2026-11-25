@@ -237,16 +237,6 @@ STANDARD_ROTATIONS = {
         description="Anastasya EQ -> Faruzan Q -> Mizuki (Sac Frag) -> Odette QE -> Mizuki (pull out)."
     ),
 
-    #Aether test rotation: just a simple skill press to test Aether's crit multiplier
-    "test_aether_loop": Rotation(
-        name="Test Aether Loop",
-        sequences=[
-            STANDARD_FIELD_SEQUENCES["Aether EN1"],
-        ],
-        repetitions=1,
-        description="A simple skill press to test Aether's crit multiplier."
-    ),
-
     # --- Sucrose rounds -----------------------------------------------------
     # Sucrose takes her own swirl credit with a QN1 (see the sequence comment) and
     # hands the field over for Mizuki's pull-out. The starter uses Mizuki's 4-nuke
@@ -280,6 +270,113 @@ STANDARD_ROTATIONS = {
         repetitions=1,
         description="Sucrose E -> Aether ECQ -> Odette EE -> Sucrose E -> Mizuki (3 nukes) "
                     "-> Sucrose E -> Aether ECQ -> Odette EE -> Sucrose QN1 -> Mizuki burst (4 nukes)."
+    ),
+    "sucrose_standard_always4": Rotation(
+        name="Sucrose Standard (Always 4 Nukes)",
+        sequences=[
+            STANDARD_FIELD_SEQUENCES["Sucrose E"],
+            STANDARD_FIELD_SEQUENCES["Aether ECQ"],
+            STANDARD_FIELD_SEQUENCES["Odette EE"],
+            STANDARD_FIELD_SEQUENCES["Sucrose E"],
+            STANDARD_FIELD_SEQUENCES["Mizuki E (Pullout)"],
+            STANDARD_FIELD_SEQUENCES["Sucrose E"],
+            STANDARD_FIELD_SEQUENCES["Aether ECQ"],
+            STANDARD_FIELD_SEQUENCES["Odette EE"],
+            STANDARD_FIELD_SEQUENCES["Sucrose QN1"],
+            STANDARD_FIELD_SEQUENCES["Mizuki EQ (4 nukes)"]
+        ],
+        repetitions=1,
+        description="Both Mizuki pull-outs are the 4-nuke skill pull-out."
+    ),
+    "sucrose_standard_odette_qe_1": Rotation(
+        name="Sucrose Standard (Odette QE, early EE)",
+        sequences=[
+            STANDARD_FIELD_SEQUENCES["Sucrose E"],
+            STANDARD_FIELD_SEQUENCES["Aether ECQ"],
+            STANDARD_FIELD_SEQUENCES["Odette EE"],
+            STANDARD_FIELD_SEQUENCES["Sucrose E"],
+            STANDARD_FIELD_SEQUENCES["Mizuki E (3 nukes)"],
+            STANDARD_FIELD_SEQUENCES["Sucrose E"],
+            STANDARD_FIELD_SEQUENCES["Aether ECQ"],
+            STANDARD_FIELD_SEQUENCES["Odette QE"],
+            STANDARD_FIELD_SEQUENCES["Sucrose QN1"],
+            STANDARD_FIELD_SEQUENCES["Mizuki EQ (4 nukes)"]
+        ],
+        repetitions=1,
+        description="3-nuke skill pull-out, then the 4-nuke burst pull-out; Odette bursts in the second half."
+    ),
+    "sucrose_standard_odette_qe_2": Rotation(
+        name="Sucrose Standard (Odette QE, early QE)",
+        sequences=[
+            STANDARD_FIELD_SEQUENCES["Sucrose E"],
+            STANDARD_FIELD_SEQUENCES["Aether ECQ"],
+            STANDARD_FIELD_SEQUENCES["Odette QE"],
+            STANDARD_FIELD_SEQUENCES["Sucrose E"],
+            STANDARD_FIELD_SEQUENCES["Mizuki E (3 nukes)"],
+            STANDARD_FIELD_SEQUENCES["Sucrose E"],
+            STANDARD_FIELD_SEQUENCES["Aether ECQ"],
+            STANDARD_FIELD_SEQUENCES["Odette EE"],
+            STANDARD_FIELD_SEQUENCES["Sucrose QN1"],
+            STANDARD_FIELD_SEQUENCES["Mizuki EQ (4 nukes)"]
+        ],
+        repetitions=1,
+        description="Same alternating pull-outs, with Odette burst casting in the FIRST half instead."
+    ),
+    "sucrose_standard_one_pass": Rotation(
+        name="Sucrose Standard (One Pass)",
+        sequences=[
+            STANDARD_FIELD_SEQUENCES["Aether ECQ"],
+            STANDARD_FIELD_SEQUENCES["Odette QE"],
+            STANDARD_FIELD_SEQUENCES["Sucrose E"],
+            STANDARD_FIELD_SEQUENCES["Mizuki E (3 nukes)"],
+            STANDARD_FIELD_SEQUENCES["Aether ECQ"],
+            STANDARD_FIELD_SEQUENCES["Odette EE"],
+            STANDARD_FIELD_SEQUENCES["Sucrose QN1"],
+            STANDARD_FIELD_SEQUENCES["Mizuki EQ (4 nukes)"]
+        ],
+        repetitions=1,
+        description="Only two Sucrose visits per loop (E + QN1). Best with Mizuki on Scarlet Proof / Gilded Dreams / 2p-2p EM."
+    ),
+    "sucrose_standard_vv_3nuke": Rotation(
+        name="Sucrose Standard (VV, alternating)",
+        sequences=[
+            STANDARD_FIELD_SEQUENCES["Sucrose E"],
+            STANDARD_FIELD_SEQUENCES["Aether ECQ"],
+            STANDARD_FIELD_SEQUENCES["Odette QE"],
+            STANDARD_FIELD_SEQUENCES["Mizuki E (3 nukes)"],
+            STANDARD_FIELD_SEQUENCES["Sucrose QN1"],
+            STANDARD_FIELD_SEQUENCES["Aether ECQ"],
+            STANDARD_FIELD_SEQUENCES["Odette EE"],
+            STANDARD_FIELD_SEQUENCES["Mizuki EQ (4 nukes)"]
+        ],
+        repetitions=1,
+        description="3-nuke then 4-nuke pull-out, one Sucrose pass per half. Best with Sucrose on VV."
+    ),
+    "sucrose_standard_vv_always4": Rotation(
+        name="Sucrose Standard (VV, always 4)",
+        sequences=[
+            STANDARD_FIELD_SEQUENCES["Sucrose E"],
+            STANDARD_FIELD_SEQUENCES["Aether ECQ"],
+            STANDARD_FIELD_SEQUENCES["Odette EE"],
+            STANDARD_FIELD_SEQUENCES["Mizuki E (Pullout)"],
+            STANDARD_FIELD_SEQUENCES["Sucrose QN1"],
+            STANDARD_FIELD_SEQUENCES["Aether ECQ"],
+            STANDARD_FIELD_SEQUENCES["Odette EE"],
+            STANDARD_FIELD_SEQUENCES["Mizuki EQ (4 nukes)"]
+        ],
+        repetitions=1,
+        description="Both pull-outs are 4-nuke, one Sucrose pass per half. Best with Sucrose on VV."
+    ),
+    "sucrose_starter_odette_qe": Rotation(
+        name="Sucrose Starter (Odette QE)",
+        sequences=[
+            STANDARD_FIELD_SEQUENCES["Aether EN1"],
+            STANDARD_FIELD_SEQUENCES["Sucrose EQ"],
+            STANDARD_FIELD_SEQUENCES["Odette QE"],
+            STANDARD_FIELD_SEQUENCES["Mizuki EQ (4 nukes)"]
+        ],
+        repetitions=1,
+        description="Starter variant: Odette casts and recasts her skill in one visit."
     ),
     # Anastasya variant: her visits replace Aether's EN1/ECQ, but they are SHORTER
     # (a plain E is 1.23s vs 3.631s), which would re-cast her skill at 14.84s. Odette's
@@ -486,14 +583,65 @@ STANDARD_TRIALS = {
                     "Odette's slot: 6 loops.",
         required_party=MIZUKI_SACFRAG_AETHER_ANASTASYA_TEAM,
     ),
-    "Test Aether": Trial(
-        name="Test Aether",
-        rotations=[STANDARD_ROTATIONS["test_aether_loop"]],
+    # --- Sucrose one-pass presets -------------------------------------------
+    # Exported from the app's trial editor (starter + 3 standards). The VV
+    # variants pair with Sucrose on Viridescent Venerer; the others are the
+    # one-pass loops that win with Mizuki on Scarlet Proof / Gilded / 2p-2p EM.
+    "Sucrose Mizuki, Always 4 Nukes": Trial(
+        name="Sucrose Mizuki, Always 4 Nukes",
+        rotations=[STANDARD_ROTATIONS["sucrose_starter"]]
+                  + [STANDARD_ROTATIONS["sucrose_standard_always4"]] * 3,
         end_mode="last_swap",
-        description="A simple skill press to test Aether's crit multiplier",
-        # Only Aether appears in the rotation, so the trial is gated on him alone
-        # (any team that fields him can run it).
-        required_party=["Aether"],
+        description="Every Mizuki pull-out is the 4-nuke burst window.",
+        required_party=MIZUKI_SUCROSE_TEAM,
+    ),
+    "Sucrose Mizuki, Alternating 3 and 4 Nukes (Odette burst check)": Trial(
+        name="Sucrose Mizuki, Alternating 3 and 4 Nukes (Odette burst check)",
+        rotations=[STANDARD_ROTATIONS["sucrose_starter"]]
+                  + [STANDARD_ROTATIONS["sucrose_standard_odette_qe_1"]] * 3,
+        end_mode="last_swap",
+        description="3-nuke then 4-nuke pull-outs; Odette bursts in the second half of each loop.",
+        required_party=MIZUKI_SUCROSE_TEAM,
+    ),
+    "Sucrose Mizuki, Alternating 3 and 4 Nukes (Odette burst check) (2)": Trial(
+        name="Sucrose Mizuki, Alternating 3 and 4 Nukes (Odette burst check) (2)",
+        rotations=[STANDARD_ROTATIONS["sucrose_starter"]]
+                  + [STANDARD_ROTATIONS["sucrose_standard_odette_qe_2"]] * 3,
+        end_mode="last_swap",
+        description="Same alternating pull-outs; Odette bursts in the FIRST half of each loop.",
+        required_party=MIZUKI_SUCROSE_TEAM,
+    ),
+    "Sucrose Mizuki, Alternating 3 and 4 Nukes (Odette burst check) (3)": Trial(
+        name="Sucrose Mizuki, Alternating 3 and 4 Nukes (Odette burst check) (3)",
+        rotations=[STANDARD_ROTATIONS["sucrose_starter_odette_qe"]]
+                  + [STANDARD_ROTATIONS["sucrose_standard_odette_qe_1"]] * 3,
+        end_mode="last_swap",
+        description="Starter also uses Odette QE: one extra burst window up front.",
+        required_party=MIZUKI_SUCROSE_TEAM,
+    ),
+    "Sucrose Mizuki, Alternating 3 and 4 Nukes (Sucrose VV)": Trial(
+        name="Sucrose Mizuki, Alternating 3 and 4 Nukes (Sucrose VV)",
+        rotations=[STANDARD_ROTATIONS["sucrose_starter"]]
+                  + [STANDARD_ROTATIONS["sucrose_standard_vv_3nuke"]] * 3,
+        end_mode="last_swap",
+        description="One Sucrose pass per half, 3-nuke then 4-nuke pull-out. Best with Sucrose on VV.",
+        required_party=MIZUKI_SUCROSE_TEAM,
+    ),
+    "Sucrose Mizuki, Always 4 Nukes (Sucrose VV)": Trial(
+        name="Sucrose Mizuki, Always 4 Nukes (Sucrose VV)",
+        rotations=[STANDARD_ROTATIONS["sucrose_starter"]]
+                  + [STANDARD_ROTATIONS["sucrose_standard_vv_always4"]] * 3,
+        end_mode="last_swap",
+        description="One Sucrose pass per half, both pull-outs 4-nuke. Best with Sucrose on VV.",
+        required_party=MIZUKI_SUCROSE_TEAM,
+    ),
+    "Sucrose Mizuki, Alternating 3 and 4 Nukes (Sucrose Instructor)": Trial(
+        name="Sucrose Mizuki, Alternating 3 and 4 Nukes (Sucrose Instructor)",
+        rotations=[STANDARD_ROTATIONS["sucrose_starter"]]
+                  + [STANDARD_ROTATIONS["sucrose_standard_one_pass"]] * 3,
+        end_mode="last_swap",
+        description="The tight one-pass loop: 3-nuke then 4-nuke. Best with Mizuki on Scarlet Proof / Gilded / 2p-2p.",
+        required_party=MIZUKI_SUCROSE_TEAM,
     )
 }
 

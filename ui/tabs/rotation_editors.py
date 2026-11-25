@@ -7,6 +7,7 @@ The editor itself is the ui.editor package; this module keeps the section header
 import streamlit as st
 
 from ui.editor import importer, open_trial, store
+from ui.build_panel import render_build_io_panel
 from ui.editor import render as editor_preview
 
 
@@ -28,6 +29,8 @@ def render(trial_obj=None) -> None:
     st.markdown("<br>", unsafe_allow_html=True)
     _open_selected(trial_obj)
     editor_preview()
+    st.markdown("<br><hr>", unsafe_allow_html=True)
+    render_build_io_panel(key_prefix="editor_config", sync_editor=True)
 
 
 def _open_selected(trial_obj) -> None:

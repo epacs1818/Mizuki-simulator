@@ -11,7 +11,8 @@ Keeping the file layout in one framework-free module means:
   * a loaded file stays EDITABLE — the importer also writes the widget state, so the
     artifact editors show the imported pieces instead of empty boxes, and the party
     composition can be changed afterwards,
-  * the same document is produced by "Export current build" and by every history run.
+  * the same document is written by every "Save file" button (Tab 1 and the
+    bottom of the Trial Editor), so a saved file can always be loaded and edited.
 
 Nothing here imports Streamlit: the functions take any mutable mapping (a Streamlit
 `session_state` or a plain dict), which keeps them unit-testable.
@@ -601,8 +602,10 @@ def collect_slot(state, slot_num) -> dict:
     }
 
 
-def collect_build_document(state, simulation_name=None) -> dict:
+def collect_build_document(state, simulation_name=None, selected_trial=None) -> dict:
     """Snapshot the whole configuration as a JSON-ready document."""
+    # *selected_trial* lets the Trial Editor store ITS active trial instead of
+    # the runner selection, so a save reopens where the editing was left off.
     pool = state.get("active_trial_pool") or {}
     custom_trials = {name: trial for name, trial in pool.items()
                      if name not in STANDARD_TRIALS}
@@ -632,7 +635,8 @@ def collect_build_document(state, simulation_name=None) -> dict:
         "simulation_name": simulation_name or state.get("imported_sim_name") or "",
         "party": [collect_slot(state, slot_num) for slot_num in range(1, 5)],
         "enemy": collect_enemy(state),
-        "selected_trial": state.get("trial_selector"),
+        "selected_trial": (selected_trial if selected_trial is not None
+                           else state.get("trial_selector")),
         "ability_timings": copy.deepcopy(timings),
         "custom_field_sequences": custom_sequences,
         "custom_rotations": list(rotation_payloads.values()),

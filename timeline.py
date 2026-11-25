@@ -117,6 +117,11 @@ ODETTE_SSD_WINDOW = 20.0
 # measured FROM THE TRIGGER (3.5s), exactly like Diona's Icy Paw volley.
 ODETTE_C4_PROC_CD = 3.5
 
+# Starsealed Edict (catalyst): the 20s EM window gains at most this many swirl
+# stacks; a new stack is only taken while below the cap, and refreshing or
+# expiring the window resets the count.
+STARSEALED_MAX_STACKS = 3
+
 
 # ==========================================
 # 5. TIMELINE ENGINE & EVALUATOR
@@ -1388,7 +1393,8 @@ class RotationTimeline:
 
             #      Starsealed Edict: a 20s EM window opened by the holder's skill CAST
             #      (first hit of a skill ability). Every stellar swirl by ANYONE while
-            #      it is up adds a stack; refreshing or expiring resets them to 0.
+            #      it is up adds a stack, capped at STARSEALED_MAX_STACKS; refreshing
+            #      or expiring resets them to 0.
             if starsealed_holder is not None:
                 if (is_cast and char == starsealed_holder
                         and event.get("attack_type") == AttackType.SKILL):
@@ -1396,7 +1402,7 @@ class RotationTimeline:
                     starsealed_stacks = 0
                 starsealed_on = (starsealed_expiration is not None
                                  and t <= starsealed_expiration + _WINDOW_EPS)
-                if starsealed_on and is_stellar_swirl:
+                if starsealed_on and is_stellar_swirl and starsealed_stacks < STARSEALED_MAX_STACKS:
                     starsealed_stacks += 1
                 if not starsealed_on:
                     starsealed_stacks = 0

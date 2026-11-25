@@ -55,7 +55,7 @@ the exact header it gets in the Simulation Results table.
 | PERMANENT_BUFFS | permanent character passive applied once at setup (not an event flag) |
 | (triggered) | an engine-injected proc: no per-event flag, but a damage row exists |
 | Table column | exact header in the results table; "(not a table column)" means the effect is real but is not audited as its own column |
-| Flat EM basis | base + weapon + artifact EM + flat EM buffs; percentage EM shares are excluded (no feedback loops) |
+| Flat EM basis | base + weapon + artifact EM + flat EM buffs, including holder-based EM (Starsealed, Silver Light) for their holder and dynamic flat EM (Gilded Dreams 4pc); percentage EM shares are excluded (no feedback loops) |
 
 Stacking is additive into the stat pool. Two effects ship WITHOUT a stat and
 have no buff entry: **quills** (flat damage added before the multipliers, keys
@@ -198,7 +198,7 @@ passives that are permanent for the whole run.
 | Wandering Evenstar - periodic ATK | User + Others | periodic: a 12s buff starting every 10s from trial start, so 2 instances overlap | 12s per instance; stack count max 2 | holder: flat ATK = 24/30/36/42/48% of FLAT EM (R1-R5) per stack; others: 7.2/9/10.8/12.6/14.4% per stack | evenstar_stacks | Evenstar Stacks | Closed-form from t (no trigger events), so after 10s the holder is always at 2 stacks. |
 | Thrilling Tales of Dragon Slayers | Active | holder swaps out, then a DIFFERENT character swaps in | 10s on the incoming character; 20s CD from the swap-out | +24/30/36/42/48% ATK (R1-R5) | ttds_state | TTDS ATK% | The buff is only flagged while the target is the owner AND on field, so it drops if they leave early. |
 | Starsealed Edict - skill window | User | holder skill CAST | 20s; refreshed/reset by the next cast | +48/60/72/84/96 EM (R1-R5) | starsealed_state | Starsealed EM | The skill first hit is included; refreshing resets the stack count. |
-| Starsealed Edict - swirl stacks | User | any Stellar Swirl by ANY character while the window is up | until the window ends | +24/30/36/42/48 EM per stack (R1-R5) | starsealed_stacks | Starsealed Stacks | No cap in code; stacks are per swirl event, not per character. |
+| Starsealed Edict - swirl stacks | User | any Stellar Swirl by ANY character while the window is up | until the window ends | +24/30/36/42/48 EM per stack (R1-R5) | starsealed_stacks | Starsealed Stacks | Capped at 3 stacks (STARSEALED_MAX_STACKS); stacks are per swirl event, not per character. |
 | Whitelake Frostfeather - ATK stacks | User | one stack per skill hit (0.1s gain CD) | 8s per stack, max 3; a 4th stack replaces the oldest | +8/10/12/14/16% ATK per stack (R1-R5) | whitlake_stacks | Whitelake Stacks | Stack expiries are pruned per event, so the count can drop between hits. |
 | Whitelake Frostfeather - 3-stack payoff | User | at 3 or more stacks | tied to the 3rd stack lifetime | +50/65/80/95/110% Stellar Crit DMG (R1-R5) | whitlake_max_state | Whitelake 3-Stack Crit | Constant gate: it does NOT scale with 4+ stacks; it turns OFF when the pool drops below 3. |
 | Finale Of The Deep - ATK window | User | a STANDARD hit by the holder whose attack type is Skill | 15s; 10s CD from the trigger | +12/15/18/21/24% ATK (R1-R5) | finale_state | Finale ATK% | Later triggers refresh the 15s window. |

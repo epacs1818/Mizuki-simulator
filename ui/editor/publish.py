@@ -79,9 +79,8 @@ def build(spec: dict, trial_id: str):
     return trial, sequences, pool_rotations
 
 
-def publish(spec: dict, trial_id: str) -> str:
-    """Write the trial and everything it uses into the pools; returns its key."""
-    trial, sequences, rotations = build(spec, trial_id)
+def _store(trial, sequences, rotations) -> None:
+    """Write one built trial and everything it uses into the pools."""
     sequence_pool = st.session_state.setdefault(SEQUENCES_KEY, {})
     rotation_pool = st.session_state.setdefault(ROTATIONS_KEY, {})
     pool = st.session_state.setdefault(POOL_KEY, {})
@@ -90,7 +89,34 @@ def publish(spec: dict, trial_id: str) -> str:
     for rotation in rotations:
         rotation_pool[rotation.name] = rotation
     pool[trial.name] = trial
+
+
+def publish(spec: dict, trial_id: str) -> str:
+    """Write the trial and everything it uses into the pools; returns its key."""
+    trial, sequences, rotations = build(spec, trial_id)
+    _store(trial, sequences, rotations)
     # The runner widget is already instantiated this run, so the selection is
     # queued: rotation.py applies it before the selectbox is created.
     st.session_state[PENDING_SELECTION] = trial.name
     return trial.name
+
+
+def publish_all(spec: dict) -> list:
+    """Sync EVERY non-preset editor trial into the pools (a draft save).
+
+    Unlike publish(), the runner selection is left alone: this exists so a
+    "Save file" includes trials that were never explicitly created in the
+    runner. Trials that cannot be built yet (no rotations, empty slots) are
+    skipped instead of aborting the save.
+    """
+    synced = []
+    for trial_id, payload in (spec.get("trials") or {}).items():
+        if payload.get("preset"):
+            continue
+        try:
+            trial, sequences, rotations = build(spec, trial_id)
+        except ValueError:
+            continue
+        _store(trial, sequences, rotations)
+        synced.append(trial.name)
+    return synced

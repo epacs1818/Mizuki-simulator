@@ -640,7 +640,11 @@ FLAG_TO_BUFFS = {
 def compute_flat_em(char_name, event_flags, active_character, party, char_initial_stats_map, refinement=1):
     """
     Returns a character's *flat* EM basis = base + weapon + artifact EM +
-    strictly-flat EM buffs (CONSTANT and STACK buffs only).
+    strictly-flat EM buffs: CONSTANT and STACK types, plus NON-CONSTANT buffs
+    that opt in with "counts_as_flat_em": True (Gilded Dreams 4pc, a dynamic
+    flat amount). Holder-based flat EM (Starsealed Edict constant + stacks,
+    Silver Light stacks) applies to its HOLDER: the caster sentinel is
+    resolved before the target check.
 
     Percentage-derived EM sources are intentionally excluded, as they do not belong
     to the "after flat buffs, before percentage buffs" tier:
@@ -667,17 +671,41 @@ def compute_flat_em(char_name, event_flags, active_character, party, char_initia
             continue
         for desc in descriptors:
             btype = desc["type"]
-            if btype not in ("constant", "stack"):
-                continue
             bkey = desc.get("key", "")
+            if btype == "non_constant":
+                # Percentage shares (Mizuki 10%, Sucrose A4, Aether A4) must never
+                # feed the basis, but a dynamic FLAT EM amount (Gilded Dreams 4pc)
+                # belongs here: such buffs opt in with "counts_as_flat_em": True.
+                # Never mark a buff whose own basis is "flat_em" (it would recurse).
+                if not (CONDITIONAL_NON_CONSTANT_BUFFS.get(bkey) or {}).get("counts_as_flat_em"):
+                    continue
+            elif btype not in ("constant", "stack"):
+                continue
 
+            # Resolve the caster sentinel exactly like resolve_active_buffs does:
+            #   "holder:<Weapon/Set>" -> whoever equips it, "user" -> this character.
+            # Without this, "User"-targeted holder buffs (Starsealed Edict EM,
+            # Silver Light stacks) fail the target check below and silently drop
+            # out of the flat-EM basis while still applying to the holder stats.
+            caster_raw = desc.get("caster")
+            caster = caster_raw
+            buff_refinement = refinement
+            if isinstance(caster_raw, str) and caster_raw.startswith("holder:"):
+                key = resolve_weapon_key(caster_raw.split(":", 1)[1])
+                caster = next((c for c, d in (party or {}).items()
+                               if resolve_weapon_key(d.get("weapon")) == key
+                               or (d.get("artifact_set") or d.get("artifact")) == key), None)
+                # Weapon-passive EM is keyed by the HOLDER refinement.
+                buff_refinement = (party or {}).get(caster, {}).get("refinement", refinement)
+            elif caster_raw == "user":
+                caster = char_name
             # Generic caster gate: the buff only applies when its CASTER is at the
             # required constellation.
             min_c = desc.get("min_constellation")
-            if min_c is not None and (party or {}).get(desc.get("caster"), {}).get("constellation", 0) < int(min_c):
+            if min_c is not None and (party or {}).get(caster, {}).get("constellation", 0) < int(min_c):
                 continue
 
-            if not _target_applies(desc.get("target", "Party"), char_name, active_character, desc.get("caster")):
+            if not _target_applies(desc.get("target", "Party"), char_name, active_character, caster):
                 continue
             # Element-exclusion filter (mirrors resolve_active_buffs), e.g. Sucrose's
             # A1 never boosts Anemo chars (incl. Sucrose herself -> no feedback loop).
@@ -691,7 +719,21 @@ def compute_flat_em(char_name, event_flags, active_character, party, char_initia
                 buff_def = CONDITIONAL_CONSTANT_BUFFS.get(bkey) or {}
                 for stat, raw_val in buff_def.items():
                     if stat == "em":
-                        em += _get_refinement_val(raw_val, refinement)
+                        em += _get_refinement_val(raw_val, buff_refinement)
+            elif btype == "non_constant":
+                # Dynamic FLAT EM (Gilded Dreams 4pc): resolve it like any other
+                # dynamic buff and add the value to the basis.
+                buff_def = CONDITIONAL_NON_CONSTANT_BUFFS.get(bkey) or {}
+                em += evaluate_dynamic_buff(
+                    buff_def,
+                    basis_stats=char_initial_stats_map.get(caster) or stats,
+                    basis_char=caster or char_name,
+                    party=party,
+                    char_initial_stats_map=char_initial_stats_map,
+                    event_flags=event_flags,
+                    active_character=active_character,
+                    refinement=buff_refinement,
+                )
             else:  # stack
                 stack_count = int(event_flags.get(desc.get("stack_flag", flag_key), 0))
                 if stack_count <= 0:
@@ -699,7 +741,7 @@ def compute_flat_em(char_name, event_flags, active_character, party, char_initia
                 buff_def = STACK_BUFFS.get(bkey) or {}
                 for stat, raw_val in buff_def.items():
                     if stat == "em":
-                        em += _get_refinement_val(raw_val, refinement) * stack_count
+                        em += _get_refinement_val(raw_val, buff_refinement) * stack_count
 
     return em
 
