@@ -279,7 +279,17 @@ def is_rv_mode(char_data) -> bool:
     return str(char_data.get("standard_mode") or "Manual").strip() != "Manual"
 
 
-def compute_card_stats(initial_stats, standard_mode=False):
+def is_crit_rate_locked(char_data) -> bool:
+    """True when a party entry asks the engine to treat every hit as a crit.
+
+    The "100% Crit Rate" switch only exists for Manual builds; a CV build has no
+    crit variance left, so `assemble_party` clears the flag there. The engine
+    checks it in one place (`timeline._with_engine_flags`).
+    """
+    return bool((char_data or {}).get("crit_rate_locked", False))
+
+
+def compute_card_stats(initial_stats, standard_mode=False, crit_rate_locked=False):
     """
     Resolves initial_stats into formatted final values for the user-facing card.
     No buffs applied - pure gear stats.
@@ -287,6 +297,9 @@ def compute_card_stats(initial_stats, standard_mode=False):
     When standard_mode is True the build uses the 100% RV / KQM Crit-Value model:
     CR and CD are not meaningful on their own, so the card reports a single CV
     line (CV = 2*CR + CD, 1 decimal) instead of separate CR and CD rows.
+
+    crit_rate_locked reports CR as 100% for a "100% Crit Rate" build, matching
+    what the engine actually uses for that character's hits.
     """
     card_hp = (initial_stats["base_hp"] * (1.0 + initial_stats["hp_percent"])) + initial_stats["hp_flat"]
     card_atk = (initial_stats["base_atk"] * (1.0 + initial_stats["atk_percent"])) + initial_stats["atk_flat"]
@@ -303,7 +316,8 @@ def compute_card_stats(initial_stats, standard_mode=False):
         # CV is expressed in points: 1 point = 1% Crit DMG = 0.5% Crit Rate.
         card_stats_calculated["CV"] = f"{round(cv * 100, 1)}"
     else:
-        card_stats_calculated["CR"] = f"{round(initial_stats['crit_rate'] * 100, 1)}%"
+        card_cr = 1.0 if crit_rate_locked else initial_stats["crit_rate"]
+        card_stats_calculated["CR"] = f"{round(card_cr * 100, 1)}%"
         card_stats_calculated["CD"] = f"{round(initial_stats['crit_dmg'] * 100, 1)}%"
     card_stats_calculated["ER"] = f"{round(initial_stats['er'] * 100, 1)}%"
 

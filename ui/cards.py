@@ -69,8 +69,12 @@ def render_party_card(char_name: str, data: dict, *, image_width: int = 74,
         # Substat standard: an RV/KQM build carries crit as one Crit Value (CV) line in
         # the grid below, a manual build carries CR / CD. Same options, new label.
         model_label = crit_model_label(data)
-        st.caption(f"Substats: **{model_label}**" if model_label != "Manual"
-                   else "Substats: Manual (CR / CD)")
+        if model_label != "Manual":
+            st.caption(f"Substats: **{model_label}**")
+        elif data.get("crit_rate_locked"):
+            st.caption("Substats: Manual (CR / CD) · **100% Crit Rate**")
+        else:
+            st.caption("Substats: Manual (CR / CD)")
 
     rows = "".join(
         f"<div style='opacity:0.85'>{label}</div>"

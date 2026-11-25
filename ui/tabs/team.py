@@ -2,7 +2,7 @@
 
 import streamlit as st
 
-from build_io import assemble_party
+from build_io import SUBSTAT_STANDARDS, assemble_party
 from substats_standards import CARRIES, standard_piece_mains
 from ui.build_panel import render_build_io_panel
 from ui.cards import render_character_cards, validate_talents
@@ -120,24 +120,63 @@ def render() -> None:
                 key=f"art_set_{slot_num}"
             )
 
-            # Substat standard selector (carries only). The options are mutually
-            # exclusive by construction: RV and KQM both lock mains AND substats,
-            # because neither matters once a standard is selected.
-            standard_mode = "Manual"
+            # Substat standard selector. Every character gets the radio so the
+            # layout is uniform, but only carries have RV / KQM standards: a
+            # support's radio is locked to "Manual" and explained below. The
+            # options are mutually exclusive by construction: RV and KQM both
+            # lock mains AND substats, because neither matters once a standard
+            # is selected.
+            is_carry = char_name in CARRIES
+            standard_options = list(SUBSTAT_STANDARDS) if is_carry else ["Manual"]
+            # A slot that used to hold a carry may still have "KQM ..." stored in
+            # session state, which is not a valid option for a support -> reset.
+            if st.session_state.get(f"std_{slot_num}") not in standard_options:
+                st.session_state[f"std_{slot_num}"] = "Manual"
+            standard_mode = st.radio(
+                "Substat standard",
+                options=standard_options,
+                index=0,
+                horizontal=True,
+                key=f"std_{slot_num}",
+                disabled=not is_carry,
+                help=("RV/KQM lock mains + substats and model crit as a single "
+                      "Crit Value (CV)." if is_carry else None),
+            )
+            if not is_carry and char_name != "Select Character":
+                st.caption("Manual mode only. No standards built for this character")
+
+            crit_value_mode = False
+            crit_rate_locked = False
             locked_mains = None
-            if char_name in CARRIES:
-                standard_mode = st.radio(
-                    "Substat standard",
-                    options=["Manual", "100% RV (Crit Value)", "KQM Standards (40 rolls)"],
-                    index=0,
-                    horizontal=True,
-                    key=f"std_{slot_num}",
-                    help="RV/KQM lock mains + substats and model crit as a single Crit Value (CV).",
+            if standard_mode != "Manual":
+                locked_mains = standard_piece_mains(char_name)
+            else:
+                # Manual-mode crit switches, offered to carries AND supports.
+                # "Crit Value units" hands the crit to the CV model, which is
+                # deterministic, so the 100% Crit Rate lock is not offered
+                # alongside it.
+                crit_value_mode = st.toggle(
+                    "Crit Value units",
+                    key=f"cv_{slot_num}",
+                    help="Enter crit as Crit Value (CV = 2*CR + CD) and let the "
+                         "engine use the CV formula.",
                 )
-                if standard_mode != "Manual":
-                    locked_mains = standard_piece_mains(char_name)
+                if crit_value_mode:
+                    # The lock is meaningless under the CV model, so keep the
+                    # widget honest: switch it off before it is drawn.
+                    st.session_state[f"crlock_{slot_num}"] = False
+                crit_rate_locked = st.toggle(
+                    "100% Crit Rate",
+                    key=f"crlock_{slot_num}",
+                    disabled=crit_value_mode,
+                    help="Every hit counts as a crit. Not available with Crit Value units.",
+                )
             subs_locked = standard_mode != "Manual"
             mains_locked = subs_locked
+            slot_data = team_data[f"Slot {slot_num}"]
+            slot_data["standard_mode"] = standard_mode
+            slot_data["crit_value_mode"] = crit_value_mode
+            slot_data["crit_rate_locked"] = crit_rate_locked
 
             st.markdown("")
             pieces_data = {}
@@ -161,7 +200,7 @@ def render() -> None:
                 rarity = st.radio(
                     "Artifact Rarity",
                     options=["5★", "4★"],
-                    index=0 if disable_subs else None,
+                    index=0,
                     horizontal=True,
                     key=(f"rarity_locked_{piece_name}_{slot_num}" if disable_subs else f"rarity_{piece_name}_{slot_num}"),
                     disabled=disable_subs,
@@ -182,10 +221,12 @@ def render() -> None:
                             disabled=disable_subs
                         )
                     is_pct = "%" in sub_type
+                    placeholder = ("CV pts" if sub_type == "Crit Value"
+                                   else "%" if is_pct else "Value")
                     with sub_col2:
                         sub_val = st.text_input(
                             f"Val {sub_idx}", 
-                            placeholder="%" if is_pct else "Value", 
+                            placeholder=placeholder, 
                             key=f"sub_val_{piece_name}_{slot_num}_{sub_idx}",
                             label_visibility="collapsed",
                             disabled=disable_subs
@@ -244,7 +285,9 @@ def render() -> None:
             sd["character"], sd["level"], sd["constellation"],
             sd["weapon"], sd["refinement"], sd["talents"],
             sd.get("artifacts", {}).get("Set"),
-            st.session_state.get(f"std_{s_num}", "Manual"),
+            sd.get("standard_mode", "Manual"),
+            sd.get("crit_value_mode", False),
+            sd.get("crit_rate_locked", False),
             gear_signature,
         ))
     
@@ -313,8 +356,10 @@ def render() -> None:
                         "talents": data["talents"],
                         "talent_levels": parsed_talents[slot_num],
                         "artifact_set": data.get("artifacts", {}).get("Set", "Select Set"),
-                        "standard_mode": (st.session_state.get(f"std_{slot_num}", "Manual")
+                        "standard_mode": (data.get("standard_mode", "Manual")
                                           if data["character"] in CARRIES else "Manual"),
+                        "crit_value_mode": data.get("crit_value_mode", False),
+                        "crit_rate_locked": data.get("crit_rate_locked", False),
                         "pieces": data.get("artifacts", {}).get("Pieces", {}),
                     })
 

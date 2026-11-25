@@ -35,6 +35,7 @@ from stats_calc import (
     build_initial_stats,
     compute_card_stats,
 )
+from substat_rolls import snap_substat
 from substats_standards import CARRIES, build_kqm_build, build_recommended_subs
 
 APP_NAME = "Yumemizuki Mizuki's Rotation Damage Calculator"
@@ -61,6 +62,9 @@ STAT_KEY_MAP = {
     "ER%": "er",
     "Crit Rate%": "crit_rate",
     "Crit Damage%": "crit_dmg",
+    # Crit Value is a Manual-only convenience entry: the user types the CV in
+    # points (CV = 2*CR + CD) instead of separate CR / CD substats.
+    "Crit Value": "crit_value",
     "Healing Bonus%": "healing_bonus",
     "Physical Bonus%": "physical_bonus",
     "Pyro Bonus%": "pyro_bonus",
@@ -174,12 +178,31 @@ def stat_name_is_valid(name) -> bool:
     return bool(name) and name != "None"
 
 
-def slot_stats_from_pieces(char_name, pieces, standard_mode="Manual"):
+def pieces_use_crit_value(pieces) -> bool:
+    """True when any manual piece carries a non-zero "Crit Value" substat.
+
+    A CV entry only makes sense under the Crit Value crit model, so the party
+    entry switches to it automatically (see `assemble_party`).
+    """
+    for piece_info in _stats_or_empty(pieces).values():
+        for sub in _as_list(_stats_or_empty(piece_info).get("substats")):
+            if (isinstance(sub, dict) and sub.get("stat") == "Crit Value"
+                    and parse_stat_value(sub.get("value")) > 0.0):
+                return True
+    return False
+
+
+def slot_stats_from_pieces(char_name, pieces, standard_mode="Manual",
+                           snap_rolls=True):
     """(main_stats_total, subs_total) for one slot.
 
     Single implementation of "artifact pieces -> stat pools": the UI confirm button
     and the build importer both go through it, so a loaded build is numerically
     identical to one typed in by hand.
+
+    `snap_rolls` (Manual builds, 5-star pieces only) replaces every displayed
+    substat with the true 2-decimal roll total the game shows as that number
+    (`substat_rolls.snap_substat`).
     """
     if standard_mode == "100% RV (Crit Value)":
         # 100% RV: auto mains + substats per the carry standard (5★ defaults).
@@ -190,7 +213,7 @@ def slot_stats_from_pieces(char_name, pieces, standard_mode="Manual"):
 
     main_stats_total = {}
     subs_total = {}
-    for piece_name, piece_info in _stats_or_empty(pieces).items():
+    for piece_info in _stats_or_empty(pieces).values():
         piece_info = _stats_or_empty(piece_info)
         main_stat = piece_info.get("main_stat", "")
         piece_rarity = piece_info.get("rarity", "5★")
@@ -210,9 +233,25 @@ def slot_stats_from_pieces(char_name, pieces, standard_mode="Manual"):
                 continue
             sub_key = STAT_KEY_MAP.get(sub_name, str(sub_name).lower().replace(" ", "_"))
             numeric_val = parse_stat_value(sub.get("value"))
-            if "%" in str(sub_name) or sub_key in PERCENT_KEYS:
+            is_percent = "%" in str(sub_name) or sub_key in PERCENT_KEYS
+            # The game shows % stats with 1 decimal and EM / flats as whole
+            # numbers, but rolls are exact 2-decimal values. Recover the real
+            # total behind the displayed number. 4-star pieces use their own
+            # roll table (not modelled here), so they are left alone.
+            if snap_rolls and piece_rarity != "4★" and sub_key != "crit_value":
+                snapped, rolls = snap_substat(sub_key, numeric_val)
+                if rolls and abs(snapped - numeric_val) > 1e-9:
+                    numeric_val = snapped
+            if is_percent:
                 numeric_val = numeric_val / 100.0
             subs_total[sub_key] = subs_total.get(sub_key, 0.0) + numeric_val
+
+    # A "Crit Value" substat is entered in points (CV = 2*CR + CD) and folds
+    # into the crit-DMG pool as its decimal share, so the engine's CV formula
+    # (2*CR + CD) sees exactly the entered Crit Value.
+    crit_value_points = subs_total.pop("crit_value", 0.0)
+    if crit_value_points:
+        subs_total["crit_dmg"] = subs_total.get("crit_dmg", 0.0) + crit_value_points / 100.0
 
     return main_stats_total, subs_total
 
@@ -223,7 +262,13 @@ def assemble_party(slots) -> dict:
     A slot spec is the plain description of one party member:
         character, level, constellation (int or "C#"), weapon, refinement,
         talents ("10/13/13"), talent_levels ([10, 13, 13]), artifact_set,
-        standard_mode, pieces {Flower: {main_stat, rarity, substats}}
+        standard_mode, crit_value_mode, crit_rate_locked,
+        pieces {Flower: {main_stat, rarity, substats}}
+
+    `standard_mode` is the radio label. The two Manual-mode switches are
+    `crit_value_mode` ("Crit Value units": crit is modelled as a single Crit
+    Value) and `crit_rate_locked` ("100% Crit Rate": every hit counts as a
+    crit).
     """
     my_party = {}
     for slot in _as_list(slots):
@@ -241,12 +286,23 @@ def assemble_party(slots) -> dict:
         if char_name not in CARRIES:
             standard_mode = "Manual"
 
+        pieces = slot.get("pieces")
+        crit_value_mode = bool(slot.get("crit_value_mode"))
+        # A Crit Value substat only makes sense under the CV crit model, so it
+        # switches the slot there on its own.
+        rv_mode = (standard_mode != "Manual"
+                   or crit_value_mode
+                   or pieces_use_crit_value(pieces))
+        # The CV model already has no crit variance, so "100% Crit Rate" is
+        # meaningless there and is dropped.
+        crit_rate_locked = bool(slot.get("crit_rate_locked")) and not rv_mode
+
         artifact_set = slot.get("artifact_set") or "Select Set"
         refinement = refinement_int(slot.get("refinement", 1))
         talent_text = str(slot.get("talents") or "").strip()
 
         main_stats_total, subs_total = slot_stats_from_pieces(
-            char_name, slot.get("pieces"), standard_mode
+            char_name, pieces, standard_mode
         )
         initial_stats = build_initial_stats(
             char_name,
@@ -268,10 +324,14 @@ def assemble_party(slots) -> dict:
             "artifact_set": artifact_set if artifact_set != "Select Set" else "None",
             "element": get_character_element(char_name),
             "standard_mode": standard_mode,
-            # Boolean mirror of the standard, so the entry is self-describing for the
-            # engine, exported documents and hand-written presets. `is_rv_mode()`
-            # still falls back to `standard_mode` for older/foreign entries.
-            "rv_mode": standard_mode != "Manual",
+            # Boolean mirror of the crit model, so the entry is self-describing
+            # for the engine, exported documents and hand-written presets.
+            # `is_rv_mode()` still falls back to `standard_mode` for older or
+            # foreign entries. True for 100% RV / KQM, for "Crit Value units"
+            # and for any build that enters a Crit Value substat.
+            "rv_mode": rv_mode,
+            "crit_value_mode": crit_value_mode,
+            "crit_rate_locked": crit_rate_locked,
             "initial_stats": initial_stats,
             "card_stats": {},
         }
@@ -284,7 +344,8 @@ def assemble_party(slots) -> dict:
     for data in my_party.values():
         data["card_stats"] = compute_card_stats(
             data["initial_stats"],
-            standard_mode=(data.get("standard_mode", "Manual") != "Manual"),
+            standard_mode=bool(data.get("rv_mode")),
+            crit_rate_locked=bool(data.get("crit_rate_locked")),
         )
     return my_party
 
@@ -300,6 +361,8 @@ def crit_model_label(char_data) -> str:
         return "100% RV"
     if standard.startswith("KQM"):
         return "KQM 40"
+    if char_data.get("crit_value_mode"):
+        return "CV units"
     if char_data.get("rv_mode"):
         return "CV standard"
     return "Manual"
@@ -597,6 +660,11 @@ def collect_slot(state, slot_num) -> dict:
         "refinement": refinement_int(state.get(f"ref_{slot_num}", 1)),
         "talents": str(state.get(f"talents_{slot_num}", "") or ""),
         "substat_standard": standard_mode,
+        # Manual-mode crit switches (see `assemble_party`). A locked standard
+        # derives its own crit model, so the switches are reported off there
+        # even if a stale widget value is still sitting in session state.
+        "crit_value_mode": bool(state.get(f"cv_{slot_num}", False)) and standard_mode == "Manual",
+        "crit_rate_locked": bool(state.get(f"crlock_{slot_num}", False)) and standard_mode == "Manual",
         "artifact_set": state.get(f"art_set_{slot_num}", "Select Set"),
         "pieces": pieces,
     }
@@ -744,8 +812,15 @@ def _apply_slot(slot, slot_num, state, catalogue, warnings):
         standard_mode = "Manual"
     if character in CARRIES:
         state[f"std_{slot_num}"] = standard_mode
+    else:
+        # Supports have no RV/KQM standards; the radio only offers "Manual".
+        state[f"std_{slot_num}"] = "Manual"
 
     locked = standard_mode != "Manual"
+    # Manual-mode crit switches. A locked standard derives its own crit model,
+    # so the switches are off there.
+    state[f"cv_{slot_num}"] = bool(slot.get("crit_value_mode")) and not locked
+    state[f"crlock_{slot_num}"] = bool(slot.get("crit_rate_locked")) and not locked
     mains = catalogue.get("mains") or {}
     rarities = catalogue.get("rarities") or ["5★", "4★"]
     substat_options = catalogue.get("substat_options") or []
@@ -805,6 +880,8 @@ def _clear_slot(slot_num, state, catalogue):
     state[f"talents_{slot_num}"] = ""
     state[f"art_set_{slot_num}"] = "Select Set"
     state[f"std_{slot_num}"] = "Manual"
+    state[f"cv_{slot_num}"] = False
+    state[f"crlock_{slot_num}"] = False
 
     for piece in PIECES:
         state[f"rarity_{piece}_{slot_num}"] = rarities[0]
@@ -875,6 +952,8 @@ def build_party_from_document(doc) -> dict:
             "artifact_set": slot.get("artifact_set", "Select Set"),
             "standard_mode": (slot.get("substat_standard")
                               or slot.get("standard_mode") or "Manual"),
+            "crit_value_mode": slot.get("crit_value_mode", False),
+            "crit_rate_locked": slot.get("crit_rate_locked", False),
             "pieces": slot.get("pieces") or {},
         })
     return assemble_party(slots)

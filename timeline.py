@@ -27,7 +27,7 @@ from abilities import (
 from damage_calc import calculate_damage, DEFAULT_ENEMY_STATS
 from stats_calc import (
     build_initial_stats, apply_permanent_buffs, apply_weapon_party_stats,
-    build_snapshot_stats, compute_final_stats, is_rv_mode,
+    build_snapshot_stats, compute_final_stats, is_rv_mode, is_crit_rate_locked,
 )
 from weapons import resolve_weapon_key, get_skill_cd_reset
 from characters import party_element_counts
@@ -1903,6 +1903,26 @@ class RotationTimeline:
         self._timeline_evaluated = True
         self._calculate_all_hits_damage()
 
+    @staticmethod
+    def _with_engine_flags(stats, char_data):
+        """One character's stat block plus the per-entry engine flags.
+
+        Single place for the two crit switches a party entry can carry:
+          * ``rv_mode``          - crit is a single Crit Value (100% RV / KQM,
+                                   "Crit Value units", or a Crit Value substat),
+          * ``crit_rate_locked`` - "100% Crit Rate": every hit counts as a crit.
+        A CV build has no crit variance left, so the lock is ignored there.
+        """
+        block = dict(stats)
+        block["level"] = char_data.get("level", 90)
+        block["rv_mode"] = is_rv_mode(char_data)
+        if is_crit_rate_locked(char_data) and not block["rv_mode"]:
+            # compute_final_stats exposes crit under both keys and the damage
+            # code reads "CR" first, so keep the pair in sync.
+            block["crit_rate"] = 1.0
+            block["CR"] = 1.0
+        return block
+
     def _calculate_all_hits_damage(self):
         for event in self.global_events:
             if event.get("event_type") == "HIT":
@@ -1927,27 +1947,20 @@ class RotationTimeline:
                     active_character=active_char,
                     char_initial_stats_map=self.char_initial_stats_map,
                 )
-                final_stats = compute_final_stats(snapshot)
-                # 100% RV / KQM flag for this hit's owner (carries only). The party
-                # entry stores the UI label, so resolve it through the shared helper.
-                final_stats["rv_mode"] = is_rv_mode(char_data)
+                # Crit model + "100% Crit Rate" flags for this hit's owner (carries
+                # only). The party entry stores the UI label, so resolve it through
+                # the shared helper.
+                final_stats = self._with_engine_flags(compute_final_stats(snapshot), char_data)
 
                 # Prepare party_stats_dict for reaction contributors
                 # Reaction contributors use THEIR OWN final stats (full snapshot), so
                 # element crit, stellar crit, elevation and RES are per share.
-                party_stats_dict = {}
-                for p_name, p_d in self.party.items():
-                    p_init = self.char_initial_stats_map.get(p_name, {})
-                    party_stats_dict[p_name] = {
-                        **p_init,
-                        "level": p_d.get("level", 90),
-                        "rv_mode": is_rv_mode(p_d),
-                    }
-                party_stats_dict[char] = {
-                    **final_stats,
-                    "level": char_level,
-                    "rv_mode": is_rv_mode(char_data),
+                party_stats_dict = {
+                    p_name: self._with_engine_flags(
+                        self.char_initial_stats_map.get(p_name, {}), p_d)
+                    for p_name, p_d in self.party.items()
                 }
+                party_stats_dict[char] = self._with_engine_flags(final_stats, char_data)
 
                 vmeta = event.get("vortex_metadata")
                 smeta = event.get("swirl_metadata")
@@ -1985,12 +1998,8 @@ class RotationTimeline:
                         active_character=active_char,
                         char_initial_stats_map=self.char_initial_stats_map,
                     )
-                    c_final = compute_final_stats(c_snap)
-                    party_stats_dict[cname] = {
-                        **c_final,
-                        "level": c_data.get("level", 90),
-                        "rv_mode": is_rv_mode(c_data),
-                    }
+                    party_stats_dict[cname] = self._with_engine_flags(
+                        compute_final_stats(c_snap), c_data)
 
                 dmg = calculate_damage(
                     hit=event,

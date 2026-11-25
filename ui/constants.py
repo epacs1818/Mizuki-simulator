@@ -3,6 +3,7 @@
 Single source of truth for what the widgets offer and what the save / load layer validates against (BUILD_CATALOGUE)."""
 
 from artifacts import ARTIFACTS_BONUSES
+from build_io import SUBSTAT_STANDARDS
 from weapons import WEAPON_STATS
 
 # Constants & options
@@ -158,8 +159,11 @@ SANDS_MAINS = ["ATK%", "HP%", "DEF%", "EM", "ER%"]
 GOBLET_MAINS = ["ATK%", "HP%", "DEF%", "EM", "Physical Bonus%", "Pyro Bonus%", "Hydro Bonus%", "Geo Bonus%", "Anemo Bonus%", "Electro Bonus%", "Dendro Bonus%", "Cryo Bonus%"]
 CIRCLET_MAINS = ["ATK%", "HP%", "DEF%", "EM", "Crit Rate%", "Crit Damage%", "Healing Bonus%"]
 
-# Substat Options (including DEF% and Flat DEF)
-SUBSTAT_OPTIONS = ["None", "Flat ATK", "Flat HP", "Flat DEF", "ATK%", "HP%", "DEF%", "Crit Rate%", "Crit Damage%", "ER%", "EM"]
+# Substat Options (including DEF% and Flat DEF).
+# "Crit Value" is a Manual-only convenience entry (CV = 2*CR + CD, in points):
+# picking it switches that character to the Crit Value crit model.
+SUBSTAT_OPTIONS = ["None", "Flat ATK", "Flat HP", "Flat DEF", "ATK%", "HP%", "DEF%",
+                   "Crit Rate%", "Crit Damage%", "Crit Value", "ER%", "EM"]
 
 # Everything the import/export layer validates widget values against. Kept here so
 # build_io never has to know about the UI's own tables.
@@ -172,5 +176,5 @@ BUILD_CATALOGUE = {
     "substat_options": SUBSTAT_OPTIONS,
     "mains": {"Sands": SANDS_MAINS, "Goblet": GOBLET_MAINS, "Circlet": CIRCLET_MAINS},
     "rarities": ["5★", "4★"],
-    "standards": ["Manual", "100% RV (Crit Value)", "KQM Standards (40 rolls)"],
+    "standards": list(SUBSTAT_STANDARDS),
 }
